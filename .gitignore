@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Next.js
+.next/
+out/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Test and coverage
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime / cache
+.cache/
+.turbo/
+.eslintcache
+.prettiercache
+*.pid
+*.seed
+*.pid.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+*.swo
+*~
+
+# PostgreSQL / local database dumps
+*.sql.gz
+*.dump
+pgdata/
+postgres-data/
+
+# Misc
+*.pem
+.vercel
+.terraform/
+*.tfstate*
