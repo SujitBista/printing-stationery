@@ -1,0 +1,24 @@
+{
+  "name": "printing-stationery",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build -w @printing-stationery/shared && concurrently -n shared,backend,frontend -c blue,green,magenta \"npm run dev -w @printing-stationery/shared\" \"npm run dev -w @printing-stationery/backend\" \"npm run dev -w @printing-stationery/frontend\"",
+    "build": "npm run build -w @printing-stationery/shared && npm run build -w @printing-stationery/backend && npm run build -w @printing-stationery/frontend",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run build -w @printing-stationery/shared && npm run typecheck -w @printing-stationery/shared && npm run typecheck -w @printing-stationery/backend && npm run typecheck -w @printing-stationery/frontend",
+    "clean": "rm -rf packages/shared/dist backend/dist frontend/.next"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
