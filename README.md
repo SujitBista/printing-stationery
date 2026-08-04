@@ -55,9 +55,22 @@ Health check: [http://localhost:3001/api/health](http://localhost:3001/api/healt
 | `npm run lint` | Lint all workspaces |
 | `npm run typecheck` | Type-check all workspaces |
 | `npm run clean` | Remove build outputs (`dist`, `.next`) only |
+| `npm run db:generate -w @printing-stationery/backend` | Generate Drizzle migrations from the schema |
+| `npm run db:migrate -w @printing-stationery/backend` | Apply pending Drizzle migrations to PostgreSQL |
+
+## Database migrations
+
+Generate and apply migrations from the repo root (requires `DATABASE_URL` in `.env` or `backend/.env`):
+
+```bash
+npm run db:generate -w @printing-stationery/backend
+npm run db:migrate -w @printing-stationery/backend
+```
+
+Inspect generated SQL under `backend/drizzle/` before applying.
 
 ## Notes
 
 - `JWT_SECRET` and `JWT_EXPIRES_IN` are documented for future authentication and are not required in this milestone.
-- No database migrations or inventory tables are created in this foundation.
+- Branch Setup is available at `/organization/branches` and `/api/branches`. Authentication and administrative permission checks are not implemented yet.
 - CORS allows `http://localhost:3000` for the Next.js frontend.

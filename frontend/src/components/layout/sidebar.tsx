@@ -1,11 +1,36 @@
-const NAV_ITEMS = [
-  { label: "Dashboard", href: "/", active: true },
-  { label: "Items", href: "#", active: false },
-  { label: "Purchases", href: "#", active: false },
-  { label: "Stock", href: "#", active: false },
-  { label: "Requests", href: "#", active: false },
-  { label: "Approvals", href: "#", active: false },
-] as const;
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+type NavItem = {
+  label: string;
+  href: string;
+  soon?: boolean;
+};
+
+type NavSection = {
+  title: string;
+  items: NavItem[];
+};
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    title: "Modules",
+    items: [
+      { label: "Dashboard", href: "/" },
+      { label: "Items", href: "#", soon: true },
+      { label: "Purchases", href: "#", soon: true },
+      { label: "Stock", href: "#", soon: true },
+      { label: "Requests", href: "#", soon: true },
+      { label: "Approvals", href: "#", soon: true },
+    ],
+  },
+  {
+    title: "Organization",
+    items: [{ label: "Branch Setup", href: "/organization/branches" }],
+  },
+];
 
 type SidebarProps = {
   open: boolean;
@@ -13,6 +38,8 @@ type SidebarProps = {
 };
 
 export function Sidebar({ open, onClose }: SidebarProps) {
+  const pathname = usePathname();
+
   return (
     <>
       <div
@@ -28,29 +55,53 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <nav className="flex h-full flex-col gap-1 p-4" aria-label="Primary">
-          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
-            Modules
-          </p>
-          {NAV_ITEMS.map((item) => (
-            <a
-              key={item.label}
-              href={item.href}
-              onClick={onClose}
-              aria-current={item.active ? "page" : undefined}
-              className={`rounded-md px-3 py-2 text-sm transition-colors ${
-                item.active
-                  ? "bg-accent-soft font-medium text-accent"
-                  : "text-ink-muted hover:bg-paper hover:text-ink"
-              } ${item.href === "#" ? "cursor-default opacity-70" : ""}`}
-            >
-              {item.label}
-              {item.href === "#" ? (
-                <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-ink-muted">
-                  Soon
-                </span>
-              ) : null}
-            </a>
+        <nav className="flex h-full flex-col gap-6 p-4" aria-label="Primary">
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.title}>
+              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                {section.title}
+              </p>
+              <div className="flex flex-col gap-1">
+                {section.items.map((item) => {
+                  const isActive =
+                    !item.soon &&
+                    (item.href === "/"
+                      ? pathname === "/"
+                      : pathname === item.href ||
+                        pathname.startsWith(`${item.href}/`));
+
+                  if (item.soon || item.href === "#") {
+                    return (
+                      <span
+                        key={item.label}
+                        className="cursor-default rounded-md px-3 py-2 text-sm text-ink-muted opacity-70"
+                      >
+                        {item.label}
+                        <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-ink-muted">
+                          Soon
+                        </span>
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <Link
+                      key={item.label}
+                      href={item.href}
+                      onClick={onClose}
+                      aria-current={isActive ? "page" : undefined}
+                      className={`rounded-md px-3 py-2 text-sm transition-colors ${
+                        isActive
+                          ? "bg-accent-soft font-medium text-accent"
+                          : "text-ink-muted hover:bg-paper hover:text-ink"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           ))}
         </nav>
       </aside>
