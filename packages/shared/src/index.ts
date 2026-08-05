@@ -66,3 +66,25 @@ export type {
   UnitListQuery,
   PaginatedUnitResponse,
 } from "./types/unit.js";
+
+export {
+  itemGroupStatusFilterSchema,
+  groupTypeSchema,
+  itemGroupSchema,
+  createItemGroupInputSchema,
+  updateItemGroupInputSchema,
+  updateItemGroupStatusInputSchema,
+  itemGroupListQuerySchema,
+  paginatedItemGroupResponseSchema,
+  itemGroupIdSchema,
+} from "./schemas/item-group.js";
+export type {
+  ItemGroup,
+  GroupType,
+  ItemGroupStatusFilter,
+  CreateItemGroupInput,
+  UpdateItemGroupInput,
+  UpdateItemGroupStatusInput,
+  ItemGroupListQuery,
+  PaginatedItemGroupResponse,
+} from "./types/item-group.js";

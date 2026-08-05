@@ -16,3 +16,10 @@ export {
   type UnitRow,
   type NewUnitRow,
 } from "./units.js";
+
+export {
+  groupTypeEnum,
+  itemGroups,
+  type ItemGroupRow,
+  type NewItemGroupRow,
+} from "./item-groups.js";
