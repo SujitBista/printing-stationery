@@ -5,6 +5,7 @@ import type { Env } from "./config/env.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { notFoundHandler } from "./middleware/not-found.js";
 import { branchesRouter } from "./routes/branches.routes.js";
+import { departmentsRouter } from "./routes/departments.routes.js";
 import { healthRouter } from "./routes/health.routes.js";
 
 const FRONTEND_ORIGIN = "http://localhost:3000";
@@ -25,6 +26,8 @@ export function createApp(_env: Env) {
   app.use("/api/health", healthRouter);
   // TODO: Restrict Branch Setup to an administrative permission once authentication is implemented.
   app.use("/api/branches", branchesRouter);
+  // TODO: Restrict Department Setup to an administrative permission once authentication is implemented.
+  app.use("/api/departments", departmentsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

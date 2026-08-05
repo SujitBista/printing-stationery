@@ -26,3 +26,23 @@ export type {
   BranchListQuery,
   PaginatedBranchResponse,
 } from "./types/branch.js";
+
+export {
+  departmentStatusFilterSchema,
+  departmentSchema,
+  createDepartmentInputSchema,
+  updateDepartmentInputSchema,
+  updateDepartmentStatusInputSchema,
+  departmentListQuerySchema,
+  paginatedDepartmentResponseSchema,
+  departmentIdSchema,
+} from "./schemas/department.js";
+export type {
+  Department,
+  DepartmentStatusFilter,
+  CreateDepartmentInput,
+  UpdateDepartmentInput,
+  UpdateDepartmentStatusInput,
+  DepartmentListQuery,
+  PaginatedDepartmentResponse,
+} from "./types/department.js";

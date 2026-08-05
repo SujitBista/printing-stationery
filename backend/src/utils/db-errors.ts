@@ -4,6 +4,7 @@ const DATABASE_UNAVAILABLE_MESSAGE =
   "Database is unavailable. Ensure PostgreSQL is running and DATABASE_URL is configured.";
 
 const BRANCH_CODE_UNIQUE_INDEX = "branches_branch_code_lower_uidx";
+const DEPARTMENT_CODE_UNIQUE_INDEX = "departments_department_code_lower_uidx";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -54,11 +55,37 @@ export function isBranchCodeUniqueViolation(error: unknown): boolean {
   return constraint === BRANCH_CODE_UNIQUE_INDEX;
 }
 
+export function isDepartmentCodeUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === DEPARTMENT_CODE_UNIQUE_INDEX;
+}
+
 export function mapBranchDatabaseError(error: unknown): never {
   if (isBranchCodeUniqueViolation(error)) {
     throw new AppError("A branch with this branch code already exists", 409, {
       cause: error,
     });
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function mapDepartmentDatabaseError(error: unknown): never {
+  if (isDepartmentCodeUniqueViolation(error)) {
+    throw new AppError(
+      "A department with this department code already exists",
+      409,
+      { cause: error },
+    );
   }
 
   if (isDatabaseUnavailableError(error)) {

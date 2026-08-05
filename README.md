@@ -73,4 +73,5 @@ Inspect generated SQL under `backend/drizzle/` before applying.
 
 - `JWT_SECRET` and `JWT_EXPIRES_IN` are documented for future authentication and are not required in this milestone.
 - Branch Setup is available at `/organization/branches` and `/api/branches`. Authentication and administrative permission checks are not implemented yet.
+- Department Setup is available at `/organization/departments` and `/api/departments`. Authentication and administrative permission checks are not implemented yet.
 - CORS allows `http://localhost:3000` for the Next.js frontend.
