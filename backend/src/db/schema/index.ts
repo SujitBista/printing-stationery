@@ -10,3 +10,9 @@ export {
   type DepartmentRow,
   type NewDepartmentRow,
 } from "./departments.js";
+
+export {
+  units,
+  type UnitRow,
+  type NewUnitRow,
+} from "./units.js";

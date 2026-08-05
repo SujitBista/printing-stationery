@@ -5,6 +5,7 @@ const DATABASE_UNAVAILABLE_MESSAGE =
 
 const BRANCH_CODE_UNIQUE_INDEX = "branches_branch_code_lower_uidx";
 const DEPARTMENT_CODE_UNIQUE_INDEX = "departments_department_code_lower_uidx";
+const UNIT_NAME_UNIQUE_INDEX = "units_unit_name_lower_uidx";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -86,6 +87,30 @@ export function mapDepartmentDatabaseError(error: unknown): never {
       409,
       { cause: error },
     );
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function isUnitNameUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === UNIT_NAME_UNIQUE_INDEX;
+}
+
+export function mapUnitDatabaseError(error: unknown): never {
+  if (isUnitNameUniqueViolation(error)) {
+    throw new AppError("A unit with this unit name already exists", 409, {
+      cause: error,
+    });
   }
 
   if (isDatabaseUnavailableError(error)) {

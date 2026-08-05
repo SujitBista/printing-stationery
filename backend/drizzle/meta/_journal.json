@@ -15,6 +15,13 @@
       "when": 1785907689705,
       "tag": "0001_bizarre_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785910565865,
+      "tag": "0002_next_winter_soldier",
+      "breakpoints": true
     }
   ]
 }

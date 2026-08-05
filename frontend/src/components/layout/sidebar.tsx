@@ -31,6 +31,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Branch Setup", href: "/organization/branches" },
       { label: "Department Setup", href: "/organization/departments" },
+      { label: "Unit Setup", href: "/organization/units" },
     ],
   },
 ];
