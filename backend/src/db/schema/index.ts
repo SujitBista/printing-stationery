@@ -23,3 +23,10 @@ export {
   type ItemGroupRow,
   type NewItemGroupRow,
 } from "./item-groups.js";
+
+export {
+  returnTypeEnum,
+  items,
+  type ItemRow,
+  type NewItemRow,
+} from "./items.js";

@@ -88,3 +88,29 @@ export type {
   ItemGroupListQuery,
   PaginatedItemGroupResponse,
 } from "./types/item-group.js";
+
+export {
+  itemStatusFilterSchema,
+  returnTypeSchema,
+  itemUnitSummarySchema,
+  itemGroupSummarySchema,
+  itemSchema,
+  createItemInputSchema,
+  updateItemInputSchema,
+  updateItemStatusInputSchema,
+  itemListQuerySchema,
+  paginatedItemResponseSchema,
+  itemIdSchema,
+} from "./schemas/item.js";
+export type {
+  Item,
+  ReturnType,
+  ItemStatusFilter,
+  ItemUnitSummary,
+  ItemGroupSummary,
+  CreateItemInput,
+  UpdateItemInput,
+  UpdateItemStatusInput,
+  ItemListQuery,
+  PaginatedItemResponse,
+} from "./types/item.js";
