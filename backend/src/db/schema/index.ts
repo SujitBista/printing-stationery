@@ -30,3 +30,9 @@ export {
   type ItemRow,
   type NewItemRow,
 } from "./items.js";
+
+export {
+  stores,
+  type StoreRow,
+  type NewStoreRow,
+} from "./stores.js";

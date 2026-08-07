@@ -34,6 +34,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Unit Setup", href: "/organization/units" },
       { label: "Item Group Setup", href: "/organization/item-groups" },
       { label: "Item Setup", href: "/organization/items" },
+      { label: "Store Setup", href: "/organization/stores" },
     ],
   },
 ];

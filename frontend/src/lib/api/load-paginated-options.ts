@@ -1,6 +1,3 @@
-import type { ApiResult as ItemGroupApiResult } from "@/lib/api/item-groups";
-import type { ApiResult as UnitApiResult } from "@/lib/api/units";
-
 type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; status?: number };
@@ -13,15 +10,11 @@ type PaginatedOptionsResponse<T> = {
   totalPages: number;
 };
 
-type PaginatedOptionsResult<T> =
-  | UnitApiResult<PaginatedOptionsResponse<T>>
-  | ItemGroupApiResult<PaginatedOptionsResponse<T>>;
-
 type FetchPaginatedOptionsPage<T, TStatus extends string> = (query: {
   page: number;
   pageSize: number;
   status: TStatus;
-}) => Promise<PaginatedOptionsResult<T>>;
+}) => Promise<ApiResult<PaginatedOptionsResponse<T>>>;
 
 const OPTIONS_PAGE_SIZE = 100;
 const MAX_PAGINATION_REQUESTS = 1000;

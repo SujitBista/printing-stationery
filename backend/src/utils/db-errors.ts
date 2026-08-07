@@ -10,6 +10,8 @@ const ITEM_GROUP_CODE_UNIQUE_INDEX = "item_groups_group_code_lower_uidx";
 const ITEM_GROUP_NAME_UNIQUE_INDEX = "item_groups_group_name_lower_uidx";
 const ITEM_CODE_UNIQUE_INDEX = "items_item_code_lower_uidx";
 const ITEM_NAME_UNIQUE_INDEX = "items_item_name_lower_uidx";
+const STORE_CODE_UNIQUE_INDEX = "stores_store_code_lower_uidx";
+const STORE_BRANCH_NAME_UNIQUE_INDEX = "stores_branch_store_name_lower_uidx";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -195,6 +197,48 @@ export function mapItemDatabaseError(error: unknown): never {
     throw new AppError("An item with this name already exists.", 409, {
       cause: error,
     });
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function isStoreCodeUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STORE_CODE_UNIQUE_INDEX;
+}
+
+export function isStoreBranchNameUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STORE_BRANCH_NAME_UNIQUE_INDEX;
+}
+
+export function mapStoreDatabaseError(error: unknown): never {
+  if (isStoreCodeUniqueViolation(error)) {
+    throw new AppError("A store with this code already exists.", 409, {
+      cause: error,
+    });
+  }
+
+  if (isStoreBranchNameUniqueViolation(error)) {
+    throw new AppError(
+      "A store with this name already exists in the selected branch.",
+      409,
+      { cause: error },
+    );
   }
 
   if (isDatabaseUnavailableError(error)) {
