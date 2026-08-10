@@ -6,6 +6,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { notFoundHandler } from "./middleware/not-found.js";
 import { branchesRouter } from "./routes/branches.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
+import { employeesRouter } from "./routes/employees.routes.js";
 import { healthRouter } from "./routes/health.routes.js";
 import { itemGroupsRouter } from "./routes/item-groups.routes.js";
 import { itemsRouter } from "./routes/items.routes.js";
@@ -40,6 +41,8 @@ export function createApp(_env: Env) {
   app.use("/api/items", itemsRouter);
   // TODO: Restrict Store Setup to an administrative permission once authentication is implemented.
   app.use("/api/stores", storesRouter);
+  // TODO: Restrict Employee Setup to an administrative permission once authentication is implemented.
+  app.use("/api/employees", employeesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

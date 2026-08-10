@@ -35,6 +35,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Item Group Setup", href: "/organization/item-groups" },
       { label: "Item Setup", href: "/organization/items" },
       { label: "Store Setup", href: "/organization/stores" },
+      { label: "Employee Setup", href: "/organization/employees" },
     ],
   },
 ];

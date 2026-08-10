@@ -140,3 +140,25 @@ export type {
   StoreListQuery,
   PaginatedStoreResponse,
 } from "./types/store.js";
+
+export {
+  employeeStatusFilterSchema,
+  employeeBranchSummarySchema,
+  employeeSchema,
+  createEmployeeInputSchema,
+  updateEmployeeInputSchema,
+  updateEmployeeStatusInputSchema,
+  employeeListQuerySchema,
+  paginatedEmployeeResponseSchema,
+  employeeIdSchema,
+} from "./schemas/employee.js";
+export type {
+  Employee,
+  EmployeeStatusFilter,
+  EmployeeBranchSummary,
+  CreateEmployeeInput,
+  UpdateEmployeeInput,
+  UpdateEmployeeStatusInput,
+  EmployeeListQuery,
+  PaginatedEmployeeResponse,
+} from "./types/employee.js";

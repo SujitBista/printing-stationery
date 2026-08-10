@@ -36,3 +36,9 @@ export {
   type StoreRow,
   type NewStoreRow,
 } from "./stores.js";
+
+export {
+  employees,
+  type EmployeeRow,
+  type NewEmployeeRow,
+} from "./employees.js";
