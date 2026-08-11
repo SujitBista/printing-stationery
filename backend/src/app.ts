@@ -1,9 +1,13 @@
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import express from "express";
 import helmet from "helmet";
 import type { Env } from "./config/env.js";
+import { attachEnv } from "./middleware/auth.js";
+import { csrfProtection } from "./middleware/csrf.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { notFoundHandler } from "./middleware/not-found.js";
+import { authRouter } from "./routes/auth.routes.js";
 import { branchesRouter } from "./routes/branches.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
 import { employeesRouter } from "./routes/employees.routes.js";
@@ -13,35 +17,32 @@ import { itemsRouter } from "./routes/items.routes.js";
 import { storesRouter } from "./routes/stores.routes.js";
 import { unitsRouter } from "./routes/units.routes.js";
 
-const FRONTEND_ORIGIN = "http://localhost:3000";
-
-export function createApp(_env: Env) {
+export function createApp(env: Env) {
   const app = express();
 
+  app.disable("x-powered-by");
   app.use(helmet());
-  // CORS is restricted to the Next.js frontend origin.
-  // Unrestricted CORS is intentionally not enabled, including in development.
+  // CORS is restricted to the configured frontend origin with credentials.
+  // Wildcard origins are intentionally not allowed with credentialed cookies.
   app.use(
     cors({
-      origin: FRONTEND_ORIGIN,
+      origin: env.FRONTEND_ORIGIN,
+      credentials: true,
     }),
   );
-  app.use(express.json());
+  app.use(express.json({ limit: "100kb" }));
+  app.use(cookieParser());
+  app.use(attachEnv(env));
+  app.use(csrfProtection(env));
 
   app.use("/api/health", healthRouter);
-  // TODO: Restrict Branch Setup to an administrative permission once authentication is implemented.
+  app.use("/api/auth", authRouter);
   app.use("/api/branches", branchesRouter);
-  // TODO: Restrict Department Setup to an administrative permission once authentication is implemented.
   app.use("/api/departments", departmentsRouter);
-  // TODO: Restrict Unit Setup to an administrative permission once authentication is implemented.
   app.use("/api/units", unitsRouter);
-  // TODO: Restrict Item Group Setup to an administrative permission once authentication is implemented.
   app.use("/api/item-groups", itemGroupsRouter);
-  // TODO: Restrict Item Setup to an administrative permission once authentication is implemented.
   app.use("/api/items", itemsRouter);
-  // TODO: Restrict Store Setup to an administrative permission once authentication is implemented.
   app.use("/api/stores", storesRouter);
-  // TODO: Restrict Employee Setup to an administrative permission once authentication is implemented.
   app.use("/api/employees", employeesRouter);
 
   app.use(notFoundHandler);

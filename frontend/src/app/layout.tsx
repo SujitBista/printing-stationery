@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { Fraunces, Source_Sans_3 } from "next/font/google";
-import { AppShell } from "@/components/layout/app-shell";
 import "./globals.css";
 
 const sourceSans = Source_Sans_3({
@@ -29,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${sourceSans.variable} ${fraunces.variable} antialiased`}>
-        <AppShell>{children}</AppShell>
+        {children}
       </body>
     </html>
   );

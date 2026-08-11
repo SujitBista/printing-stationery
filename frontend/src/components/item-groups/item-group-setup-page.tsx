@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
   CreateItemGroupInput,
@@ -18,6 +19,7 @@ import { ItemGroupFormDialog, groupTypeLabel } from "./item-group-form-dialog";
 const PAGE_SIZE = 20;
 
 export function ItemGroupSetupPage() {
+  const { canMutateMasterData } = useAuth();
   const [itemGroups, setItemGroups] = useState<ItemGroup[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -178,6 +180,7 @@ export function ItemGroupSetupPage() {
             Item groups classify similar stationery and printing items.
           </p>
         </div>
+        {canMutateMasterData ? (
         <button
           type="button"
           onClick={openCreateDialog}
@@ -185,6 +188,7 @@ export function ItemGroupSetupPage() {
         >
           Add Item Group
         </button>
+        ) : null}
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -290,6 +294,7 @@ export function ItemGroupSetupPage() {
                         </span>
                       </td>
                       <td className="px-3 py-3">
+                        {canMutateMasterData ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -311,6 +316,9 @@ export function ItemGroupSetupPage() {
                                 : "Activate"}
                           </button>
                         </div>
+                        ) : (
+                          <span className="text-ink-muted">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

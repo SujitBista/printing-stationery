@@ -42,3 +42,15 @@ export {
   type EmployeeRow,
   type NewEmployeeRow,
 } from "./employees.js";
+
+export {
+  appRoleEnum,
+  applicationUsers,
+  userRoles,
+  authSessions,
+  type ApplicationUserRow,
+  type NewApplicationUserRow,
+  type UserRoleRow,
+  type AuthSessionRow,
+  type NewAuthSessionRow,
+} from "./auth.js";

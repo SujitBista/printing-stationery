@@ -162,3 +162,26 @@ export type {
   EmployeeListQuery,
   PaginatedEmployeeResponse,
 } from "./types/employee.js";
+
+export {
+  appRoleSchema,
+  APP_ROLES,
+  usernameSchema,
+  passwordSchema,
+  loginInputSchema,
+  changeInitialPasswordInputSchema,
+  authenticatedEmployeeBranchSchema,
+  authenticatedEmployeeSchema,
+  authenticatedUserSchema,
+  authResponseSchema,
+  userHasRole,
+  userHasAnyRole,
+} from "./schemas/auth.js";
+export type {
+  AppRole,
+  Password,
+  LoginInput,
+  ChangeInitialPasswordInput,
+  AuthenticatedUser,
+  AuthResponse,
+} from "./types/auth.js";

@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
   Branch,
@@ -22,6 +23,7 @@ function branchTypeLabel(type: Branch["branchType"]): string {
 }
 
 export function BranchSetupPage() {
+  const { canMutateMasterData } = useAuth();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -175,6 +177,7 @@ export function BranchSetupPage() {
             stores will be connected to branches separately.
           </p>
         </div>
+        {canMutateMasterData ? (
         <button
           type="button"
           onClick={openCreateDialog}
@@ -182,6 +185,7 @@ export function BranchSetupPage() {
         >
           Add Branch
         </button>
+        ) : null}
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -280,6 +284,7 @@ export function BranchSetupPage() {
                         </span>
                       </td>
                       <td className="px-3 py-3">
+                        {canMutateMasterData ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -301,6 +306,9 @@ export function BranchSetupPage() {
                                 : "Activate"}
                           </button>
                         </div>
+                        ) : (
+                          <span className="text-ink-muted">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

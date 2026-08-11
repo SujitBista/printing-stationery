@@ -6,12 +6,15 @@ import {
   updateBranchHandler,
   updateBranchStatusHandler,
 } from "../controllers/branches.controller.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const branchesRouter = Router();
 
-// TODO: Restrict Branch Setup to an administrative permission once authentication is implemented.
-branchesRouter.get("/", listBranchesHandler);
-branchesRouter.post("/", createBranchHandler);
-branchesRouter.patch("/:id/status", updateBranchStatusHandler);
-branchesRouter.get("/:id", getBranchHandler);
-branchesRouter.patch("/:id", updateBranchHandler);
+const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
+const adminOnly = requireRole("ADMIN");
+
+branchesRouter.get("/", requireAuth, readRoles, listBranchesHandler);
+branchesRouter.get("/:id", requireAuth, readRoles, getBranchHandler);
+branchesRouter.post("/", requireAuth, adminOnly, createBranchHandler);
+branchesRouter.patch("/:id/status", requireAuth, adminOnly, updateBranchStatusHandler);
+branchesRouter.patch("/:id", requireAuth, adminOnly, updateBranchHandler);

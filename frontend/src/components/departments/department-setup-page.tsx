@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
   CreateDepartmentInput,
@@ -18,6 +19,7 @@ import { DepartmentFormDialog } from "./department-form-dialog";
 const PAGE_SIZE = 20;
 
 export function DepartmentSetupPage() {
+  const { canMutateMasterData } = useAuth();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -179,6 +181,7 @@ export function DepartmentSetupPage() {
             stationery and printing items.
           </p>
         </div>
+        {canMutateMasterData ? (
         <button
           type="button"
           onClick={openCreateDialog}
@@ -186,6 +189,7 @@ export function DepartmentSetupPage() {
         >
           Add Department
         </button>
+        ) : null}
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -285,6 +289,7 @@ export function DepartmentSetupPage() {
                         </span>
                       </td>
                       <td className="px-3 py-3">
+                        {canMutateMasterData ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -306,6 +311,9 @@ export function DepartmentSetupPage() {
                                 : "Activate"}
                           </button>
                         </div>
+                        ) : (
+                          <span className="text-ink-muted">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

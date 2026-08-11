@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
   CreateUnitInput,
@@ -18,6 +19,7 @@ import { UnitFormDialog } from "./unit-form-dialog";
 const PAGE_SIZE = 20;
 
 export function UnitSetupPage() {
+  const { canMutateMasterData } = useAuth();
   const [units, setUnits] = useState<Unit[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -177,6 +179,7 @@ export function UnitSetupPage() {
             measured.
           </p>
         </div>
+        {canMutateMasterData ? (
         <button
           type="button"
           onClick={openCreateDialog}
@@ -184,6 +187,7 @@ export function UnitSetupPage() {
         >
           Add Unit
         </button>
+        ) : null}
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -277,6 +281,7 @@ export function UnitSetupPage() {
                         </span>
                       </td>
                       <td className="px-3 py-3">
+                        {canMutateMasterData ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -298,6 +303,9 @@ export function UnitSetupPage() {
                                 : "Activate"}
                           </button>
                         </div>
+                        ) : (
+                          <span className="text-ink-muted">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

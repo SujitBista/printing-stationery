@@ -33,6 +33,22 @@ cp frontend/.env.example frontend/.env.local
 npm install
 ```
 
+4. Apply database migrations:
+
+```bash
+npm run db:migrate -w @printing-stationery/backend
+```
+
+5. Bootstrap the first Admin (independent system account; no Employee required):
+
+```bash
+BOOTSTRAP_ADMIN_USERNAME="<admin-username>" \
+BOOTSTRAP_ADMIN_PASSWORD="<strong-temporary-password>" \
+npm run auth:bootstrap-admin -w @printing-stationery/backend
+```
+
+On first login the Admin must change the temporary password, then receives full `ADMIN` access. Ordinary users created later through Application User Setup must reference an Employee. See [docs/AUTH.md](docs/AUTH.md).
+
 ## Development
 
 ```bash
@@ -46,6 +62,8 @@ This builds (then watches) the shared package, then starts:
 
 Health check: [http://localhost:3001/api/health](http://localhost:3001/api/health)
 
+Sign in: [http://localhost:3000/login](http://localhost:3000/login)
+
 ## Scripts
 
 | Command | Description |
@@ -57,6 +75,8 @@ Health check: [http://localhost:3001/api/health](http://localhost:3001/api/healt
 | `npm run clean` | Remove build outputs (`dist`, `.next`) only |
 | `npm run db:generate -w @printing-stationery/backend` | Generate Drizzle migrations from the schema |
 | `npm run db:migrate -w @printing-stationery/backend` | Apply pending Drizzle migrations to PostgreSQL |
+| `npm run auth:bootstrap-admin -w @printing-stationery/backend` | Create the first Admin application user |
+| `npm run auth:cleanup-sessions -w @printing-stationery/backend` | Remove expired / long-revoked sessions |
 
 ## Database migrations
 
@@ -71,7 +91,6 @@ Inspect generated SQL under `backend/drizzle/` before applying.
 
 ## Notes
 
-- `JWT_SECRET` and `JWT_EXPIRES_IN` are documented for future authentication and are not required in this milestone.
-- Branch Setup is available at `/organization/branches` and `/api/branches`. Authentication and administrative permission checks are not implemented yet.
-- Department Setup is available at `/organization/departments` and `/api/departments`. Authentication and administrative permission checks are not implemented yet.
-- CORS allows `http://localhost:3000` for the Next.js frontend.
+- Authentication uses opaque HttpOnly session cookies. Details: [docs/AUTH.md](docs/AUTH.md).
+- Organization master-data APIs require authentication. Mutations require `ADMIN`.
+- CORS allows the configured `FRONTEND_ORIGIN` (default `http://localhost:3000`) with credentials.

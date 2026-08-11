@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
   Branch,
@@ -26,6 +27,7 @@ function yesNo(value: boolean): string {
 }
 
 export function StoreSetupPage() {
+  const { canMutateMasterData } = useAuth();
   const [stores, setStores] = useState<Store[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -210,6 +212,7 @@ export function StoreSetupPage() {
             items will be held and managed.
           </p>
         </div>
+        {canMutateMasterData ? (
         <button
           type="button"
           onClick={openCreateDialog}
@@ -217,6 +220,7 @@ export function StoreSetupPage() {
         >
           Add New
         </button>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -393,6 +397,7 @@ export function StoreSetupPage() {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
+                        {canMutateMasterData ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -414,6 +419,9 @@ export function StoreSetupPage() {
                                 : "Activate"}
                           </button>
                         </div>
+                        ) : (
+                          <span className="text-ink-muted">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

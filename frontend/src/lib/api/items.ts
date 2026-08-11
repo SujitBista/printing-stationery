@@ -13,81 +13,9 @@ import {
   type UpdateItemInput,
   type UpdateItemStatusInput,
 } from "@printing-stationery/shared";
+import { requestJson, type ApiResult } from "./client";
 
-export type ApiResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; status?: number };
 
-function getBaseUrl(): string | null {
-  return process.env.NEXT_PUBLIC_API_URL ?? null;
-}
-
-async function parseErrorMessage(
-  response: Response,
-  fallback: string,
-): Promise<string> {
-  try {
-    const json: unknown = await response.json();
-    if (
-      json &&
-      typeof json === "object" &&
-      "error" in json &&
-      json.error &&
-      typeof json.error === "object" &&
-      "message" in json.error &&
-      typeof json.error.message === "string"
-    ) {
-      return json.error.message;
-    }
-  } catch {
-    // Ignore JSON parse failures and use the fallback message.
-  }
-
-  return fallback;
-}
-
-async function requestJson<T>(
-  path: string,
-  options: RequestInit | undefined,
-  parse: (json: unknown) =>
-    | { success: true; data: T }
-    | { success: false; error: string },
-  fallbackError: string,
-): Promise<ApiResult<T>> {
-  const baseUrl = getBaseUrl();
-  if (!baseUrl) {
-    return { ok: false, error: "NEXT_PUBLIC_API_URL is not configured" };
-  }
-
-  try {
-    const response = await fetch(`${baseUrl}${path}`, {
-      ...options,
-      cache: "no-store",
-      headers: {
-        "Content-Type": "application/json",
-        ...(options?.headers ?? {}),
-      },
-    });
-
-    if (!response.ok) {
-      const error = await parseErrorMessage(response, fallbackError);
-      return { ok: false, error, status: response.status };
-    }
-
-    const json: unknown = await response.json();
-    const parsed = parse(json);
-    if (!parsed.success) {
-      return { ok: false, error: parsed.error, status: response.status };
-    }
-
-    return { ok: true, data: parsed.data };
-  } catch {
-    return {
-      ok: false,
-      error: "Unable to reach the API. Check that the backend is running.",
-    };
-  }
-}
 
 function buildQueryString(query: ItemListQuery): string {
   const params = new URLSearchParams();

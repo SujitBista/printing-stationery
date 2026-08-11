@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/lib/auth/auth-context";
 
 type NavItem = {
   label: string;
   href: string;
   soon?: boolean;
+  /** When true, only users who can mutate master data (ADMIN) see this link. */
+  adminSetup?: boolean;
 };
 
 type NavSection = {
@@ -47,6 +50,7 @@ type SidebarProps = {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { canReadMasterData } = useAuth();
 
   return (
     <>
@@ -64,53 +68,64 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         }`}
       >
         <nav className="flex h-full flex-col gap-6 p-4" aria-label="Primary">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.title}>
-              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                {section.title}
-              </p>
-              <div className="flex flex-col gap-1">
-                {section.items.map((item) => {
-                  const isActive =
-                    !item.soon &&
-                    (item.href === "/"
-                      ? pathname === "/"
-                      : pathname === item.href ||
-                        pathname.startsWith(`${item.href}/`));
+          {NAV_SECTIONS.map((section) => {
+            const items =
+              section.title === "Organization" && !canReadMasterData
+                ? []
+                : section.items;
 
-                  if (item.soon || item.href === "#") {
+            if (items.length === 0) {
+              return null;
+            }
+
+            return (
+              <div key={section.title}>
+                <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  {section.title}
+                </p>
+                <div className="flex flex-col gap-1">
+                  {items.map((item) => {
+                    const isActive =
+                      !item.soon &&
+                      (item.href === "/"
+                        ? pathname === "/"
+                        : pathname === item.href ||
+                          pathname.startsWith(`${item.href}/`));
+
+                    if (item.soon || item.href === "#") {
+                      return (
+                        <span
+                          key={item.label}
+                          className="cursor-default rounded-md px-3 py-2 text-sm text-ink-muted opacity-70"
+                        >
+                          {item.label}
+                          <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-ink-muted">
+                            Soon
+                          </span>
+                        </span>
+                      );
+                    }
+
                     return (
-                      <span
+                      <Link
                         key={item.label}
-                        className="cursor-default rounded-md px-3 py-2 text-sm text-ink-muted opacity-70"
+                        href={item.href}
+                        onClick={onClose}
+                        aria-current={isActive ? "page" : undefined}
+                        className={`rounded-md px-3 py-2 text-sm transition-colors ${
+                          isActive
+                            ? "bg-accent-soft font-medium text-accent"
+                            : "text-ink-muted hover:bg-paper hover:text-ink"
+                        }`}
                       >
                         {item.label}
-                        <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-ink-muted">
-                          Soon
-                        </span>
-                      </span>
+                      </Link>
                     );
-                  }
-
-                  return (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      onClick={onClose}
-                      aria-current={isActive ? "page" : undefined}
-                      className={`rounded-md px-3 py-2 text-sm transition-colors ${
-                        isActive
-                          ? "bg-accent-soft font-medium text-accent"
-                          : "text-ink-muted hover:bg-paper hover:text-ink"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  );
-                })}
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
       </aside>
     </>

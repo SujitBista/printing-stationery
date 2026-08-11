@@ -6,12 +6,20 @@ import {
   updateItemGroupHandler,
   updateItemGroupStatusHandler,
 } from "../controllers/item-groups.controller.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const itemGroupsRouter = Router();
 
-// TODO: Restrict Item Group Setup to an administrative permission once authentication is implemented.
-itemGroupsRouter.get("/", listItemGroupsHandler);
-itemGroupsRouter.post("/", createItemGroupHandler);
-itemGroupsRouter.patch("/:id/status", updateItemGroupStatusHandler);
-itemGroupsRouter.get("/:id", getItemGroupHandler);
-itemGroupsRouter.patch("/:id", updateItemGroupHandler);
+const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
+const adminOnly = requireRole("ADMIN");
+
+itemGroupsRouter.get("/", requireAuth, readRoles, listItemGroupsHandler);
+itemGroupsRouter.get("/:id", requireAuth, readRoles, getItemGroupHandler);
+itemGroupsRouter.post("/", requireAuth, adminOnly, createItemGroupHandler);
+itemGroupsRouter.patch(
+  "/:id/status",
+  requireAuth,
+  adminOnly,
+  updateItemGroupStatusHandler,
+);
+itemGroupsRouter.patch("/:id", requireAuth, adminOnly, updateItemGroupHandler);

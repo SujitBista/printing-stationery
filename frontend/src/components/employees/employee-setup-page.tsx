@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
   Branch,
@@ -21,6 +22,7 @@ import { EmployeeFormDialog } from "./employee-form-dialog";
 const PAGE_SIZE = 20;
 
 export function EmployeeSetupPage() {
+  const { canMutateMasterData } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -203,6 +205,7 @@ export function EmployeeSetupPage() {
             supervisor assignments.
           </p>
         </div>
+        {canMutateMasterData ? (
         <button
           type="button"
           onClick={openCreateDialog}
@@ -210,6 +213,7 @@ export function EmployeeSetupPage() {
         >
           Add New
         </button>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -346,6 +350,7 @@ export function EmployeeSetupPage() {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
+                        {canMutateMasterData ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -367,6 +372,9 @@ export function EmployeeSetupPage() {
                                 : "Activate"}
                           </button>
                         </div>
+                        ) : (
+                          <span className="text-ink-muted">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

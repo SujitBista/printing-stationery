@@ -10,10 +10,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "db:generate": "NODE_OPTIONS='--import tsx' drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "auth:bootstrap-admin": "tsx --env-file=../.env --env-file=.env src/scripts/bootstrap-admin.ts",
+    "auth:cleanup-sessions": "tsx --env-file=../.env --env-file=.env src/scripts/cleanup-sessions.ts"
   },
   "dependencies": {
     "@printing-stationery/shared": "*",
+    "argon2": "^0.45.1",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.0",
     "express": "^4.21.2",
@@ -23,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.13.10",

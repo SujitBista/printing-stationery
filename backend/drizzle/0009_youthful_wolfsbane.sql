@@ -1,0 +1,1 @@
+ALTER TABLE "application_users" ALTER COLUMN "employee_id" DROP NOT NULL;

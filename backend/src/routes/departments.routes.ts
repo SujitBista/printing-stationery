@@ -6,12 +6,20 @@ import {
   updateDepartmentHandler,
   updateDepartmentStatusHandler,
 } from "../controllers/departments.controller.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const departmentsRouter = Router();
 
-// TODO: Restrict Department Setup to an administrative permission once authentication is implemented.
-departmentsRouter.get("/", listDepartmentsHandler);
-departmentsRouter.post("/", createDepartmentHandler);
-departmentsRouter.patch("/:id/status", updateDepartmentStatusHandler);
-departmentsRouter.get("/:id", getDepartmentHandler);
-departmentsRouter.patch("/:id", updateDepartmentHandler);
+const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
+const adminOnly = requireRole("ADMIN");
+
+departmentsRouter.get("/", requireAuth, readRoles, listDepartmentsHandler);
+departmentsRouter.get("/:id", requireAuth, readRoles, getDepartmentHandler);
+departmentsRouter.post("/", requireAuth, adminOnly, createDepartmentHandler);
+departmentsRouter.patch(
+  "/:id/status",
+  requireAuth,
+  adminOnly,
+  updateDepartmentStatusHandler,
+);
+departmentsRouter.patch("/:id", requireAuth, adminOnly, updateDepartmentHandler);

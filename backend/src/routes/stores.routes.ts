@@ -6,12 +6,15 @@ import {
   updateStoreHandler,
   updateStoreStatusHandler,
 } from "../controllers/stores.controller.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const storesRouter = Router();
 
-// TODO: Restrict Store Setup to an administrative permission once authentication is implemented.
-storesRouter.get("/", listStoresHandler);
-storesRouter.post("/", createStoreHandler);
-storesRouter.patch("/:id/status", updateStoreStatusHandler);
-storesRouter.get("/:id", getStoreHandler);
-storesRouter.patch("/:id", updateStoreHandler);
+const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
+const adminOnly = requireRole("ADMIN");
+
+storesRouter.get("/", requireAuth, readRoles, listStoresHandler);
+storesRouter.get("/:id", requireAuth, readRoles, getStoreHandler);
+storesRouter.post("/", requireAuth, adminOnly, createStoreHandler);
+storesRouter.patch("/:id/status", requireAuth, adminOnly, updateStoreStatusHandler);
+storesRouter.patch("/:id", requireAuth, adminOnly, updateStoreHandler);
