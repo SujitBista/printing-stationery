@@ -13,6 +13,10 @@ const ITEM_NAME_UNIQUE_INDEX = "items_item_name_lower_uidx";
 const STORE_CODE_UNIQUE_INDEX = "stores_store_code_lower_uidx";
 const STORE_BRANCH_NAME_UNIQUE_INDEX = "stores_branch_store_name_lower_uidx";
 const EMPLOYEE_CODE_UNIQUE_INDEX = "employees_employee_code_lower_uidx";
+const APPLICATION_USER_EMPLOYEE_UNIQUE_INDEX =
+  "application_users_employee_id_uidx";
+const APPLICATION_USER_USERNAME_UNIQUE_INDEX =
+  "application_users_username_lower_uidx";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -262,6 +266,52 @@ export function isEmployeeCodeUniqueViolation(error: unknown): boolean {
 export function mapEmployeeDatabaseError(error: unknown): never {
   if (isEmployeeCodeUniqueViolation(error)) {
     throw new AppError("An employee with this code already exists.", 409, {
+      cause: error,
+    });
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function isApplicationUserEmployeeUniqueViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === APPLICATION_USER_EMPLOYEE_UNIQUE_INDEX;
+}
+
+export function isApplicationUserUsernameUniqueViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === APPLICATION_USER_USERNAME_UNIQUE_INDEX;
+}
+
+export function mapApplicationUserDatabaseError(error: unknown): never {
+  if (isApplicationUserEmployeeUniqueViolation(error)) {
+    throw new AppError(
+      "This employee already has an application account.",
+      409,
+      { cause: error },
+    );
+  }
+
+  if (isApplicationUserUsernameUniqueViolation(error)) {
+    throw new AppError("A user with this username already exists.", 409, {
       cause: error,
     });
   }

@@ -39,6 +39,11 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Item Setup", href: "/organization/items" },
       { label: "Store Setup", href: "/organization/stores" },
       { label: "Employee Setup", href: "/organization/employees" },
+      {
+        label: "Application User Setup",
+        href: "/organization/application-users",
+        adminSetup: true,
+      },
     ],
   },
 ];
@@ -50,7 +55,7 @@ type SidebarProps = {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { canReadMasterData } = useAuth();
+  const { canReadMasterData, canManageApplicationUsers } = useAuth();
 
   return (
     <>
@@ -69,10 +74,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       >
         <nav className="flex h-full flex-col gap-6 p-4" aria-label="Primary">
           {NAV_SECTIONS.map((section) => {
-            const items =
+            const items = (
               section.title === "Organization" && !canReadMasterData
                 ? []
-                : section.items;
+                : section.items
+            ).filter(
+              (item) => !item.adminSetup || canManageApplicationUsers,
+            );
 
             if (items.length === 0) {
               return null;

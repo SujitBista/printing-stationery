@@ -16,7 +16,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { employees } from "./employees.js";
 
-export const appRoleEnum = pgEnum("app_role", ["ADMIN", "MAKER", "CHECKER"]);
+export const appRoleEnum = pgEnum("app_role", [
+  "ADMIN",
+  "MAKER",
+  "CHECKER",
+  "HR",
+]);
 
 export const applicationUsers = pgTable(
   "application_users",

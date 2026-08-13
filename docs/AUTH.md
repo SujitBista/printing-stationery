@@ -19,16 +19,15 @@ Created only by the first-Admin bootstrap command:
 
 The Admin must never be required to create, select, or link an Employee for themselves.
 
-### Employee application user (future Application User Setup)
+### Employee application user (Application User Setup)
 
-Ordinary users created later through Application User Setup:
+Ordinary users created through Application User Setup:
 
 - Must reference an existing active Employee (`employeeId` required)
-- May receive roles such as `MAKER` or `CHECKER`
+- Receive exactly one application role: `ADMIN`, `HR`, `MAKER`, or `CHECKER`
 - Must not be created with `employeeId = null`
 - Must not use the bootstrap command
-
-Future Application User Setup rule:
+- Must change the temporary password on first login
 
 ```text
 Bootstrap Admin:
@@ -38,15 +37,17 @@ Any account created through Application User Setup:
 employeeId is required.
 ```
 
-Application User Setup is not implemented yet. When it is, it must:
+Application User Setup:
 
-- Select an existing active Employee
-- Require an Employee ID
-- Prevent one Employee from having multiple accounts
-- Create the username and temporary password
-- Assign controlled roles
-- Never offer “No Employee”
-- Never create another independent Admin through ordinary UI unless separately confirmed later
+- Selects an existing active Employee (employees who already have an account are excluded)
+- Requires an Employee ID
+- Prevents one Employee from having multiple accounts
+- Stores only a password hash; never returns the password or hash
+- Assigns one of `ADMIN`, `HR`, `MAKER`, `CHECKER`
+- Never offers “No Employee”
+- Never creates another independent Admin (`employeeId = null`) through ordinary UI
+- Does not permanently delete accounts; inactive users cannot log in
+- Is Admin-only (`HR` cannot create accounts or assign roles)
 
 ## Environment variables
 
@@ -87,6 +88,13 @@ Never commit real credentials.
 | `POST` | `/api/auth/logout` | optional session | Revokes current session; clears cookie; idempotent |
 | `GET` | `/api/auth/me` | session | Current user with roles; `employee` may be `null` for the bootstrap Admin |
 | `POST` | `/api/auth/change-initial-password` | session | Initial password change |
+| `GET` | `/api/application-users` | `ADMIN` | Paginated Application User Setup list |
+| `GET` | `/api/application-users/eligible-employees` | `ADMIN` | Active employees without an application account |
+| `GET` | `/api/application-users/:id` | `ADMIN` | Safe user payload (no password or hash) |
+| `POST` | `/api/application-users` | `ADMIN` | Create employee-linked account |
+| `PATCH` | `/api/application-users/:id` | `ADMIN` | Update username and role |
+| `PATCH` | `/api/application-users/:id/status` | `ADMIN` | Activate or deactivate |
+| `POST` | `/api/application-users/:id/reset-password` | `ADMIN` | Set a temporary password; `mustChangePassword=true` |
 
 ## Bootstrap first Admin
 
@@ -131,7 +139,7 @@ The only initial restriction is `mustChangePassword = true`. A missing Employee 
 
 ## Initial password behavior
 
-Bootstrap (and future user provisioning) sets `mustChangePassword=true`.
+Bootstrap and Application User Setup (create or password reset) set `mustChangePassword=true`.
 
 Until the password is changed:
 
@@ -187,12 +195,15 @@ npm run auth:cleanup-sessions -w @printing-stationery/backend
 
 ## Roles
 
-Application roles (not employee types): `ADMIN`, `MAKER`, `CHECKER`.
+Application roles (not employee types): `ADMIN`, `HR`, `MAKER`, `CHECKER`.
+
+Branch vs Head Office maker/checker is derived later from role plus the employee’s branch. Separate `BRANCH_MAKER` / `HEAD_OFFICE_MAKER` / `BRANCH_CHECKER` / `HEAD_OFFICE_CHECKER` roles are not used.
 
 Master-data API policy at this stage:
 
 - `GET`: authenticated `ADMIN`, `MAKER`, or `CHECKER`
 - `POST` / `PATCH` / status: `ADMIN` only
+- Application User Setup: `ADMIN` only. `HR` will maintain Employee Setup later, but cannot create application accounts or assign roles.
 
 UI visibility is convenience only; backend authorization is authoritative. Authorization uses database-derived roles; a null `employee_id` does not restrict `ADMIN`.
 

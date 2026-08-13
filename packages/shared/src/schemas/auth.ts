@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const appRoleSchema = z.enum(["ADMIN", "MAKER", "CHECKER"]);
+export const appRoleSchema = z.enum(["ADMIN", "HR", "MAKER", "CHECKER"]);
 
 export const APP_ROLES = appRoleSchema.options;
 

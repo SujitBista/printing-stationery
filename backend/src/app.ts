@@ -7,6 +7,7 @@ import { attachEnv } from "./middleware/auth.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { notFoundHandler } from "./middleware/not-found.js";
+import { applicationUsersRouter } from "./routes/application-users.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { branchesRouter } from "./routes/branches.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
@@ -37,6 +38,7 @@ export function createApp(env: Env) {
 
   app.use("/api/health", healthRouter);
   app.use("/api/auth", authRouter);
+  app.use("/api/application-users", applicationUsersRouter);
   app.use("/api/branches", branchesRouter);
   app.use("/api/departments", departmentsRouter);
   app.use("/api/units", unitsRouter);

@@ -71,6 +71,13 @@
       "when": 1786423894137,
       "tag": "0009_youthful_wolfsbane",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786609767347,
+      "tag": "0010_little_joshua_kane",
+      "breakpoints": true
     }
   ]
 }
