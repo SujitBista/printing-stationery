@@ -18,6 +18,7 @@ import {
   updateEmployeeStatus,
 } from "@/lib/api/employees";
 import { EmployeeFormDialog } from "./employee-form-dialog";
+import { EmployeeImportDialog } from "./employee-import-dialog";
 
 const PAGE_SIZE = 20;
 
@@ -45,6 +46,7 @@ export function EmployeeSetupPage() {
   const [dialogMode, setDialogMode] = useState<"create" | "edit">("create");
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [saving, setSaving] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -206,13 +208,22 @@ export function EmployeeSetupPage() {
           </p>
         </div>
         {canMutateMasterData ? (
-        <button
-          type="button"
-          onClick={openCreateDialog}
-          className="shrink-0 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
-        >
-          Add New
-        </button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setImportDialogOpen(true)}
+              className="rounded-md border border-border bg-paper-elevated px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+            >
+              Import Employees
+            </button>
+            <button
+              type="button"
+              onClick={openCreateDialog}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            >
+              Add New
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -429,6 +440,27 @@ export function EmployeeSetupPage() {
         }}
         onSubmitCreate={handleCreate}
         onSubmitEdit={handleEdit}
+      />
+
+      <EmployeeImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImported={async (importedCount, skippedExistingCount) => {
+          setImportDialogOpen(false);
+          const parts = [
+            `Imported ${importedCount} ${importedCount === 1 ? "employee" : "employees"}.`,
+          ];
+          if (skippedExistingCount > 0) {
+            parts.push(
+              `Skipped ${skippedExistingCount} existing ${skippedExistingCount === 1 ? "code" : "codes"}.`,
+            );
+          }
+          setFeedback({
+            type: "success",
+            message: parts.join(" "),
+          });
+          await loadEmployees();
+        }}
       />
     </section>
   );

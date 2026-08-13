@@ -47,14 +47,19 @@ export async function requestJson<T>(
   }
 
   try {
+    const headers = new Headers(options?.headers);
+    const isFormData =
+      typeof FormData !== "undefined" && options?.body instanceof FormData;
+
+    if (!isFormData && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+
     const response = await fetch(`${baseUrl}${path}`, {
       ...options,
       cache: "no-store",
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...(options?.headers ?? {}),
-      },
+      headers,
     });
 
     if (!response.ok) {

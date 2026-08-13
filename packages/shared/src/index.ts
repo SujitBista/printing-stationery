@@ -151,6 +151,17 @@ export {
   employeeListQuerySchema,
   paginatedEmployeeResponseSchema,
   employeeIdSchema,
+  EMPLOYEE_IMPORT_MAX_ROWS,
+  employeeImportReadyRowSchema,
+  employeeImportExistingRowSchema,
+  employeeImportDuplicateCodeSchema,
+  employeeImportUnknownBranchRowSchema,
+  employeeImportInvalidRowSchema,
+  employeeImportPreviewSummarySchema,
+  employeeImportPreviewResponseSchema,
+  employeeImportConfirmEmployeeSchema,
+  employeeImportConfirmInputSchema,
+  employeeImportConfirmResponseSchema,
 } from "./schemas/employee.js";
 export type {
   Employee,
@@ -161,6 +172,14 @@ export type {
   UpdateEmployeeStatusInput,
   EmployeeListQuery,
   PaginatedEmployeeResponse,
+  EmployeeImportReadyRow,
+  EmployeeImportExistingRow,
+  EmployeeImportDuplicateCode,
+  EmployeeImportUnknownBranchRow,
+  EmployeeImportInvalidRow,
+  EmployeeImportPreviewResponse,
+  EmployeeImportConfirmInput,
+  EmployeeImportConfirmResponse,
 } from "./types/employee.js";
 
 export {
