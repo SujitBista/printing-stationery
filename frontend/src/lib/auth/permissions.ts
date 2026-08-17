@@ -33,6 +33,12 @@ export function canManageApplicationUsers(
   return isAdmin(user);
 }
 
+export function canManageStoreUsers(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  return isAdmin(user);
+}
+
 export function hasRole(
   user: AuthenticatedUser | null | undefined,
   role: AppRole,

@@ -54,3 +54,9 @@ export {
   type AuthSessionRow,
   type NewAuthSessionRow,
 } from "./auth.js";
+
+export {
+  storeUsers,
+  type StoreUserRow,
+  type NewStoreUserRow,
+} from "./store-users.js";

@@ -44,6 +44,11 @@ const NAV_SECTIONS: NavSection[] = [
         href: "/organization/application-users",
         adminSetup: true,
       },
+      {
+        label: "Store User Setup",
+        href: "/organization/store-users",
+        adminSetup: true,
+      },
     ],
   },
 ];
@@ -55,7 +60,7 @@ type SidebarProps = {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { canReadMasterData, canManageApplicationUsers } = useAuth();
+  const { canReadMasterData, isAdmin } = useAuth();
 
   return (
     <>
@@ -78,9 +83,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               section.title === "Organization" && !canReadMasterData
                 ? []
                 : section.items
-            ).filter(
-              (item) => !item.adminSetup || canManageApplicationUsers,
-            );
+            ).filter((item) => !item.adminSetup || isAdmin);
 
             if (items.length === 0) {
               return null;

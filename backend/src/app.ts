@@ -16,6 +16,7 @@ import { healthRouter } from "./routes/health.routes.js";
 import { itemGroupsRouter } from "./routes/item-groups.routes.js";
 import { itemsRouter } from "./routes/items.routes.js";
 import { storesRouter } from "./routes/stores.routes.js";
+import { storeUsersRouter } from "./routes/store-users.routes.js";
 import { unitsRouter } from "./routes/units.routes.js";
 
 export function createApp(env: Env) {
@@ -45,6 +46,7 @@ export function createApp(env: Env) {
   app.use("/api/item-groups", itemGroupsRouter);
   app.use("/api/items", itemsRouter);
   app.use("/api/stores", storesRouter);
+  app.use("/api/store-users", storeUsersRouter);
   app.use("/api/employees", employeesRouter);
 
   app.use(notFoundHandler);

@@ -17,6 +17,11 @@ const APPLICATION_USER_EMPLOYEE_UNIQUE_INDEX =
   "application_users_employee_id_uidx";
 const APPLICATION_USER_USERNAME_UNIQUE_INDEX =
   "application_users_username_lower_uidx";
+const STORE_USER_STORE_UNIQUE_INDEX = "store_users_store_id_uidx";
+const STORE_USER_ACTIVE_MAKER_UNIQUE_INDEX =
+  "store_users_active_maker_application_user_id_uidx";
+const STORE_USER_MAKER_NE_SUPERVISOR_CHECK =
+  "store_users_maker_ne_supervisor";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -314,6 +319,70 @@ export function mapApplicationUserDatabaseError(error: unknown): never {
     throw new AppError("A user with this username already exists.", 409, {
       cause: error,
     });
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function isStoreUserStoreUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STORE_USER_STORE_UNIQUE_INDEX;
+}
+
+export function isStoreUserActiveMakerUniqueViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STORE_USER_ACTIVE_MAKER_UNIQUE_INDEX;
+}
+
+export function isStoreUserMakerSupervisorCheckViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23514") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STORE_USER_MAKER_NE_SUPERVISOR_CHECK;
+}
+
+export function mapStoreUserDatabaseError(error: unknown): never {
+  if (isStoreUserStoreUniqueViolation(error)) {
+    throw new AppError("This store already has a user configuration.", 409, {
+      cause: error,
+    });
+  }
+
+  if (isStoreUserActiveMakerUniqueViolation(error)) {
+    throw new AppError(
+      "This maker is already assigned to another active store.",
+      409,
+      { cause: error },
+    );
+  }
+
+  if (isStoreUserMakerSupervisorCheckViolation(error)) {
+    throw new AppError(
+      "Maker and Supervisor must be different accounts.",
+      400,
+      { cause: error },
+    );
   }
 
   if (isDatabaseUnavailableError(error)) {
