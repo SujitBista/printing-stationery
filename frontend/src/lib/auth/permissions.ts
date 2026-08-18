@@ -39,6 +39,15 @@ export function canManageStoreUsers(
   return isAdmin(user);
 }
 
+export function canAccessItemRequests(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  if (!user) {
+    return false;
+  }
+  return userHasAnyRole(user.roles, ["ADMIN", "MAKER", "CHECKER"]);
+}
+
 export function hasRole(
   user: AuthenticatedUser | null | undefined,
   role: AppRole,

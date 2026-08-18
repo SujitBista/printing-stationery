@@ -60,3 +60,17 @@ export {
   type StoreUserRow,
   type NewStoreUserRow,
 } from "./store-users.js";
+
+export {
+  itemRequestStatusEnum,
+  itemRequestActionEnum,
+  itemRequests,
+  itemRequestLines,
+  itemRequestActions,
+  type ItemRequestRow,
+  type NewItemRequestRow,
+  type ItemRequestLineRow,
+  type NewItemRequestLineRow,
+  type ItemRequestActionRow,
+  type NewItemRequestActionRow,
+} from "./item-requests.js";

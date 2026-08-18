@@ -15,6 +15,7 @@ import {
   canManageStoreUsers,
   canMutateMasterData,
   canReadMasterData,
+  canAccessItemRequests,
   isAdmin,
 } from "@/lib/auth/permissions";
 
@@ -27,6 +28,7 @@ type AuthContextValue = {
   canReadMasterData: boolean;
   canManageApplicationUsers: boolean;
   canManageStoreUsers: boolean;
+  canAccessItemRequests: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -62,6 +64,7 @@ export function AuthProvider({ initialUser, children }: AuthProviderProps) {
       canReadMasterData: canReadMasterData(user),
       canManageApplicationUsers: canManageApplicationUsers(user),
       canManageStoreUsers: canManageStoreUsers(user),
+      canAccessItemRequests: canAccessItemRequests(user),
     }),
     [user, refresh, logout],
   );

@@ -22,6 +22,11 @@ const STORE_USER_ACTIVE_MAKER_UNIQUE_INDEX =
   "store_users_active_maker_application_user_id_uidx";
 const STORE_USER_MAKER_NE_SUPERVISOR_CHECK =
   "store_users_maker_ne_supervisor";
+const ITEM_REQUEST_NUMBER_UNIQUE_INDEX = "item_requests_request_number_uidx";
+const ITEM_REQUEST_LINE_ITEM_UNIQUE_INDEX =
+  "item_request_lines_request_item_uidx";
+const ITEM_REQUEST_LINE_QUANTITY_CHECK =
+  "item_request_lines_requested_quantity_positive";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -383,6 +388,66 @@ export function mapStoreUserDatabaseError(error: unknown): never {
       400,
       { cause: error },
     );
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function isItemRequestNumberUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === ITEM_REQUEST_NUMBER_UNIQUE_INDEX;
+}
+
+export function isItemRequestLineItemUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === ITEM_REQUEST_LINE_ITEM_UNIQUE_INDEX;
+}
+
+export function isItemRequestLineQuantityCheckViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23514") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === ITEM_REQUEST_LINE_QUANTITY_CHECK;
+}
+
+export function mapItemRequestDatabaseError(error: unknown): never {
+  if (isItemRequestNumberUniqueViolation(error)) {
+    throw new AppError("A request with this number already exists.", 409, {
+      cause: error,
+    });
+  }
+
+  if (isItemRequestLineItemUniqueViolation(error)) {
+    throw new AppError(
+      "The same item cannot appear twice in one request",
+      409,
+      { cause: error },
+    );
+  }
+
+  if (isItemRequestLineQuantityCheckViolation(error)) {
+    throw new AppError("Requested quantity must be greater than zero", 400, {
+      cause: error,
+    });
   }
 
   if (isDatabaseUnavailableError(error)) {

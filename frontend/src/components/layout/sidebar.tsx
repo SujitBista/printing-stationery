@@ -25,7 +25,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Items", href: "#", soon: true },
       { label: "Purchases", href: "#", soon: true },
       { label: "Stock", href: "#", soon: true },
-      { label: "Requests", href: "#", soon: true },
+      { label: "Requests", href: "/requests/item-requests" },
       { label: "Approvals", href: "#", soon: true },
     ],
   },
@@ -60,7 +60,7 @@ type SidebarProps = {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { canReadMasterData, isAdmin } = useAuth();
+  const { canReadMasterData, isAdmin, canAccessItemRequests } = useAuth();
 
   return (
     <>
@@ -83,7 +83,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               section.title === "Organization" && !canReadMasterData
                 ? []
                 : section.items
-            ).filter((item) => !item.adminSetup || isAdmin);
+            )
+              .filter((item) => !item.adminSetup || isAdmin)
+              .filter(
+                (item) =>
+                  item.href !== "/requests/item-requests" ||
+                  canAccessItemRequests,
+              );
 
             if (items.length === 0) {
               return null;
