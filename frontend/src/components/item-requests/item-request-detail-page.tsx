@@ -11,6 +11,7 @@ import {
   fetchItemRequest,
   performItemRequestAction,
 } from "@/lib/api/item-requests";
+import { fetchItemIssueEligibility } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import {
@@ -57,6 +58,7 @@ export function ItemRequestDetailPage() {
   const [pendingAction, setPendingAction] =
     useState<ItemRequestActionType | null>(null);
   const [saving, setSaving] = useState(false);
+  const [canCreateIssue, setCanCreateIssue] = useState(false);
 
   const loadRequest = useCallback(async () => {
     if (!params.id) {
@@ -76,6 +78,13 @@ export function ItemRequestDetailPage() {
     }
 
     setRequest(result.data);
+    setCanCreateIssue(false);
+    if (result.data.status === "APPROVED") {
+      const eligibility = await fetchItemIssueEligibility(result.data.id);
+      if (eligibility.ok && eligibility.data.canCreate) {
+        setCanCreateIssue(true);
+      }
+    }
     setLoading(false);
   }, [params.id]);
 
@@ -161,6 +170,14 @@ export function ItemRequestDetailPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              {canCreateIssue ? (
+                <Link
+                  href={`/requests/item-requests/${request.id}/issue`}
+                  className="rounded-md border border-border px-4 py-2 text-sm"
+                >
+                  Create Item Issue
+                </Link>
+              ) : null}
               {request.canEdit ? (
                 <Link
                   href={`/requests/item-requests/${request.id}/edit`}

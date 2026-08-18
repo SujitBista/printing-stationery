@@ -27,6 +27,11 @@ const ITEM_REQUEST_LINE_ITEM_UNIQUE_INDEX =
   "item_request_lines_request_item_uidx";
 const ITEM_REQUEST_LINE_QUANTITY_CHECK =
   "item_request_lines_requested_quantity_positive";
+const ITEM_ISSUE_NUMBER_UNIQUE_INDEX = "item_issues_issue_number_uidx";
+const ITEM_ISSUE_LINE_REQUEST_LINE_UNIQUE_INDEX =
+  "item_issue_lines_issue_request_line_uidx";
+const ITEM_ISSUE_LINE_QUANTITY_CHECK =
+  "item_issue_lines_issue_quantity_positive";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -459,4 +464,64 @@ export function mapItemRequestDatabaseError(error: unknown): never {
 
 export function databaseUnavailableError(cause?: unknown): AppError {
   return new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause });
+}
+
+export function isItemIssueNumberUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === ITEM_ISSUE_NUMBER_UNIQUE_INDEX;
+}
+
+export function isItemIssueLineRequestLineUniqueViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === ITEM_ISSUE_LINE_REQUEST_LINE_UNIQUE_INDEX;
+}
+
+export function isItemIssueLineQuantityCheckViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23514") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === ITEM_ISSUE_LINE_QUANTITY_CHECK;
+}
+
+export function mapItemIssueDatabaseError(error: unknown): never {
+  if (isItemIssueNumberUniqueViolation(error)) {
+    throw new AppError("An issue with this number already exists.", 409, {
+      cause: error,
+    });
+  }
+
+  if (isItemIssueLineRequestLineUniqueViolation(error)) {
+    throw new AppError(
+      "The same request line cannot appear twice in one issue",
+      409,
+      { cause: error },
+    );
+  }
+
+  if (isItemIssueLineQuantityCheckViolation(error)) {
+    throw new AppError("Issue quantity must be greater than zero", 400, {
+      cause: error,
+    });
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
 }

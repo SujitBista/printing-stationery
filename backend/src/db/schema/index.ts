@@ -74,3 +74,13 @@ export {
   type ItemRequestActionRow,
   type NewItemRequestActionRow,
 } from "./item-requests.js";
+
+export {
+  itemIssueStatusEnum,
+  itemIssues,
+  itemIssueLines,
+  type ItemIssueRow,
+  type NewItemIssueRow,
+  type ItemIssueLineRow,
+  type NewItemIssueLineRow,
+} from "./item-issues.js";
