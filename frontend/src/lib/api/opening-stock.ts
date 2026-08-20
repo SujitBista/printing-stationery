@@ -8,7 +8,6 @@ import {
   openingStockValidationResultSchema,
   paginatedOpeningStockResponseSchema,
   postOpeningStockInputSchema,
-  updateOpeningStockMappingsInputSchema,
   type CancelOpeningStockInput,
   type CreateManualOpeningStockInput,
   type OpeningStockPreview,
@@ -17,7 +16,6 @@ import {
   type OpeningStockValidationResult,
   type PaginatedOpeningStockResponse,
   type PostOpeningStockInput,
-  type UpdateOpeningStockMappingsInput,
 } from "@printing-stationery/shared";
 import { requestJson, type ApiResult } from "./client";
 
@@ -90,49 +88,6 @@ export async function createManualOpeningStock(
         : { success: false, error: "Manual opening stock response did not match the expected schema" };
     },
     "Failed to create manual opening stock batch",
-  );
-}
-
-export async function previewLegacyOpeningStockImport(
-  file: File,
-): Promise<ApiResult<OpeningStockPreview>> {
-  if (!file.name.toLowerCase().endsWith(".xls")) {
-    return { ok: false, error: "Only the legacy .xls HTML export is accepted.", status: 400 };
-  }
-  const formData = new FormData();
-  formData.append("file", file);
-  return requestJson(
-    "/api/opening-stock/import/preview",
-    { method: "POST", body: formData },
-    (json) => {
-      const parsed = openingStockPreviewSchema.safeParse(json);
-      return parsed.success
-        ? { success: true, data: parsed.data }
-        : { success: false, error: "Import preview response did not match the expected schema" };
-    },
-    "Failed to preview legacy opening stock import",
-  );
-}
-
-export async function updateOpeningStockMappings(
-  id: string,
-  input: UpdateOpeningStockMappingsInput,
-): Promise<ApiResult<OpeningStockPreview>> {
-  const parsedId = openingStockIdSchema.safeParse(id);
-  const parsedInput = updateOpeningStockMappingsInputSchema.safeParse(input);
-  if (!parsedId.success || !parsedInput.success) {
-    return { ok: false, error: "Invalid opening stock mapping update", status: 400 };
-  }
-  return requestJson(
-    `/api/opening-stock/${parsedId.data}/mappings`,
-    { method: "PATCH", body: JSON.stringify(parsedInput.data) },
-    (json) => {
-      const parsed = openingStockPreviewSchema.safeParse(json);
-      return parsed.success
-        ? { success: true, data: parsed.data }
-        : { success: false, error: "Mapping update response did not match the expected schema" };
-    },
-    "Failed to update opening stock mappings",
   );
 }
 

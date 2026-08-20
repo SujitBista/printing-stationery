@@ -7,7 +7,6 @@ import { fetchItems } from "@/lib/api/items";
 import {
   createManualOpeningStock,
   fetchOpeningStockBatches,
-  previewLegacyOpeningStockImport,
 } from "@/lib/api/opening-stock";
 import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
@@ -19,7 +18,6 @@ export function OpeningStockListPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [status, setStatus] = useState<"ALL" | OpeningStockBatchSummary["status"]>("ALL");
-  const [sourceType, setSourceType] = useState<"ALL" | OpeningStockBatchSummary["sourceType"]>("ALL");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -31,7 +29,6 @@ export function OpeningStockListPage() {
   const [manualCutoverDate, setManualCutoverDate] = useState(new Date().toISOString().slice(0, 10));
   const [manualRemarks, setManualRemarks] = useState("");
   const [submittingManual, setSubmittingManual] = useState(false);
-  const [importingFile, setImportingFile] = useState(false);
 
   useEffect(() => {
     if (!canAccessOpeningStock) {
@@ -40,7 +37,7 @@ export function OpeningStockListPage() {
     }
     void (async () => {
       const [batchResult, storeResult, itemResult] = await Promise.all([
-        fetchOpeningStockBatches({ page: 1, pageSize: 20, status, sourceType, search: search || undefined }),
+        fetchOpeningStockBatches({ page: 1, pageSize: 20, status, search: search || undefined }),
         loadAllPaginatedOptions(fetchStores, "ACTIVE"),
         loadAllPaginatedOptions(fetchItems, "ACTIVE"),
       ]);
@@ -57,7 +54,7 @@ export function OpeningStockListPage() {
       }
       setLoading(false);
     })();
-  }, [canAccessOpeningStock, search, sourceType, status]);
+  }, [canAccessOpeningStock, search, status]);
 
   if (!canAccessOpeningStock) {
     return (
@@ -73,6 +70,9 @@ export function OpeningStockListPage() {
   }
 
   const selectedItem = items.find((item) => item.id === manualItemId);
+  const hasStores = stores.length > 0;
+  const hasItems = items.length > 0;
+  const canCreateOpeningStock = hasStores && hasItems;
 
   return (
     <section className="w-full max-w-7xl">
@@ -82,9 +82,7 @@ export function OpeningStockListPage() {
             Opening Stock
           </h1>
           <p className="mt-2 max-w-3xl text-ink-muted">
-            Upload a safe legacy opening-stock preview or create a manual draft batch. Only legacy
-            <span className="font-medium text-ink"> Closing Stock Qty </span>
-            becomes new-system opening stock. In Transit must be migrated separately.
+            Create opening-stock draft batches from stores and items already entered in master setup, then validate and post balances.
           </p>
         </div>
       </div>
@@ -92,133 +90,173 @@ export function OpeningStockListPage() {
       <div className="mt-4 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm text-ink">
         <p className="font-semibold text-warning">Required to continue</p>
         <p className="mt-1 text-ink-muted">
-          Opening stock data is required before inventory operations can continue. Import and post
-          a validated opening-stock batch so store balances exist for issues, transfers, and stock
+          Opening stock data is required before inventory operations can continue. Create and post a
+          validated opening-stock batch so store balances exist for issues, transfers, and stock
           checks.
         </p>
       </div>
 
+      {!canCreateOpeningStock ? (
+        <div className="mt-4 rounded-md border border-danger/30 bg-danger/5 p-4 text-sm text-ink">
+          <p className="font-semibold text-danger">Store names and item names required first</p>
+          <p className="mt-1 text-ink-muted">
+            Enter store names in Store Setup and item names in Item Setup before creating opening stock.
+            Opening stock cannot be created until both exist.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            {!hasStores ? (
+              <Link href="/organization/stores" className="text-accent hover:underline">
+                Go to Store Setup
+              </Link>
+            ) : null}
+            {!hasItems ? (
+              <Link href="/organization/items" className="text-accent hover:underline">
+                Go to Item Setup
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {feedback ? <p className="mt-4 border-l-2 border-success pl-3 text-sm text-success">{feedback}</p> : null}
       {error ? <p className="mt-4 border-l-2 border-danger pl-3 text-sm text-danger">{error}</p> : null}
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-md border border-border bg-paper-elevated p-4">
-          <h2 className="text-lg font-semibold text-ink">Import Legacy Stock</h2>
-          <p className="mt-2 text-sm text-ink-muted">
-            Upload the HTML-exported `ConsolidateStockRateWise.xls` report. Uploading creates a draft preview only and does not affect stock.
-          </p>
-          <label className="mt-4 block text-sm font-medium text-ink">
-            Legacy file
+      <div className="mt-6 rounded-md border border-border bg-paper-elevated p-4">
+        <h2 className="text-lg font-semibold text-ink">Create Opening Stock</h2>
+        <p className="mt-2 text-sm text-ink-muted">
+          Select an existing store name and item name, then enter rate and quantity for the cutover date.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="text-sm">
+            <span className="font-medium text-ink">Store name</span>
+            <select
+              value={manualStoreId}
+              onChange={(event) => setManualStoreId(event.target.value)}
+              disabled={!canCreateOpeningStock}
+              className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 disabled:opacity-60"
+            >
+              <option value="">{hasStores ? "Select store name" : "No store names available"}</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.storeCode} - {store.storeName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="font-medium text-ink">Cutover date</span>
             <input
-              type="file"
-              accept=".xls"
-              className="mt-2 block w-full rounded-md border border-border bg-paper px-3 py-2 text-sm"
-              onChange={async (event) => {
-                const file = event.target.files?.[0];
-                if (!file) {
-                  return;
-                }
-                setImportingFile(true);
-                setError(null);
-                const result = await previewLegacyOpeningStockImport(file);
-                setImportingFile(false);
-                if (!result.ok) {
-                  setError(result.error);
-                  return;
-                }
-                setFeedback(`Created preview batch ${result.data.batch.batchNumber}.`);
-                const refresh = await fetchOpeningStockBatches({ page: 1, pageSize: 20, status, sourceType, search: search || undefined });
-                if (refresh.ok) {
-                  setBatches(refresh.data.items);
-                }
-              }}
+              type="date"
+              value={manualCutoverDate}
+              onChange={(event) => setManualCutoverDate(event.target.value)}
+              disabled={!canCreateOpeningStock}
+              className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 disabled:opacity-60"
             />
           </label>
-          <p className="mt-3 text-xs text-ink-muted">
-            Posting does not replay legacy purchases, received, transfer, or consumption movements. It imports only closing balances as opening stock.
-          </p>
-          {importingFile ? <p className="mt-2 text-sm text-ink-muted">Creating preview…</p> : null}
+          <label className="text-sm sm:col-span-2">
+            <span className="font-medium text-ink">Item name</span>
+            <select
+              value={manualItemId}
+              onChange={(event) => setManualItemId(event.target.value)}
+              disabled={!canCreateOpeningStock}
+              className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 disabled:opacity-60"
+            >
+              <option value="">{hasItems ? "Select item name" : "No item names available"}</option>
+              {items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.itemCode} - {item.itemName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="font-medium text-ink">Unit</span>
+            <input
+              value={selectedItem?.unit.unitName ?? ""}
+              disabled
+              className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
+            />
+          </label>
+          <label className="text-sm">
+            <span className="font-medium text-ink">Rate</span>
+            <input
+              value={manualRate}
+              onChange={(event) => setManualRate(event.target.value)}
+              placeholder="0.0000"
+              disabled={!canCreateOpeningStock}
+              className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 disabled:opacity-60"
+            />
+          </label>
+          <label className="text-sm">
+            <span className="font-medium text-ink">Quantity</span>
+            <input
+              value={manualQuantity}
+              onChange={(event) => setManualQuantity(event.target.value)}
+              placeholder="0.0000"
+              disabled={!canCreateOpeningStock}
+              className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 disabled:opacity-60"
+            />
+          </label>
+          <label className="text-sm sm:col-span-2">
+            <span className="font-medium text-ink">Remarks</span>
+            <input
+              value={manualRemarks}
+              onChange={(event) => setManualRemarks(event.target.value)}
+              disabled={!canCreateOpeningStock}
+              className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 disabled:opacity-60"
+            />
+          </label>
         </div>
-
-        <div className="rounded-md border border-border bg-paper-elevated p-4">
-          <h2 className="text-lg font-semibold text-ink">Manual Opening Stock</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="text-sm">
-              <span className="font-medium text-ink">Store</span>
-              <select value={manualStoreId} onChange={(event) => setManualStoreId(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2">
-                <option value="">Select store</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.storeCode} - {store.storeName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="font-medium text-ink">Cutover date</span>
-              <input type="date" value={manualCutoverDate} onChange={(event) => setManualCutoverDate(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2" />
-            </label>
-            <label className="text-sm sm:col-span-2">
-              <span className="font-medium text-ink">Item</span>
-              <select value={manualItemId} onChange={(event) => setManualItemId(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2">
-                <option value="">Select item</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.itemCode} - {item.itemName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="font-medium text-ink">Unit</span>
-              <input value={selectedItem?.unit.unitName ?? ""} disabled className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2 text-ink-muted" />
-            </label>
-            <label className="text-sm">
-              <span className="font-medium text-ink">Rate</span>
-              <input value={manualRate} onChange={(event) => setManualRate(event.target.value)} placeholder="0.0000" className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2" />
-            </label>
-            <label className="text-sm">
-              <span className="font-medium text-ink">Quantity</span>
-              <input value={manualQuantity} onChange={(event) => setManualQuantity(event.target.value)} placeholder="0.0000" className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2" />
-            </label>
-            <label className="text-sm sm:col-span-2">
-              <span className="font-medium text-ink">Remarks</span>
-              <input value={manualRemarks} onChange={(event) => setManualRemarks(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2" />
-            </label>
-          </div>
-          <button
-            type="button"
-            disabled={submittingManual}
-            className="mt-4 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-            onClick={async () => {
-              setSubmittingManual(true);
-              setError(null);
-              const result = await createManualOpeningStock({
-                storeId: manualStoreId,
-                cutoverDate: manualCutoverDate,
-                remarks: manualRemarks || null,
-                lines: [{ itemId: manualItemId, rate: manualRate, quantity: manualQuantity }],
-              });
-              setSubmittingManual(false);
-              if (!result.ok) {
-                setError(result.error);
-                return;
-              }
-              setFeedback(`Created manual batch ${result.data.batch.batchNumber}.`);
-              const refresh = await fetchOpeningStockBatches({ page: 1, pageSize: 20, status, sourceType, search: search || undefined });
-              if (refresh.ok) {
-                setBatches(refresh.data.items);
-              }
-            }}
-          >
-            {submittingManual ? "Saving…" : "Create Manual Batch"}
-          </button>
-        </div>
+        <button
+          type="button"
+          disabled={submittingManual || !canCreateOpeningStock}
+          className="mt-4 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+          onClick={async () => {
+            if (!canCreateOpeningStock) {
+              setError(MASTER_DATA_MESSAGE);
+              return;
+            }
+            setSubmittingManual(true);
+            setError(null);
+            const result = await createManualOpeningStock({
+              storeId: manualStoreId,
+              cutoverDate: manualCutoverDate,
+              remarks: manualRemarks || null,
+              lines: [{ itemId: manualItemId, rate: manualRate, quantity: manualQuantity }],
+            });
+            setSubmittingManual(false);
+            if (!result.ok) {
+              setError(result.error);
+              return;
+            }
+            setFeedback(`Created opening-stock batch ${result.data.batch.batchNumber}.`);
+            const refresh = await fetchOpeningStockBatches({
+              page: 1,
+              pageSize: 20,
+              status,
+              search: search || undefined,
+            });
+            if (refresh.ok) {
+              setBatches(refresh.data.items);
+            }
+          }}
+        >
+          {submittingManual ? "Saving…" : "Create Opening Stock"}
+        </button>
       </div>
 
-      <div className="mt-8 grid gap-3 sm:grid-cols-3">
-        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search batch number or file" className="rounded-md border border-border bg-paper-elevated px-3 py-2 text-sm" />
-        <select value={status} onChange={(event) => setStatus(event.target.value as typeof status)} className="rounded-md border border-border bg-paper-elevated px-3 py-2 text-sm">
+      <div className="mt-8 grid gap-3 sm:grid-cols-2">
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search batch number"
+          className="rounded-md border border-border bg-paper-elevated px-3 py-2 text-sm"
+        />
+        <select
+          value={status}
+          onChange={(event) => setStatus(event.target.value as typeof status)}
+          className="rounded-md border border-border bg-paper-elevated px-3 py-2 text-sm"
+        >
           <option value="ALL">All statuses</option>
           <option value="DRAFT">Draft</option>
           <option value="VALIDATED">Validated</option>
@@ -226,22 +264,16 @@ export function OpeningStockListPage() {
           <option value="FAILED">Failed</option>
           <option value="CANCELLED">Cancelled</option>
         </select>
-        <select value={sourceType} onChange={(event) => setSourceType(event.target.value as typeof sourceType)} className="rounded-md border border-border bg-paper-elevated px-3 py-2 text-sm">
-          <option value="ALL">All sources</option>
-          <option value="MANUAL">Manual</option>
-          <option value="LEGACY_IMPORT">Legacy import</option>
-        </select>
       </div>
 
       <div className="mt-6 overflow-x-auto rounded-md border border-border bg-paper-elevated">
         {loading ? (
           <p className="p-4 text-sm text-ink-muted">Loading opening-stock batches…</p>
         ) : (
-          <table className="min-w-[72rem] w-full text-left text-sm">
+          <table className="min-w-[64rem] w-full text-left text-sm">
             <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
               <tr>
                 <th className="px-3 py-2 font-semibold">Batch</th>
-                <th className="px-3 py-2 font-semibold">Source</th>
                 <th className="px-3 py-2 font-semibold">Cutover</th>
                 <th className="px-3 py-2 font-semibold">Status</th>
                 <th className="px-3 py-2 font-semibold">Lines</th>
@@ -255,9 +287,7 @@ export function OpeningStockListPage() {
                 <tr key={batch.id} className="border-b border-border last:border-b-0">
                   <td className="px-3 py-3">
                     <div className="font-medium">{batch.batchNumber}</div>
-                    <div className="text-xs text-ink-muted">{batch.sourceFilename ?? "Manual batch"}</div>
                   </td>
-                  <td className="px-3 py-3">{batch.sourceType === "LEGACY_IMPORT" ? "Legacy import" : "Manual"}</td>
                   <td className="px-3 py-3">{batch.cutoverDate}</td>
                   <td className="px-3 py-3">{batch.status}</td>
                   <td className="px-3 py-3">{batch.lineCount}</td>
@@ -278,12 +308,12 @@ export function OpeningStockListPage() {
       <div className="mt-6 rounded-md border border-warning/30 bg-warning/5 p-4 text-sm text-ink-muted">
         <p className="font-medium text-warning">Posting warning</p>
         <p className="mt-2">
-          Post this opening-stock batch? This will create inventory balances and cannot be edited or posted again.
-        </p>
-        <p className="mt-2">
-          Only legacy Closing Stock Qty becomes Opening Stock. Individual purchases, issues, consumption, and transfers are not replayed.
+          Posting an opening-stock batch creates inventory balances and cannot be edited or posted again.
         </p>
       </div>
     </section>
   );
 }
+
+const MASTER_DATA_MESSAGE =
+  "Create at least one store name in Store Setup and one item name in Item Setup before creating opening stock.";
