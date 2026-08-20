@@ -154,3 +154,101 @@ export const paginatedItemResponseSchema = z.object({
 });
 
 export const itemIdSchema = z.string().uuid("Invalid item id");
+
+export const ITEM_IMPORT_MAX_ROWS = 2000;
+
+export const itemImportReadyRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  itemCode: z.string(),
+  itemName: z.string(),
+  unitId: z.string().uuid(),
+  unitName: z.string(),
+  itemGroupId: z.string().uuid(),
+  groupName: z.string(),
+  returnType: returnTypeSchema,
+  purchaseRate: z.string(),
+  remarks: z.string().nullable(),
+  isActive: z.boolean(),
+  isRequestable: z.boolean(),
+  isIssuable: z.boolean(),
+  trackSerialNumber: z.boolean(),
+});
+
+export const itemImportExistingRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  itemCode: z.string(),
+  itemName: z.string(),
+});
+
+export const itemImportDuplicateCodeSchema = z.object({
+  itemCode: z.string(),
+  rowNumbers: z.array(z.number().int().positive()).min(2),
+});
+
+export const itemImportUnknownUnitRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  itemCode: z.string(),
+  unitName: z.string(),
+});
+
+export const itemImportUnknownGroupRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  itemCode: z.string(),
+  groupName: z.string(),
+});
+
+export const itemImportInvalidRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  reason: z.string(),
+});
+
+export const itemImportPreviewSummarySchema = z.object({
+  totalRows: z.number().int().nonnegative(),
+  readyCount: z.number().int().nonnegative(),
+  existingCount: z.number().int().nonnegative(),
+  duplicateCodeCount: z.number().int().nonnegative(),
+  unknownUnitCount: z.number().int().nonnegative(),
+  unknownGroupCount: z.number().int().nonnegative(),
+  invalidRowCount: z.number().int().nonnegative(),
+});
+
+export const itemImportPreviewResponseSchema = z.object({
+  ready: z.array(itemImportReadyRowSchema),
+  existing: z.array(itemImportExistingRowSchema),
+  duplicateCodes: z.array(itemImportDuplicateCodeSchema),
+  unknownUnits: z.array(itemImportUnknownUnitRowSchema),
+  unknownGroups: z.array(itemImportUnknownGroupRowSchema),
+  invalidRows: z.array(itemImportInvalidRowSchema),
+  summary: itemImportPreviewSummarySchema,
+});
+
+export const itemImportConfirmItemSchema = z
+  .object({
+    itemCode: itemCodeSchema,
+    itemName: itemNameSchema,
+    unitId: z.string().uuid("Invalid unit id"),
+    itemGroupId: z.string().uuid("Invalid item group id"),
+    returnType: returnTypeSchema.default("NON_RETURNABLE"),
+    purchaseRate: purchaseRateSchema,
+    remarks: remarksInputSchema,
+    isActive: z.boolean().optional().default(true),
+    isRequestable: z.boolean().optional().default(true),
+    isIssuable: z.boolean().optional().default(true),
+    trackSerialNumber: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export const itemImportConfirmInputSchema = z.object({
+  items: z
+    .array(itemImportConfirmItemSchema)
+    .min(1, "Select at least one item to import")
+    .max(
+      ITEM_IMPORT_MAX_ROWS,
+      `Cannot import more than ${ITEM_IMPORT_MAX_ROWS} items at once`,
+    ),
+});
+
+export const itemImportConfirmResponseSchema = z.object({
+  importedCount: z.number().int().nonnegative(),
+  skippedExistingCount: z.number().int().nonnegative(),
+});

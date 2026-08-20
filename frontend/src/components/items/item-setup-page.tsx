@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CreateItemInput,
   GroupType,
@@ -22,6 +22,7 @@ import {
 } from "@/lib/api/items";
 import { fetchUnits } from "@/lib/api/units";
 import { ItemFormDialog, returnTypeLabel } from "./item-form-dialog";
+import { ItemImportDialog } from "./item-import-dialog";
 
 const PAGE_SIZE = 20;
 
@@ -57,7 +58,8 @@ export function ItemSetupPage() {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [saving, setSaving] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const loadRequestIdRef = useRef(0);
 
   useEffect(() => {
     async function loadFilterOptions() {
@@ -90,6 +92,8 @@ export function ItemSetupPage() {
   }, []);
 
   const loadItems = useCallback(async () => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
     setLoading(true);
     setLoadError(null);
     setIsUnavailable(false);
@@ -103,6 +107,10 @@ export function ItemSetupPage() {
       itemGroupId: itemGroupId || undefined,
       groupType: groupType || undefined,
     });
+
+    if (requestId !== loadRequestIdRef.current) {
+      return;
+    }
 
     if (!result.ok) {
       setItems([]);
@@ -126,10 +134,9 @@ export function ItemSetupPage() {
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
-      startTransition(() => {
-        setPage(1);
-        setSearch(searchInput.trim());
-      });
+      const nextSearch = searchInput.trim();
+      setPage(1);
+      setSearch(nextSearch);
     }, 300);
 
     return () => window.clearTimeout(handle);
@@ -230,13 +237,22 @@ export function ItemSetupPage() {
           </p>
         </div>
         {canMutateMasterData ? (
-        <button
-          type="button"
-          onClick={openCreateDialog}
-          className="shrink-0 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
-        >
-          Add New
-        </button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setImportDialogOpen(true)}
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+            >
+              Import Items
+            </button>
+            <button
+              type="button"
+              onClick={openCreateDialog}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            >
+              Add New
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -247,7 +263,7 @@ export function ItemSetupPage() {
             type="search"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search by code or name"
+            placeholder="Search by code, name, unit, or group"
             className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
           />
         </label>
@@ -533,6 +549,22 @@ export function ItemSetupPage() {
         }}
         onSubmitCreate={handleCreate}
         onSubmitEdit={handleEdit}
+      />
+
+      <ItemImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImported={(importedCount, skippedExistingCount) => {
+          setImportDialogOpen(false);
+          setFeedback({
+            type: "success",
+            message:
+              skippedExistingCount > 0
+                ? `Imported ${importedCount} item${importedCount === 1 ? "" : "s"}; skipped ${skippedExistingCount} existing.`
+                : `Imported ${importedCount} item${importedCount === 1 ? "" : "s"}.`,
+          });
+          void loadItems();
+        }}
       />
     </section>
   );

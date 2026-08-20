@@ -135,6 +135,18 @@ export {
   itemListQuerySchema,
   paginatedItemResponseSchema,
   itemIdSchema,
+  ITEM_IMPORT_MAX_ROWS,
+  itemImportReadyRowSchema,
+  itemImportExistingRowSchema,
+  itemImportDuplicateCodeSchema,
+  itemImportUnknownUnitRowSchema,
+  itemImportUnknownGroupRowSchema,
+  itemImportInvalidRowSchema,
+  itemImportPreviewSummarySchema,
+  itemImportPreviewResponseSchema,
+  itemImportConfirmItemSchema,
+  itemImportConfirmInputSchema,
+  itemImportConfirmResponseSchema,
 } from "./schemas/item.js";
 export type {
   Item,
@@ -147,6 +159,15 @@ export type {
   UpdateItemStatusInput,
   ItemListQuery,
   PaginatedItemResponse,
+  ItemImportReadyRow,
+  ItemImportExistingRow,
+  ItemImportDuplicateCode,
+  ItemImportUnknownUnitRow,
+  ItemImportUnknownGroupRow,
+  ItemImportInvalidRow,
+  ItemImportPreviewResponse,
+  ItemImportConfirmInput,
+  ItemImportConfirmResponse,
 } from "./types/item.js";
 
 export {

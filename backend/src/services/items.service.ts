@@ -71,6 +71,9 @@ function buildListFilters(query: ItemListQuery): SQL | undefined {
     const searchCondition = or(
       sql`${items.itemCode} ILIKE ${pattern} ESCAPE '\\'`,
       sql`${items.itemName} ILIKE ${pattern} ESCAPE '\\'`,
+      sql`${units.unitName} ILIKE ${pattern} ESCAPE '\\'`,
+      sql`${itemGroups.groupCode} ILIKE ${pattern} ESCAPE '\\'`,
+      sql`${itemGroups.groupName} ILIKE ${pattern} ESCAPE '\\'`,
     );
 
     if (searchCondition) {
@@ -227,16 +230,17 @@ export async function listItems(
       totalItems === 0 ? 0 : Math.ceil(totalItems / query.pageSize);
     const offset = (query.page - 1) * query.pageSize;
 
-    const listBase = getDb()
+    const listQuery = getDb()
       .select(itemSelect)
       .from(items)
       .innerJoin(units, eq(items.unitId, units.id))
-      .innerJoin(itemGroups, eq(items.itemGroupId, itemGroups.id))
+      .innerJoin(itemGroups, eq(items.itemGroupId, itemGroups.id));
+
+    const filteredList = where ? listQuery.where(where) : listQuery;
+    const rows = await filteredList
       .orderBy(asc(items.itemName), asc(items.id))
       .limit(query.pageSize)
       .offset(offset);
-
-    const rows = where ? await listBase.where(where) : await listBase;
 
     return {
       items: rows.map(toItem),

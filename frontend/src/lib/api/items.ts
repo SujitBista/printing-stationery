@@ -1,5 +1,8 @@
 import {
   createItemInputSchema,
+  itemImportConfirmInputSchema,
+  itemImportConfirmResponseSchema,
+  itemImportPreviewResponseSchema,
   paginatedItemResponseSchema,
   itemIdSchema,
   itemListQuerySchema,
@@ -7,6 +10,9 @@ import {
   updateItemInputSchema,
   updateItemStatusInputSchema,
   type CreateItemInput,
+  type ItemImportConfirmInput,
+  type ItemImportConfirmResponse,
+  type ItemImportPreviewResponse,
   type PaginatedItemResponse,
   type Item,
   type ItemListQuery,
@@ -196,5 +202,68 @@ export async function updateItemStatus(
       return { success: true, data: parsed.data };
     },
     "Failed to update item status",
+  );
+}
+
+export async function previewItemImport(
+  file: File,
+): Promise<ApiResult<ItemImportPreviewResponse>> {
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    return { ok: false, error: "Only .xlsx files are accepted.", status: 400 };
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return requestJson(
+    "/api/items/import/preview",
+    {
+      method: "POST",
+      body: formData,
+    },
+    (json) => {
+      const parsed = itemImportPreviewResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import preview response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to preview item import",
+  );
+}
+
+export async function confirmItemImport(
+  input: ItemImportConfirmInput,
+): Promise<ApiResult<ItemImportConfirmResponse>> {
+  const parsedInput = itemImportConfirmInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    const issue = parsedInput.error.issues[0];
+    return {
+      ok: false,
+      error: issue?.message ?? "Invalid item import request",
+      status: 400,
+    };
+  }
+
+  return requestJson(
+    "/api/items/import/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify(parsedInput.data),
+    },
+    (json) => {
+      const parsed = itemImportConfirmResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import confirm response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to import items",
   );
 }
