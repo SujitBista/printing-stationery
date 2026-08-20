@@ -15,6 +15,7 @@ import {
   updateUnitStatus,
 } from "@/lib/api/units";
 import { UnitFormDialog } from "./unit-form-dialog";
+import { UnitImportDialog } from "./unit-import-dialog";
 
 const PAGE_SIZE = 20;
 
@@ -39,6 +40,7 @@ export function UnitSetupPage() {
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
   const [saving, setSaving] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [, startTransition] = useTransition();
 
   const loadUnits = useCallback(async () => {
@@ -180,13 +182,22 @@ export function UnitSetupPage() {
           </p>
         </div>
         {canMutateMasterData ? (
-        <button
-          type="button"
-          onClick={openCreateDialog}
-          className="shrink-0 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
-        >
-          Add Unit
-        </button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setImportDialogOpen(true)}
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+            >
+              Import Units
+            </button>
+            <button
+              type="button"
+              onClick={openCreateDialog}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            >
+              Add Unit
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -360,6 +371,22 @@ export function UnitSetupPage() {
         }}
         onSubmitCreate={handleCreate}
         onSubmitEdit={handleEdit}
+      />
+
+      <UnitImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImported={(importedCount, skippedExistingCount) => {
+          setImportDialogOpen(false);
+          setFeedback({
+            type: "success",
+            message:
+              skippedExistingCount > 0
+                ? `Imported ${importedCount} unit${importedCount === 1 ? "" : "s"}; skipped ${skippedExistingCount} existing.`
+                : `Imported ${importedCount} unit${importedCount === 1 ? "" : "s"}.`,
+          });
+          void loadUnits();
+        }}
       />
     </section>
   );

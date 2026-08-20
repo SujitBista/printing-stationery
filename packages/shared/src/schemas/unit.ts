@@ -55,3 +55,62 @@ export const paginatedUnitResponseSchema = z.object({
 });
 
 export const unitIdSchema = z.string().uuid("Invalid unit id");
+
+export const UNIT_IMPORT_MAX_ROWS = 500;
+
+export const unitImportReadyRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  unitName: z.string(),
+  isActive: z.boolean(),
+});
+
+export const unitImportExistingRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  unitName: z.string(),
+});
+
+export const unitImportDuplicateNameSchema = z.object({
+  unitName: z.string(),
+  rowNumbers: z.array(z.number().int().positive()).min(2),
+});
+
+export const unitImportInvalidRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  reason: z.string(),
+});
+
+export const unitImportPreviewSummarySchema = z.object({
+  totalRows: z.number().int().nonnegative(),
+  readyCount: z.number().int().nonnegative(),
+  existingCount: z.number().int().nonnegative(),
+  duplicateNameCount: z.number().int().nonnegative(),
+  invalidRowCount: z.number().int().nonnegative(),
+});
+
+export const unitImportPreviewResponseSchema = z.object({
+  ready: z.array(unitImportReadyRowSchema),
+  existing: z.array(unitImportExistingRowSchema),
+  duplicateNames: z.array(unitImportDuplicateNameSchema),
+  invalidRows: z.array(unitImportInvalidRowSchema),
+  summary: unitImportPreviewSummarySchema,
+});
+
+export const unitImportConfirmUnitSchema = z.object({
+  unitName: unitNameSchema,
+  isActive: z.boolean().optional().default(true),
+});
+
+export const unitImportConfirmInputSchema = z.object({
+  units: z
+    .array(unitImportConfirmUnitSchema)
+    .min(1, "Select at least one unit to import")
+    .max(
+      UNIT_IMPORT_MAX_ROWS,
+      `Cannot import more than ${UNIT_IMPORT_MAX_ROWS} units at once`,
+    ),
+});
+
+export const unitImportConfirmResponseSchema = z.object({
+  importedCount: z.number().int().nonnegative(),
+  skippedExistingCount: z.number().int().nonnegative(),
+});

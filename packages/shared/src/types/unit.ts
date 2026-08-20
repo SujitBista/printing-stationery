@@ -7,6 +7,13 @@ import type {
   unitListQuerySchema,
   paginatedUnitResponseSchema,
   unitStatusFilterSchema,
+  unitImportReadyRowSchema,
+  unitImportExistingRowSchema,
+  unitImportDuplicateNameSchema,
+  unitImportInvalidRowSchema,
+  unitImportPreviewResponseSchema,
+  unitImportConfirmInputSchema,
+  unitImportConfirmResponseSchema,
 } from "../schemas/unit.js";
 
 export type Unit = z.infer<typeof unitSchema>;
@@ -19,4 +26,19 @@ export type UpdateUnitStatusInput = z.infer<
 export type UnitListQuery = z.infer<typeof unitListQuerySchema>;
 export type PaginatedUnitResponse = z.infer<
   typeof paginatedUnitResponseSchema
+>;
+export type UnitImportReadyRow = z.infer<typeof unitImportReadyRowSchema>;
+export type UnitImportExistingRow = z.infer<typeof unitImportExistingRowSchema>;
+export type UnitImportDuplicateName = z.infer<
+  typeof unitImportDuplicateNameSchema
+>;
+export type UnitImportInvalidRow = z.infer<typeof unitImportInvalidRowSchema>;
+export type UnitImportPreviewResponse = z.infer<
+  typeof unitImportPreviewResponseSchema
+>;
+export type UnitImportConfirmInput = z.infer<
+  typeof unitImportConfirmInputSchema
+>;
+export type UnitImportConfirmResponse = z.infer<
+  typeof unitImportConfirmResponseSchema
 >;

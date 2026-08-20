@@ -2,6 +2,9 @@ import {
   createUnitInputSchema,
   paginatedUnitResponseSchema,
   unitIdSchema,
+  unitImportConfirmInputSchema,
+  unitImportConfirmResponseSchema,
+  unitImportPreviewResponseSchema,
   unitListQuerySchema,
   unitSchema,
   updateUnitInputSchema,
@@ -9,6 +12,9 @@ import {
   type CreateUnitInput,
   type PaginatedUnitResponse,
   type Unit,
+  type UnitImportConfirmInput,
+  type UnitImportConfirmResponse,
+  type UnitImportPreviewResponse,
   type UnitListQuery,
   type UpdateUnitInput,
   type UpdateUnitStatusInput,
@@ -187,5 +193,68 @@ export async function updateUnitStatus(
       return { success: true, data: parsed.data };
     },
     "Failed to update unit status",
+  );
+}
+
+export async function previewUnitImport(
+  file: File,
+): Promise<ApiResult<UnitImportPreviewResponse>> {
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    return { ok: false, error: "Only .xlsx files are accepted.", status: 400 };
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return requestJson(
+    "/api/units/import/preview",
+    {
+      method: "POST",
+      body: formData,
+    },
+    (json) => {
+      const parsed = unitImportPreviewResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import preview response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to preview unit import",
+  );
+}
+
+export async function confirmUnitImport(
+  input: UnitImportConfirmInput,
+): Promise<ApiResult<UnitImportConfirmResponse>> {
+  const parsedInput = unitImportConfirmInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    const issue = parsedInput.error.issues[0];
+    return {
+      ok: false,
+      error: issue?.message ?? "Invalid unit import request",
+      status: 400,
+    };
+  }
+
+  return requestJson(
+    "/api/units/import/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify(parsedInput.data),
+    },
+    (json) => {
+      const parsed = unitImportConfirmResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import confirm response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to import units",
   );
 }

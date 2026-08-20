@@ -73,6 +73,16 @@ export {
   unitListQuerySchema,
   paginatedUnitResponseSchema,
   unitIdSchema,
+  UNIT_IMPORT_MAX_ROWS,
+  unitImportReadyRowSchema,
+  unitImportExistingRowSchema,
+  unitImportDuplicateNameSchema,
+  unitImportInvalidRowSchema,
+  unitImportPreviewSummarySchema,
+  unitImportPreviewResponseSchema,
+  unitImportConfirmUnitSchema,
+  unitImportConfirmInputSchema,
+  unitImportConfirmResponseSchema,
 } from "./schemas/unit.js";
 export type {
   Unit,
@@ -82,6 +92,13 @@ export type {
   UpdateUnitStatusInput,
   UnitListQuery,
   PaginatedUnitResponse,
+  UnitImportReadyRow,
+  UnitImportExistingRow,
+  UnitImportDuplicateName,
+  UnitImportInvalidRow,
+  UnitImportPreviewResponse,
+  UnitImportConfirmInput,
+  UnitImportConfirmResponse,
 } from "./types/unit.js";
 
 export {
