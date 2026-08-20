@@ -1,5 +1,8 @@
 import {
   branchIdSchema,
+  branchImportConfirmInputSchema,
+  branchImportConfirmResponseSchema,
+  branchImportPreviewResponseSchema,
   branchListQuerySchema,
   branchSchema,
   createBranchInputSchema,
@@ -7,6 +10,9 @@ import {
   updateBranchInputSchema,
   updateBranchStatusInputSchema,
   type Branch,
+  type BranchImportConfirmInput,
+  type BranchImportConfirmResponse,
+  type BranchImportPreviewResponse,
   type BranchListQuery,
   type CreateBranchInput,
   type PaginatedBranchResponse,
@@ -14,8 +20,6 @@ import {
   type UpdateBranchStatusInput,
 } from "@printing-stationery/shared";
 import { requestJson, type ApiResult } from "./client";
-
-
 
 function buildQueryString(query: BranchListQuery): string {
   const params = new URLSearchParams();
@@ -189,5 +193,68 @@ export async function updateBranchStatus(
       return { success: true, data: parsed.data };
     },
     "Failed to update branch status",
+  );
+}
+
+export async function previewBranchImport(
+  file: File,
+): Promise<ApiResult<BranchImportPreviewResponse>> {
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    return { ok: false, error: "Only .xlsx files are accepted.", status: 400 };
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return requestJson(
+    "/api/branches/import/preview",
+    {
+      method: "POST",
+      body: formData,
+    },
+    (json) => {
+      const parsed = branchImportPreviewResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import preview response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to preview branch import",
+  );
+}
+
+export async function confirmBranchImport(
+  input: BranchImportConfirmInput,
+): Promise<ApiResult<BranchImportConfirmResponse>> {
+  const parsedInput = branchImportConfirmInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    const issue = parsedInput.error.issues[0];
+    return {
+      ok: false,
+      error: issue?.message ?? "Invalid branch import request",
+      status: 400,
+    };
+  }
+
+  return requestJson(
+    "/api/branches/import/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify(parsedInput.data),
+    },
+    (json) => {
+      const parsed = branchImportConfirmResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import confirm response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to import branches",
   );
 }

@@ -48,6 +48,12 @@ export function canAccessItemRequests(
   return userHasAnyRole(user.roles, ["ADMIN", "MAKER", "CHECKER"]);
 }
 
+export function canAccessOpeningStock(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  return isAdmin(user);
+}
+
 export function hasRole(
   user: AuthenticatedUser | null | undefined,
   role: AppRole,

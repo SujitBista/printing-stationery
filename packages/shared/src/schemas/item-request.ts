@@ -277,6 +277,7 @@ export const itemRequestListItemSchema = z.object({
   pendingWith: itemRequestPersonSummarySchema.nullable(),
   canEdit: z.boolean(),
   allowedActions: z.array(itemRequestActionTypeSchema),
+  canCreateIssue: z.boolean(),
 });
 
 export const itemRequestSchema = itemRequestListItemSchema.extend({

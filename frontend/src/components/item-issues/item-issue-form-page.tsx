@@ -16,6 +16,7 @@ import {
   updateItemIssue,
 } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
+import { isItemIssueAccessDenied } from "@/lib/item-issues/permissions";
 import {
   formatDateTime,
   ITEM_ISSUE_STATUS_LABELS,
@@ -97,6 +98,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
@@ -105,10 +107,12 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
     async function load() {
       setLoading(true);
       setLoadError(null);
+      setAccessDenied(false);
 
       if (props.mode === "create") {
         const result = await fetchItemIssueEligibility(props.requestId);
         if (!result.ok) {
+          setAccessDenied(isItemIssueAccessDenied(result.status));
           setLoadError(result.error);
           setLoading(false);
           return;
@@ -128,6 +132,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
 
       const result = await fetchItemIssue(props.issueId);
       if (!result.ok) {
+        setAccessDenied(isItemIssueAccessDenied(result.status));
         setLoadError(result.error);
         setLoading(false);
         return;
@@ -277,9 +282,14 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
       {loading ? (
         <p className="mt-6 text-sm text-ink-muted">Loading item issue…</p>
       ) : loadError ? (
-        <p className="mt-6 border-l-2 border-danger pl-3 text-sm text-danger">
-          {loadError}
-        </p>
+        <div className="mt-6 border-l-2 border-danger pl-3">
+          {accessDenied ? (
+            <p className="font-medium text-danger">You are not authorized to create this item issue.</p>
+          ) : null}
+          <p className={`text-sm text-danger ${accessDenied ? "mt-1" : ""}`}>
+            {loadError}
+          </p>
+        </div>
       ) : request ? (
         <form
           onSubmit={(event) => void handleSaveDraft(event)}
@@ -297,6 +307,9 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 {issue
                   ? ITEM_ISSUE_STATUS_LABELS[issue.status]
                   : "Draft not yet created"}
+              </p>
+              <p className="mt-1 text-sm text-ink-muted">
+                Corporate Store Checker creates the issue
               </p>
             </div>
             {issue?.issueNumber ? (
@@ -498,7 +511,8 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               Submit Item Issue
             </h2>
             <p className="mt-2 text-sm text-ink-muted">
-              Submit this Item Issue to the Corporate Store Checker? You will not be able to edit it after submission.
+              Submit this Item Issue? You will not be able to edit it after
+              submission.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button

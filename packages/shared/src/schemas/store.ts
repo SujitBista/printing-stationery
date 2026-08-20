@@ -144,3 +144,4 @@ export const paginatedStoreResponseSchema = z.object({
 });
 
 export const storeIdSchema = z.string().uuid("Invalid store id");
+

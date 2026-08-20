@@ -21,8 +21,11 @@ const branchCodeSchema = z
 const branchNameSchema = z
   .string()
   .trim()
-  .min(2, "Branch name must be between 2 and 150 characters")
-  .max(150, "Branch name must be between 2 and 150 characters");
+  .refine(
+    (value) =>
+      value === "-" || (value.length >= 2 && value.length <= 150),
+    { message: "Branch name must be between 2 and 150 characters" },
+  );
 
 const addressInputSchema = z
   .union([z.string(), z.null(), z.undefined()])
@@ -100,3 +103,67 @@ export const paginatedBranchResponseSchema = z.object({
 });
 
 export const branchIdSchema = z.string().uuid("Invalid branch id");
+
+
+export const BRANCH_IMPORT_MAX_ROWS = 500;
+
+export const branchImportReadyRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  branchCode: z.string(),
+  branchName: z.string(),
+  branchType: branchTypeSchema,
+  address: z.string().nullable(),
+  isActive: z.boolean(),
+});
+
+export const branchImportExistingRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  branchCode: z.string(),
+  branchName: z.string(),
+});
+
+export const branchImportDuplicateCodeSchema = z.object({
+  branchCode: z.string(),
+  rowNumbers: z.array(z.number().int().positive()).min(2),
+});
+
+export const branchImportInvalidRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  reason: z.string(),
+});
+
+export const branchImportPreviewSummarySchema = z.object({
+  totalRows: z.number().int().nonnegative(),
+  readyCount: z.number().int().nonnegative(),
+  existingCount: z.number().int().nonnegative(),
+  duplicateCodeCount: z.number().int().nonnegative(),
+  invalidRowCount: z.number().int().nonnegative(),
+});
+
+export const branchImportPreviewResponseSchema = z.object({
+  ready: z.array(branchImportReadyRowSchema),
+  existing: z.array(branchImportExistingRowSchema),
+  duplicateCodes: z.array(branchImportDuplicateCodeSchema),
+  invalidRows: z.array(branchImportInvalidRowSchema),
+  summary: branchImportPreviewSummarySchema,
+});
+
+export const branchImportConfirmBranchSchema = z.object({
+  branchCode: branchCodeSchema,
+  branchName: branchNameSchema,
+  branchType: branchTypeSchema,
+  address: addressInputSchema,
+  isActive: z.boolean().optional().default(true),
+});
+
+export const branchImportConfirmInputSchema = z.object({
+  branches: z.array(branchImportConfirmBranchSchema).min(1, "Select at least one branch to import").max(
+    BRANCH_IMPORT_MAX_ROWS,
+    `Cannot import more than ${BRANCH_IMPORT_MAX_ROWS} branches at once`,
+  ),
+});
+
+export const branchImportConfirmResponseSchema = z.object({
+  importedCount: z.number().int().nonnegative(),
+  skippedExistingCount: z.number().int().nonnegative(),
+});

@@ -24,6 +24,18 @@ import type {
   UpdateItemIssueInput,
 } from "@printing-stationery/shared";
 import { userHasRole } from "@printing-stationery/shared";
+import { AppError } from "../utils/errors.js";
+import {
+  isItemIssueNumberUniqueViolation,
+  mapItemIssueDatabaseError,
+} from "../utils/db-errors.js";
+import {
+  ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+  NON_CORPORATE_SUPPLYING_STORE_MESSAGE,
+  actorMayOperateItemIssue,
+  isCorporateSupplyingStore,
+} from "./item-issue-authorization.js";
 import { getDb } from "../db/client.js";
 import {
   applicationUsers,
@@ -46,11 +58,6 @@ import { items, type ItemRow } from "../db/schema/items.js";
 import { stores, type StoreRow } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
 import { units } from "../db/schema/units.js";
-import { AppError } from "../utils/errors.js";
-import {
-  isItemIssueNumberUniqueViolation,
-  mapItemIssueDatabaseError,
-} from "../utils/db-errors.js";
 
 const ISSUE_NUMBER_RETRY_ATTEMPTS = 5;
 const STALE_ISSUE_MESSAGE = "This issue has changed. Refresh and try again.";
@@ -102,8 +109,8 @@ function isAdminUser(actor: AuthenticatedUser): boolean {
   return userHasRole(actor.roles, "ADMIN");
 }
 
-function isMakerUser(actor: AuthenticatedUser): boolean {
-  return userHasRole(actor.roles, "MAKER");
+function isCheckerUser(actor: AuthenticatedUser): boolean {
+  return userHasRole(actor.roles, "CHECKER");
 }
 
 function generateIssueNumber(): string {
@@ -184,8 +191,9 @@ function toPersonSummary(
   };
 }
 
-async function getActiveMakerAssignment(
+async function getActiveCheckerAssignment(
   applicationUserId: string,
+  storeId: string,
 ): Promise<StoreAssignmentContext | undefined> {
   const rows = await getDb()
     .select({
@@ -198,7 +206,8 @@ async function getActiveMakerAssignment(
     .innerJoin(branches, eq(stores.branchId, branches.id))
     .where(
       and(
-        eq(storeUsers.makerApplicationUserId, applicationUserId),
+        eq(storeUsers.supervisorApplicationUserId, applicationUserId),
+        eq(storeUsers.storeId, storeId),
         eq(storeUsers.isActive, true),
         eq(stores.isActive, true),
         eq(branches.isActive, true),
@@ -207,6 +216,24 @@ async function getActiveMakerAssignment(
     .limit(1);
 
   return rows[0];
+}
+
+async function listSupervisedStoreIds(applicationUserId: string): Promise<string[]> {
+  const rows = await getDb()
+    .select({ storeId: storeUsers.storeId })
+    .from(storeUsers)
+    .innerJoin(stores, eq(storeUsers.storeId, stores.id))
+    .innerJoin(branches, eq(stores.branchId, branches.id))
+    .where(
+      and(
+        eq(storeUsers.supervisorApplicationUserId, applicationUserId),
+        eq(storeUsers.isActive, true),
+        eq(stores.isActive, true),
+        eq(branches.isActive, true),
+      ),
+    );
+
+  return rows.map((row) => row.storeId);
 }
 
 async function assertActiveParticipant(
@@ -250,28 +277,30 @@ async function assertActiveParticipant(
   };
 }
 
-async function requireSupplyingStoreMaker(
+async function requireSupplyingStoreChecker(
   actor: AuthenticatedUser,
-  expectedStoreId?: string,
+  supplyingStoreId: string,
 ): Promise<StoreAssignmentContext> {
   if (isAdminUser(actor)) {
-    throw new AppError("Administrators cannot create or submit item issues.", 403);
+    throw new AppError(ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
-  if (!isMakerUser(actor)) {
-    throw new AppError("Only makers can create item issues.", 403);
+  if (!isCheckerUser(actor)) {
+    throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
 
-  await assertActiveParticipant(actor.id, "Maker");
-  const assignment = await getActiveMakerAssignment(actor.id);
+  await assertActiveParticipant(actor.id, "Checker");
+  const assignment = await getActiveCheckerAssignment(actor.id, supplyingStoreId);
   if (!assignment) {
-    throw new AppError(
-      "You are not assigned as an active maker of a store.",
-      403,
-    );
+    throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
 
-  if (expectedStoreId && assignment.store.id !== expectedStoreId) {
-    throw new AppError("You are not assigned as the maker of this store.", 403);
+  if (
+    !isCorporateSupplyingStore({
+      underStoreId: assignment.store.underStoreId,
+      branchType: assignment.branch.branchType,
+    })
+  ) {
+    throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
 
   return assignment;
@@ -343,6 +372,14 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
   if (!row.corporateStore.isActive) {
     throw new AppError("The supplying store is inactive.", 409);
   }
+  if (
+    !isCorporateSupplyingStore({
+      underStoreId: row.corporateStore.underStoreId,
+      branchType: row.corporateBranch.branchType,
+    })
+  ) {
+    throw new AppError(NON_CORPORATE_SUPPLYING_STORE_MESSAGE, 409);
+  }
 
   return row;
 }
@@ -406,7 +443,7 @@ async function buildAvailability(
   });
 }
 
-function canCreateIssueFromAvailability(
+export function canCreateIssueFromAvailability(
   availability: ItemIssueLineAvailability[],
 ): boolean {
   return availability.some(
@@ -414,7 +451,7 @@ function canCreateIssueFromAvailability(
   );
 }
 
-function validateIssueLinesAgainstAvailability(params: {
+export function validateIssueLinesAgainstAvailability(params: {
   lines: Array<{ requestLineId: string; issueQuantity: string }>;
   availability: ItemIssueLineAvailability[];
 }): void {
@@ -511,12 +548,11 @@ async function createDraftWithRetry(
 }
 
 async function loadIssueVisibilityIds(actor: AuthenticatedUser): Promise<string[]> {
-  const assignment = await getActiveMakerAssignment(actor.id);
-  if (!assignment) {
+  if (isAdminUser(actor) || !isCheckerUser(actor)) {
     return [];
   }
 
-  return [assignment.store.id];
+  return listSupervisedStoreIds(actor.id);
 }
 
 function issueListWhere(
@@ -531,10 +567,7 @@ function issueListWhere(
       conditions.push(sql`1 = 0`);
     } else {
       conditions.push(
-        or(
-          inArray(itemIssues.fromStoreId, visibleStoreIds),
-          eq(itemIssues.createdByApplicationUserId, actor.id),
-        )!,
+        inArray(itemIssues.fromStoreId, visibleStoreIds),
       );
     }
   }
@@ -618,14 +651,22 @@ type IssueHeaderRow = {
 
 function toIssueListItem(
   row: IssueHeaderRow,
-  assignmentStoreId?: string,
+  actor: AuthenticatedUser,
+  supervisedStoreIds: string[],
 ): ItemIssueListItem {
   const createdBy = toPersonSummary(row.createdByUser, row.createdByEmployee)!;
   const submittedBy = toPersonSummary(row.submittedByUser, row.submittedByEmployee);
   const canEdit =
     row.issue.status === "DRAFT" &&
-    assignmentStoreId !== undefined &&
-    row.issue.fromStoreId === assignmentStoreId;
+    isCorporateSupplyingStore({
+      underStoreId: row.fromStore.underStoreId,
+      branchType: row.fromBranch.branchType,
+    }) &&
+    actorMayOperateItemIssue({
+      actor,
+      supplyingStoreId: row.issue.fromStoreId,
+      supervisedStoreIds,
+    });
 
   return {
     id: row.issue.id,
@@ -652,7 +693,10 @@ export async function getItemIssueEligibility(
   actor: AuthenticatedUser,
 ): Promise<ItemIssueEligibility> {
   const request = await loadApprovedRequestOrThrow(requestId);
-  const assignment = await requireSupplyingStoreMaker(actor, request.corporateStore.id);
+  const assignment = await requireSupplyingStoreChecker(
+    actor,
+    request.corporateStore.id,
+  );
   const availability = await buildAvailability(requestId);
 
   const draftRows = await getDb()
@@ -739,15 +783,15 @@ export async function createItemIssueFromRequest(
   const availabilityByLine = new Map(
     eligibility.lines.map((line) => [line.requestLineId, line]),
   );
-  const assignment = await requireSupplyingStoreMaker(
-    actor,
-    eligibility.request.corporateStore?.id,
-  );
+  const supplyingStoreId = eligibility.request.corporateStore?.id;
+  if (!supplyingStoreId) {
+    throw new AppError(NON_CORPORATE_SUPPLYING_STORE_MESSAGE, 409);
+  }
 
   const createdId = await createDraftWithRetry(
     {
       requestId,
-      fromStoreId: assignment.store.id,
+      fromStoreId: supplyingStoreId,
       toStoreId: eligibility.request.requestingStore.id,
       status: "DRAFT",
       remarks: input.remarks,
@@ -775,7 +819,6 @@ export async function listItemIssues(
   query: ItemIssueListQuery,
 ): Promise<PaginatedItemIssueResponse> {
   const visibleStoreIds = await loadIssueVisibilityIds(actor);
-  const assignment = await getActiveMakerAssignment(actor.id);
   const where = issueListWhere(actor, visibleStoreIds, query);
 
   try {
@@ -804,7 +847,7 @@ export async function listItemIssues(
     const rows = where ? await listBase.where(where) : await listBase;
 
     return {
-      items: rows.map((row) => toIssueListItem(row, assignment?.store.id)),
+      items: rows.map((row) => toIssueListItem(row, actor, visibleStoreIds)),
       page: query.page,
       pageSize: query.pageSize,
       totalItems,
@@ -819,17 +862,13 @@ export async function getItemIssueById(
   issueId: string,
   actor: AuthenticatedUser,
 ): Promise<ItemIssue> {
-  const assignment = await getActiveMakerAssignment(actor.id);
   const visibleStoreIds = await loadIssueVisibilityIds(actor);
 
   const visibility = isAdminUser(actor)
     ? undefined
     : visibleStoreIds.length > 0
-      ? or(
-          inArray(itemIssues.fromStoreId, visibleStoreIds),
-          eq(itemIssues.createdByApplicationUserId, actor.id),
-        )
-      : eq(itemIssues.createdByApplicationUserId, actor.id);
+      ? inArray(itemIssues.fromStoreId, visibleStoreIds)
+      : sql`1 = 0`;
 
   const where = visibility
     ? and(eq(itemIssues.id, issueId), visibility)
@@ -862,7 +901,7 @@ export async function getItemIssueById(
     ]);
 
     return {
-      ...toIssueListItem(header, assignment?.store.id),
+      ...toIssueListItem(header, actor, visibleStoreIds),
       request: {
         id: requestHeader.request.id,
         requestNumber: requestHeader.request.requestNumber,
@@ -941,6 +980,11 @@ export async function updateItemIssue(
   input: UpdateItemIssueInput,
 ): Promise<ItemIssue> {
   const existing = await getItemIssueById(issueId, actor);
+  const supplyingStoreId = existing.request.corporateStore?.id;
+  if (!supplyingStoreId || existing.fromStore.id !== supplyingStoreId) {
+    throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
+  }
+  await requireSupplyingStoreChecker(actor, supplyingStoreId);
   if (!existing.canEdit) {
     throw new AppError("This issue cannot be edited.", 403);
   }
@@ -1066,7 +1110,10 @@ export async function submitItemIssue(
         throw new AppError("The supplying store is inactive.", 409);
       }
 
-      await requireSupplyingStoreMaker(actor, issue.fromStoreId);
+      await requireSupplyingStoreChecker(actor, requestRow.corporateStore.id);
+      if (issue.fromStoreId !== requestRow.corporateStore.id) {
+        throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
+      }
 
       const issueLineRows = await tx
         .select({

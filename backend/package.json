@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
+    "test": "tsx --test --test-concurrency=1 --env-file=../.env --env-file=.env \"src/**/*.test.ts\"",
     "db:generate": "NODE_OPTIONS='--import tsx' drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "auth:bootstrap-admin": "tsx --env-file=../.env --env-file=.env src/scripts/bootstrap-admin.ts",

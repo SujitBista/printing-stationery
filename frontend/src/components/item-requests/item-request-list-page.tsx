@@ -408,6 +408,14 @@ export function ItemRequestListPage() {
                           >
                             View
                           </Link>
+                          {request.canCreateIssue ? (
+                            <Link
+                              href={`/requests/item-requests/${request.id}/issue`}
+                              className="text-accent hover:underline"
+                            >
+                              Create Item Issue
+                            </Link>
+                          ) : null}
                           {request.canEdit ? (
                             <Link
                               href={`/requests/item-requests/${request.id}/edit`}

@@ -13,6 +13,7 @@ import {
 } from "@/lib/api/item-requests";
 import { fetchItemIssueEligibility } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
+import { shouldShowCreateItemIssueButton } from "@/lib/item-issues/permissions";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import {
   formatDateTime,
@@ -79,11 +80,17 @@ export function ItemRequestDetailPage() {
 
     setRequest(result.data);
     setCanCreateIssue(false);
-    if (result.data.status === "APPROVED") {
+    if (result.data.canCreateIssue) {
       const eligibility = await fetchItemIssueEligibility(result.data.id);
-      if (eligibility.ok && eligibility.data.canCreate) {
-        setCanCreateIssue(true);
-      }
+      setCanCreateIssue(
+        shouldShowCreateItemIssueButton({
+          requestCanCreateIssue: result.data.canCreateIssue,
+          eligibilityOk: eligibility.ok,
+          eligibilityCanCreate: eligibility.ok
+            ? eligibility.data.canCreate
+            : false,
+        }),
+      );
     }
     setLoading(false);
   }, [params.id]);

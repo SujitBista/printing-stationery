@@ -24,7 +24,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Dashboard", href: "/" },
       { label: "Items", href: "#", soon: true },
       { label: "Purchases", href: "#", soon: true },
-      { label: "Stock", href: "#", soon: true },
+      { label: "Opening Stock", href: "/stock/opening-stock", adminSetup: true },
       { label: "Requests", href: "/requests/item-requests" },
       { label: "Approvals", href: "#", soon: true },
     ],
@@ -60,7 +60,8 @@ type SidebarProps = {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { canReadMasterData, isAdmin, canAccessItemRequests } = useAuth();
+  const { canReadMasterData, isAdmin, canAccessItemRequests, canAccessOpeningStock } =
+    useAuth();
 
   return (
     <>
@@ -90,8 +91,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   item.href !== "/requests/item-requests" ||
                   canAccessItemRequests,
               );
+            const filteredItems = items.filter(
+              (item) => item.href !== "/stock/opening-stock" || canAccessOpeningStock,
+            );
 
-            if (items.length === 0) {
+            if (filteredItems.length === 0) {
               return null;
             }
 
@@ -101,7 +105,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   {section.title}
                 </p>
                 <div className="flex flex-col gap-1">
-                  {items.map((item) => {
+                  {filteredItems.map((item) => {
                     const isActive =
                       !item.soon &&
                       (item.href === "/"

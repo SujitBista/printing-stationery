@@ -8,6 +8,13 @@ import type {
   paginatedBranchResponseSchema,
   branchTypeSchema,
   branchStatusFilterSchema,
+  branchImportReadyRowSchema,
+  branchImportExistingRowSchema,
+  branchImportDuplicateCodeSchema,
+  branchImportInvalidRowSchema,
+  branchImportPreviewResponseSchema,
+  branchImportConfirmInputSchema,
+  branchImportConfirmResponseSchema,
 } from "../schemas/branch.js";
 
 export type Branch = z.infer<typeof branchSchema>;
@@ -21,4 +28,21 @@ export type UpdateBranchStatusInput = z.infer<
 export type BranchListQuery = z.infer<typeof branchListQuerySchema>;
 export type PaginatedBranchResponse = z.infer<
   typeof paginatedBranchResponseSchema
+>;
+export type BranchImportReadyRow = z.infer<typeof branchImportReadyRowSchema>;
+export type BranchImportExistingRow = z.infer<
+  typeof branchImportExistingRowSchema
+>;
+export type BranchImportDuplicateCode = z.infer<
+  typeof branchImportDuplicateCodeSchema
+>;
+export type BranchImportInvalidRow = z.infer<typeof branchImportInvalidRowSchema>;
+export type BranchImportPreviewResponse = z.infer<
+  typeof branchImportPreviewResponseSchema
+>;
+export type BranchImportConfirmInput = z.infer<
+  typeof branchImportConfirmInputSchema
+>;
+export type BranchImportConfirmResponse = z.infer<
+  typeof branchImportConfirmResponseSchema
 >;

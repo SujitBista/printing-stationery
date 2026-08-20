@@ -84,3 +84,24 @@ export {
   type ItemIssueLineRow,
   type NewItemIssueLineRow,
 } from "./item-issues.js";
+
+export {
+  openingStockSourceTypeEnum,
+  openingStockBatchStatusEnum,
+  openingStockMappingStatusEnum,
+  openingStockMappingEntityTypeEnum,
+  stockLedgerMovementTypeEnum,
+  stockLedgerReferenceTypeEnum,
+  openingStockBatches,
+  openingStockLines,
+  openingStockNameMappings,
+  stockLedger,
+  type OpeningStockBatchRow,
+  type NewOpeningStockBatchRow,
+  type OpeningStockLineRow,
+  type NewOpeningStockLineRow,
+  type OpeningStockNameMappingRow,
+  type NewOpeningStockNameMappingRow,
+  type StockLedgerRow,
+  type NewStockLedgerRow,
+} from "./opening-stocks.js";

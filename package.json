@@ -12,6 +12,7 @@
     "build": "npm run build -w @printing-stationery/shared && npm run build -w @printing-stationery/backend && npm run build -w @printing-stationery/frontend",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run build -w @printing-stationery/shared && npm run typecheck -w @printing-stationery/shared && npm run typecheck -w @printing-stationery/backend && npm run typecheck -w @printing-stationery/frontend",
+    "test": "npm run test --workspaces --if-present",
     "clean": "rm -rf packages/shared/dist backend/dist frontend/.next"
   },
   "devDependencies": {

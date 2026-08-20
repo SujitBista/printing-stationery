@@ -56,6 +56,10 @@ import {
   isItemRequestNumberUniqueViolation,
   mapItemRequestDatabaseError,
 } from "../utils/db-errors.js";
+import {
+  actorMayOperateItemIssue,
+  requestAllowsItemIssueCreation,
+} from "./item-issue-authorization.js";
 
 const REQUEST_NUMBER_RETRY_ATTEMPTS = 5;
 const STALE_REQUEST_MESSAGE =
@@ -758,6 +762,7 @@ type HeaderJoinedRow = {
 function toListItem(
   row: HeaderJoinedRow,
   actor: AuthenticatedUser,
+  supervisedStoreIds: string[],
 ): ItemRequestListItem {
   const createdBy = toPersonSummary(row.createdByUser, row.createdByEmployee)!;
   const branchChecker = toPersonSummary(
@@ -772,6 +777,26 @@ function toListItem(
     row.corporateCheckerUser,
     row.corporateCheckerEmployee,
   );
+  const supplyingStoreId = row.request.corporateStoreId;
+  const canCreateIssue =
+    requestAllowsItemIssueCreation({
+      requestStatus: row.request.status,
+      supplyingStoreId,
+      supplyingStore:
+        row.corporateStore && row.corporateBranch
+          ? {
+              id: row.corporateStore.id,
+              underStoreId: row.corporateStore.underStoreId,
+              branchType: row.corporateBranch.branchType,
+            }
+          : null,
+    }) &&
+    supplyingStoreId !== null &&
+    actorMayOperateItemIssue({
+      actor,
+      supplyingStoreId,
+      supervisedStoreIds,
+    });
 
   return {
     id: row.request.id,
@@ -796,6 +821,7 @@ function toListItem(
       corporateChecker,
     }),
     canEdit: canEditRequest(row.request, actor),
+    canCreateIssue,
     allowedActions: computeAllowedActions(row.request, actor),
   };
 }
@@ -1024,7 +1050,9 @@ export async function listItemRequests(
     const rows = where ? await listBase.where(where) : await listBase;
 
     return {
-      items: (rows as HeaderJoinedRow[]).map((row) => toListItem(row, actor)),
+      items: (rows as HeaderJoinedRow[]).map((row) =>
+        toListItem(row, actor, supervisedStoreIds),
+      ),
       page: query.page,
       pageSize: query.pageSize,
       totalItems,
@@ -1041,7 +1069,10 @@ export async function getItemRequestById(
 ): Promise<ItemRequest> {
   try {
     const header = await getVisibleHeaderRow(id, actor);
-    const listItem = toListItem(header, actor);
+    const supervisedStoreIds = isAdminUser(actor)
+      ? []
+      : await listSupervisedStoreIds(actor.id);
+    const listItem = toListItem(header, actor, supervisedStoreIds);
 
     const lineRows = await getDb()
       .select({
