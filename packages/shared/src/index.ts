@@ -182,6 +182,18 @@ export {
   storeListQuerySchema,
   paginatedStoreResponseSchema,
   storeIdSchema,
+  STORE_IMPORT_MAX_ROWS,
+  storeImportReadyRowSchema,
+  storeImportExistingRowSchema,
+  storeImportDuplicateCodeSchema,
+  storeImportUnknownBranchRowSchema,
+  storeImportUnknownUnderStoreRowSchema,
+  storeImportInvalidRowSchema,
+  storeImportPreviewSummarySchema,
+  storeImportPreviewResponseSchema,
+  storeImportConfirmStoreSchema,
+  storeImportConfirmInputSchema,
+  storeImportConfirmResponseSchema,
 } from "./schemas/store.js";
 export type {
   Store,
@@ -194,6 +206,15 @@ export type {
   UpdateStoreStatusInput,
   StoreListQuery,
   PaginatedStoreResponse,
+  StoreImportReadyRow,
+  StoreImportExistingRow,
+  StoreImportDuplicateCode,
+  StoreImportUnknownBranchRow,
+  StoreImportUnknownUnderStoreRow,
+  StoreImportInvalidRow,
+  StoreImportPreviewResponse,
+  StoreImportConfirmInput,
+  StoreImportConfirmResponse,
 } from "./types/store.js";
 
 export {

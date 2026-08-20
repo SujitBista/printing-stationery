@@ -2,6 +2,9 @@ import {
   createStoreInputSchema,
   paginatedStoreResponseSchema,
   storeIdSchema,
+  storeImportConfirmInputSchema,
+  storeImportConfirmResponseSchema,
+  storeImportPreviewResponseSchema,
   storeListQuerySchema,
   storeSchema,
   updateStoreInputSchema,
@@ -9,6 +12,9 @@ import {
   type CreateStoreInput,
   type PaginatedStoreResponse,
   type Store,
+  type StoreImportConfirmInput,
+  type StoreImportConfirmResponse,
+  type StoreImportPreviewResponse,
   type StoreListQuery,
   type UpdateStoreInput,
   type UpdateStoreStatusInput,
@@ -154,6 +160,69 @@ export async function updateStore(
       return { success: true, data: parsed.data };
     },
     "Failed to update store",
+  );
+}
+
+export async function previewStoreImport(
+  file: File,
+): Promise<ApiResult<StoreImportPreviewResponse>> {
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    return { ok: false, error: "Only .xlsx files are accepted.", status: 400 };
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return requestJson(
+    "/api/stores/import/preview",
+    {
+      method: "POST",
+      body: formData,
+    },
+    (json) => {
+      const parsed = storeImportPreviewResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import preview response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to preview store import",
+  );
+}
+
+export async function confirmStoreImport(
+  input: StoreImportConfirmInput,
+): Promise<ApiResult<StoreImportConfirmResponse>> {
+  const parsedInput = storeImportConfirmInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    const issue = parsedInput.error.issues[0];
+    return {
+      ok: false,
+      error: issue?.message ?? "Invalid store import request",
+      status: 400,
+    };
+  }
+
+  return requestJson(
+    "/api/stores/import/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify(parsedInput.data),
+    },
+    (json) => {
+      const parsed = storeImportConfirmResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Import confirm response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to import stores",
   );
 }
 

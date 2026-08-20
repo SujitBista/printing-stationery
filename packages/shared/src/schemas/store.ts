@@ -145,3 +145,104 @@ export const paginatedStoreResponseSchema = z.object({
 
 export const storeIdSchema = z.string().uuid("Invalid store id");
 
+export const STORE_IMPORT_MAX_ROWS = 500;
+
+export const storeImportReadyRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  storeCode: z.string(),
+  storeName: z.string(),
+  branchId: z.string().uuid(),
+  branchName: z.string(),
+  underStoreId: z.string().uuid().nullable(),
+  underStoreName: z.string().nullable(),
+  allowTransfer: z.boolean(),
+  allowDepartmentIssue: z.boolean(),
+  isActive: z.boolean(),
+});
+
+export const storeImportExistingRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  storeCode: z.string(),
+  storeName: z.string(),
+});
+
+export const storeImportDuplicateCodeSchema = z.object({
+  storeCode: z.string(),
+  rowNumbers: z.array(z.number().int().positive()).min(2),
+});
+
+export const storeImportUnknownBranchRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  storeCode: z.string(),
+  branchName: z.string(),
+});
+
+export const storeImportUnknownUnderStoreRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  storeCode: z.string(),
+  underStoreName: z.string(),
+});
+
+export const storeImportInvalidRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  reason: z.string(),
+});
+
+export const storeImportPreviewSummarySchema = z.object({
+  totalRows: z.number().int().nonnegative(),
+  readyCount: z.number().int().nonnegative(),
+  existingCount: z.number().int().nonnegative(),
+  duplicateCodeCount: z.number().int().nonnegative(),
+  unknownBranchCount: z.number().int().nonnegative(),
+  unknownUnderStoreCount: z.number().int().nonnegative(),
+  invalidRowCount: z.number().int().nonnegative(),
+});
+
+export const storeImportPreviewResponseSchema = z.object({
+  ready: z.array(storeImportReadyRowSchema),
+  existing: z.array(storeImportExistingRowSchema),
+  duplicateCodes: z.array(storeImportDuplicateCodeSchema),
+  unknownBranches: z.array(storeImportUnknownBranchRowSchema),
+  unknownUnderStores: z.array(storeImportUnknownUnderStoreRowSchema),
+  invalidRows: z.array(storeImportInvalidRowSchema),
+  summary: storeImportPreviewSummarySchema,
+});
+
+export const storeImportConfirmStoreSchema = z
+  .object({
+    storeCode: storeCodeSchema,
+    storeName: storeNameSchema,
+    branchId: z.string().uuid("Invalid branch id"),
+    underStoreId: underStoreIdCreateSchema.optional().default(null),
+    underStoreName: z
+      .union([z.string(), z.null(), z.undefined()])
+      .transform((value) => {
+        if (value == null) {
+          return null;
+        }
+        const trimmed = value.trim();
+        return trimmed.length === 0 ? null : trimmed;
+      })
+      .optional()
+      .default(null),
+    allowTransfer: z.boolean().optional().default(false),
+    allowDepartmentIssue: z.boolean().optional().default(false),
+    isActive: z.boolean().optional().default(true),
+  })
+  .strict();
+
+export const storeImportConfirmInputSchema = z.object({
+  stores: z
+    .array(storeImportConfirmStoreSchema)
+    .min(1, "Select at least one store to import")
+    .max(
+      STORE_IMPORT_MAX_ROWS,
+      `Cannot import more than ${STORE_IMPORT_MAX_ROWS} stores at once`,
+    ),
+});
+
+export const storeImportConfirmResponseSchema = z.object({
+  importedCount: z.number().int().nonnegative(),
+  skippedExistingCount: z.number().int().nonnegative(),
+});
+
