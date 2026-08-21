@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import type {
   AuthenticatedUser,
@@ -8,6 +8,7 @@ import type {
   OpeningStockBatchSummary,
   OpeningStockItemSummary,
   OpeningStockListQuery,
+  OpeningStockMappingChoice,
   OpeningStockMappingStatus,
   OpeningStockPostResult,
   OpeningStockPreview,
@@ -26,6 +27,7 @@ import {
   items,
   openingStockBatches,
   openingStockLines,
+  openingStockNameMappings,
   stockLedger,
   stores,
   units,
@@ -33,12 +35,64 @@ import {
 import { AppError } from "../utils/errors.js";
 import { databaseUnavailableError, isDatabaseUnavailableError } from "../utils/db-errors.js";
 
+const MAX_IMPORT_FILE_BYTES = 3 * 1024 * 1024;
 const HISTORICAL_CUTOVER_WARNING =
-  "This cutover date is before today. Confirm this is intentional before posting.";
+  "This report ends before today. Treat it as a development/test migration unless final cutover is explicitly confirmed and no later legacy transactions exist.";
 const IN_TRANSIT_WARNING =
-  "Rows with In Transit quantity were detected and will not be posted as opening stock.";
-const MASTER_DATA_REQUIRED_MESSAGE =
-  "Create at least one store name in Store Setup and one item name in Item Setup before creating opening stock.";
+  "Rows with In Transit quantity were detected. Outstanding In Transit must be migrated separately from a detailed legacy transfer export.";
+
+type ParsedLegacyRow = {
+  sourceRowNumber: number;
+  legacyStoreName: string;
+  legacyCategoryName: string;
+  legacyItemName: string;
+  legacyUnitName: string;
+  itemRate: string;
+  openingQuantity: string;
+  openingAmount: string;
+  purchaseQuantity: string;
+  purchaseAmount: string;
+  receivedQuantity: string;
+  receivedAmount: string;
+  consumptionQuantity: string;
+  consumptionAmount: string;
+  transferQuantity: string;
+  transferAmount: string;
+  inTransitQuantity: string;
+  inTransitAmount: string;
+  closingQuantity: string;
+  closingAmount: string;
+};
+
+type ParsedLegacyReport = {
+  reportTitle: string | null;
+  sourceReportFromDate: string | null;
+  sourceReportToDate: string | null;
+  rows: ParsedLegacyRow[];
+  storeNames: string[];
+};
+
+type MappingContext = {
+  storesByNormalized: Map<string, Array<{ id: string; storeCode: string; storeName: string; isActive: boolean }>>;
+  itemsByNormalized: Map<
+    string,
+    Array<{
+      id: string;
+      itemCode: string;
+      itemName: string;
+      isActive: boolean;
+      unitId: string;
+      unitName: string;
+      unitActive: boolean;
+    }>
+  >;
+  unitsByNormalized: Map<string, Array<{ id: string; unitName: string; isActive: boolean }>>;
+  persistedMappings: {
+    store: Map<string, string>;
+    item: Map<string, string>;
+    unit: Map<string, string>;
+  };
+};
 
 function isAdmin(user: AuthenticatedUser): boolean {
   return user.roles.includes("ADMIN");
@@ -50,8 +104,50 @@ function requireOpeningStockAdmin(actor: AuthenticatedUser): void {
   }
 }
 
+function normalizeLegacyName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function decodeHtml(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .trim();
+}
+
+function parseFlexibleDate(value: string): Date {
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) {
+    throw new AppError("Invalid report date in legacy file.", 400);
+  }
+  const [, day, month, year] = match;
+  return new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+}
+
 function formatDateOnly(value: Date | null): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function parseDateRangeFromTitle(title: string | null): {
+  fromDate: Date | null;
+  toDate: Date | null;
+} {
+  if (!title) {
+    return { fromDate: null, toDate: null };
+  }
+  const match = title.match(/Period:\s*(\d{2}\/\d{2}\/\d{4})\s+and\s+(\d{2}\/\d{2}\/\d{4})/i);
+  if (!match) {
+    return { fromDate: null, toDate: null };
+  }
+  return {
+    fromDate: parseFlexibleDate(match[1]!),
+    toDate: parseFlexibleDate(match[2]!),
+  };
 }
 
 function stripCommas(value: string): string {
@@ -64,7 +160,7 @@ function normalizeNumericCell(value: string): string {
     return "0";
   }
   if (!/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
-    throw new AppError(`Invalid numeric value "${value}".`, 400);
+    throw new AppError(`Invalid numeric value "${value}" in legacy file.`, 400);
   }
   const [wholePart = "0", fraction = ""] = trimmed.split(".");
   const normalizedWhole = wholePart.replace(/^(-?)0+(?=\d)/, "$1") || "0";
@@ -102,6 +198,200 @@ function multiplyQuantityRateToAmount(quantity: string, rate: string): string {
   const productScaled8 = quantityScaled * rateScaled;
   const roundedToCents = (productScaled8 + 500_000n) / 1_000_000n;
   return formatScaled(roundedToCents, 2);
+}
+
+function extractRowsFromHtml(html: string): string[] {
+  return [...html.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)].map((match) => match[0]);
+}
+
+function extractCells(rowHtml: string): string[] {
+  return [...rowHtml.matchAll(/<(?:td|th)\b[^>]*>([\s\S]*?)<\/(?:td|th)>/gi)].map((match) =>
+    decodeHtml(match[1] ?? ""),
+  );
+}
+
+export function parseLegacyOpeningStockHtml(
+  fileBuffer: Buffer,
+  sourceFilename = "ConsolidateStockRateWise.xls",
+): ParsedLegacyReport {
+  if (fileBuffer.byteLength > MAX_IMPORT_FILE_BYTES) {
+    throw new AppError("Legacy opening-stock file exceeds the 3 MB limit.", 400);
+  }
+
+  const html = fileBuffer.toString("utf8");
+  if (!/<html[\s>]/i.test(html) || !/<table[\s>]/i.test(html)) {
+    throw new AppError("Unsupported legacy opening-stock file content.", 400);
+  }
+
+  if (!sourceFilename.toLowerCase().endsWith(".xls")) {
+    throw new AppError("Only the legacy .xls HTML export is accepted.", 400);
+  }
+
+  const titleMatch = html.match(
+    /Consolidate Stock Report for the Period:\s*([^<]+)/i,
+  );
+  const reportTitle = titleMatch?.[0]?.trim() ?? null;
+  const { fromDate, toDate } = parseDateRangeFromTitle(reportTitle);
+
+  const rows: ParsedLegacyRow[] = [];
+  const storeNames = new Set<string>();
+  let currentStore: string | null = null;
+  let currentCategory: string | null = null;
+
+  for (const rowHtml of extractRowsFromHtml(html)) {
+    if (/nim-report-section-header1/i.test(rowHtml)) {
+      const header = extractCells(rowHtml)[0];
+      if (header) {
+        currentStore = header;
+        storeNames.add(header);
+      }
+      continue;
+    }
+
+    if (/nim-report-section-header2/i.test(rowHtml)) {
+      const header = extractCells(rowHtml)[0];
+      if (header) {
+        currentCategory = header;
+      }
+      continue;
+    }
+
+    if (/nim-section-footer/i.test(rowHtml)) {
+      continue;
+    }
+
+    const cells = extractCells(rowHtml);
+    if (cells.length !== 18) {
+      continue;
+    }
+
+    if (
+      cells[0] === "SrNo" ||
+      !/^\d+$/.test(cells[0] ?? "") ||
+      !currentStore ||
+      !currentCategory
+    ) {
+      continue;
+    }
+
+    rows.push({
+      sourceRowNumber: Number(cells[0]),
+      legacyStoreName: currentStore,
+      legacyCategoryName: currentCategory,
+      legacyItemName: cells[1] ?? "",
+      legacyUnitName: cells[2] ?? "",
+      itemRate: normalizeNumericCell(cells[3] ?? "0"),
+      openingQuantity: normalizeNumericCell(cells[4] ?? "0"),
+      openingAmount: normalizeNumericCell(cells[5] ?? "0"),
+      purchaseQuantity: normalizeNumericCell(cells[6] ?? "0"),
+      purchaseAmount: normalizeNumericCell(cells[7] ?? "0"),
+      receivedQuantity: normalizeNumericCell(cells[8] ?? "0"),
+      receivedAmount: normalizeNumericCell(cells[9] ?? "0"),
+      consumptionQuantity: normalizeNumericCell(cells[10] ?? "0"),
+      consumptionAmount: normalizeNumericCell(cells[11] ?? "0"),
+      transferQuantity: normalizeNumericCell(cells[12] ?? "0"),
+      transferAmount: normalizeNumericCell(cells[13] ?? "0"),
+      inTransitQuantity: normalizeNumericCell(cells[14] ?? "0"),
+      inTransitAmount: normalizeNumericCell(cells[15] ?? "0"),
+      closingQuantity: normalizeNumericCell(cells[16] ?? "0"),
+      closingAmount: normalizeNumericCell(cells[17] ?? "0"),
+    });
+  }
+
+  if (rows.length === 0) {
+    throw new AppError("No detail rows were found in the legacy opening-stock file.", 400);
+  }
+
+  return {
+    reportTitle,
+    sourceReportFromDate: formatDateOnly(fromDate),
+    sourceReportToDate: formatDateOnly(toDate),
+    rows,
+    storeNames: [...storeNames],
+  };
+}
+
+function summarizeReconciliation(row: ParsedLegacyRow): boolean {
+  const left =
+    parseScaled(row.openingQuantity, 4) +
+    parseScaled(row.purchaseQuantity, 4) +
+    parseScaled(row.receivedQuantity, 4) -
+    parseScaled(row.consumptionQuantity, 4) -
+    parseScaled(row.transferQuantity, 4);
+  const right = parseScaled(row.closingQuantity, 4);
+  return left === right;
+}
+
+async function loadMappingContext(): Promise<MappingContext> {
+  const [storeRows, itemRows, unitRows, mappingRows] = await Promise.all([
+    getDb()
+      .select({
+        id: stores.id,
+        storeCode: stores.storeCode,
+        storeName: stores.storeName,
+        isActive: stores.isActive,
+      })
+      .from(stores),
+    getDb()
+      .select({
+        id: items.id,
+        itemCode: items.itemCode,
+        itemName: items.itemName,
+        isActive: items.isActive,
+        unitId: items.unitId,
+        unitName: units.unitName,
+        unitActive: units.isActive,
+      })
+      .from(items)
+      .innerJoin(units, eq(items.unitId, units.id)),
+    getDb()
+      .select({
+        id: units.id,
+        unitName: units.unitName,
+        isActive: units.isActive,
+      })
+      .from(units),
+    getDb().select().from(openingStockNameMappings),
+  ]);
+
+  const byNormalized = <T>(rows: T[], getName: (row: T) => string) => {
+    const map = new Map<string, T[]>();
+    for (const row of rows) {
+      const key = normalizeLegacyName(getName(row));
+      const list = map.get(key);
+      if (list) {
+        list.push(row);
+      } else {
+        map.set(key, [row]);
+      }
+    }
+    return map;
+  };
+
+  const persistedMappings = {
+    store: new Map<string, string>(),
+    item: new Map<string, string>(),
+    unit: new Map<string, string>(),
+  };
+
+  for (const mapping of mappingRows) {
+    if (mapping.entityType === "STORE" && mapping.storeId) {
+      persistedMappings.store.set(mapping.normalizedLegacyName, mapping.storeId);
+    }
+    if (mapping.entityType === "ITEM" && mapping.itemId) {
+      persistedMappings.item.set(mapping.normalizedLegacyName, mapping.itemId);
+    }
+    if (mapping.entityType === "UNIT" && mapping.unitId) {
+      persistedMappings.unit.set(mapping.normalizedLegacyName, mapping.unitId);
+    }
+  }
+
+  return {
+    storesByNormalized: byNormalized(storeRows, (row) => row.storeName),
+    itemsByNormalized: byNormalized(itemRows, (row) => row.itemName),
+    unitsByNormalized: byNormalized(unitRows, (row) => row.unitName),
+    persistedMappings,
+  };
 }
 
 async function getOpeningStockBatchSummaryById(id: string): Promise<OpeningStockBatchSummary> {
@@ -168,8 +458,25 @@ async function getOpeningStockBatchSummaryById(id: string): Promise<OpeningStock
 async function mapLineRow(
   line: typeof openingStockLines.$inferSelect,
 ): Promise<OpeningStockBatchLine> {
-  const [storeRow, itemRow, unitRow] = await Promise.all([
-    line.storeId
+  const lines = await mapLineRows([line]);
+  return lines[0]!;
+}
+
+async function mapLineRows(
+  lineRows: Array<typeof openingStockLines.$inferSelect>,
+): Promise<OpeningStockBatchLine[]> {
+  const storeIds = [
+    ...new Set(lineRows.map((line) => line.storeId).filter((id): id is string => Boolean(id))),
+  ];
+  const itemIds = [
+    ...new Set(lineRows.map((line) => line.itemId).filter((id): id is string => Boolean(id))),
+  ];
+  const unitIds = [
+    ...new Set(lineRows.map((line) => line.unitId).filter((id): id is string => Boolean(id))),
+  ];
+
+  const [storeRows, itemRows, unitRows] = await Promise.all([
+    storeIds.length > 0
       ? getDb()
           .select({
             id: stores.id,
@@ -178,10 +485,9 @@ async function mapLineRow(
             isActive: stores.isActive,
           })
           .from(stores)
-          .where(eq(stores.id, line.storeId))
-          .limit(1)
+          .where(inArray(stores.id, storeIds))
       : Promise.resolve([]),
-    line.itemId
+    itemIds.length > 0
       ? getDb()
           .select({
             id: items.id,
@@ -194,10 +500,9 @@ async function mapLineRow(
           })
           .from(items)
           .innerJoin(units, eq(items.unitId, units.id))
-          .where(eq(items.id, line.itemId))
-          .limit(1)
+          .where(inArray(items.id, itemIds))
       : Promise.resolve([]),
-    line.unitId
+    unitIds.length > 0
       ? getDb()
           .select({
             id: units.id,
@@ -205,71 +510,233 @@ async function mapLineRow(
             isActive: units.isActive,
           })
           .from(units)
-          .where(eq(units.id, line.unitId))
-          .limit(1)
+          .where(inArray(units.id, unitIds))
       : Promise.resolve([]),
   ]);
 
-  const store: OpeningStockStoreSummary | null = storeRow[0]
-    ? {
-        id: storeRow[0].id,
-        storeCode: storeRow[0].storeCode,
-        storeName: storeRow[0].storeName,
-        isActive: storeRow[0].isActive,
-      }
-    : null;
-  const unit: OpeningStockUnitSummary | null = unitRow[0]
-    ? {
-        id: unitRow[0].id,
-        unitName: unitRow[0].unitName,
-        isActive: unitRow[0].isActive,
-      }
-    : null;
-  const item: OpeningStockItemSummary | null = itemRow[0]
-    ? {
-        id: itemRow[0].id,
-        itemCode: itemRow[0].itemCode,
-        itemName: itemRow[0].itemName,
-        isActive: itemRow[0].isActive,
-        unit: {
-          id: itemRow[0].unitId,
-          unitName: itemRow[0].unitName,
-          isActive: itemRow[0].unitActive,
-        },
-      }
-    : null;
+  const storeById = new Map(storeRows.map((row) => [row.id, row]));
+  const itemById = new Map(itemRows.map((row) => [row.id, row]));
+  const unitById = new Map(unitRows.map((row) => [row.id, row]));
+
+  return lineRows.map((line) => {
+    const storeRow = line.storeId ? storeById.get(line.storeId) : undefined;
+    const itemRow = line.itemId ? itemById.get(line.itemId) : undefined;
+    const unitRow = line.unitId ? unitById.get(line.unitId) : undefined;
+
+    const store: OpeningStockStoreSummary | null = storeRow
+      ? {
+          id: storeRow.id,
+          storeCode: storeRow.storeCode,
+          storeName: storeRow.storeName,
+          isActive: storeRow.isActive,
+        }
+      : null;
+    const unit: OpeningStockUnitSummary | null = unitRow
+      ? {
+          id: unitRow.id,
+          unitName: unitRow.unitName,
+          isActive: unitRow.isActive,
+        }
+      : null;
+    const item: OpeningStockItemSummary | null = itemRow
+      ? {
+          id: itemRow.id,
+          itemCode: itemRow.itemCode,
+          itemName: itemRow.itemName,
+          isActive: itemRow.isActive,
+          unit: {
+            id: itemRow.unitId,
+            unitName: itemRow.unitName,
+            isActive: itemRow.unitActive,
+          },
+        }
+      : null;
+
+    return {
+      id: line.id,
+      sourceRowNumber: Number(line.sourceRowNumber),
+      legacyStoreName: line.legacyStoreName,
+      legacyCategoryName: line.legacyCategoryName,
+      legacyItemName: line.legacyItemName,
+      legacyUnitName: line.legacyUnitName,
+      itemRate: String(line.itemRate),
+      openingQuantity: String(line.sourceOpeningQuantity),
+      openingAmount: String(line.sourceOpeningAmount),
+      purchaseQuantity: String(line.sourcePurchaseQuantity),
+      purchaseAmount: String(line.sourcePurchaseAmount),
+      receivedQuantity: String(line.sourceReceivedQuantity),
+      receivedAmount: String(line.sourceReceivedAmount),
+      consumptionQuantity: String(line.sourceConsumptionQuantity),
+      consumptionAmount: String(line.sourceConsumptionAmount),
+      transferQuantity: String(line.sourceTransferQuantity),
+      transferAmount: String(line.sourceTransferAmount),
+      inTransitQuantity: String(line.sourceInTransitQuantity),
+      inTransitAmount: String(line.sourceInTransitAmount),
+      closingQuantity: String(line.openingQuantity),
+      closingAmount: String(line.openingAmount),
+      storeId: line.storeId,
+      itemId: line.itemId,
+      unitId: line.unitId,
+      mappingStatus: line.mappingStatus,
+      validationErrors: [...line.validationErrors],
+      isIncludedForPosting: line.isIncludedForPosting,
+      store,
+      item,
+      unit,
+    };
+  });
+}
+
+function buildLineValidationErrors(params: {
+  row: ParsedLegacyRow;
+  mappingStatus: OpeningStockMappingStatus;
+  selectedStore?: { isActive: boolean };
+  selectedItem?: { isActive: boolean; unitId: string; unitActive: boolean };
+  selectedUnit?: { id: string; isActive: boolean };
+}): string[] {
+  const errors: string[] = [];
+  const quantity = parseScaled(params.row.closingQuantity, 4);
+  if (!summarizeReconciliation(params.row)) {
+    errors.push("Quantity formula does not reconcile to Closing Stock Qty.");
+  }
+  if (quantity < 0n) {
+    errors.push("Negative closing quantity is not allowed.");
+  }
+  if (params.mappingStatus !== "MAPPED") {
+    errors.push(`Mapping status: ${params.mappingStatus}.`);
+  }
+  if (params.selectedStore && !params.selectedStore.isActive) {
+    errors.push("Mapped store is inactive.");
+  }
+  if (params.selectedItem && !params.selectedItem.isActive) {
+    errors.push("Mapped item is inactive.");
+  }
+  if (params.selectedUnit && !params.selectedUnit.isActive) {
+    errors.push("Mapped unit is inactive.");
+  }
+  if (params.selectedItem && !params.selectedItem.unitActive) {
+    errors.push("Mapped item unit is inactive.");
+  }
+  if (
+    params.selectedItem &&
+    params.selectedUnit &&
+    params.selectedItem.unitId !== params.selectedUnit.id
+  ) {
+    errors.push("Mapped unit does not match Item Setup.");
+  }
+  // In-transit qty is informational only: Closing Stock Qty still posts as opening stock.
+  return errors;
+}
+
+function findMappedEntity<T extends { id: string }>(
+  byNormalized: Map<string, T[]>,
+  id: string | null,
+): T | undefined {
+  if (!id) {
+    return undefined;
+  }
+  for (const rows of byNormalized.values()) {
+    const found = rows.find((candidate) => candidate.id === id);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function resolveMappedId<T extends { id: string }>(
+  candidates: T[],
+  byNormalized: Map<string, T[]>,
+  overrideId: string | null | undefined,
+  persistedId: string | undefined,
+): { id: string | null; entity: T | undefined } {
+  if (overrideId) {
+    const overridden = findMappedEntity(byNormalized, overrideId);
+    if (overridden) {
+      return { id: overrideId, entity: overridden };
+    }
+  }
+  if (persistedId) {
+    const persisted = findMappedEntity(byNormalized, persistedId);
+    if (persisted) {
+      return { id: persistedId, entity: persisted };
+    }
+  }
+  if (candidates.length === 1) {
+    return { id: candidates[0]!.id, entity: candidates[0] };
+  }
+  return { id: null, entity: undefined };
+}
+
+async function resolveMappingsForParsedRow(
+  row: ParsedLegacyRow,
+  mappingContext: MappingContext,
+  overrides?: OpeningStockMappingChoice,
+): Promise<{
+  storeId: string | null;
+  itemId: string | null;
+  unitId: string | null;
+  mappingStatus: OpeningStockMappingStatus;
+  validationErrors: string[];
+}> {
+  const storeKey = normalizeLegacyName(row.legacyStoreName);
+  const itemKey = normalizeLegacyName(row.legacyItemName);
+  const unitKey = normalizeLegacyName(row.legacyUnitName);
+
+  const storeRows = mappingContext.storesByNormalized.get(storeKey) ?? [];
+  const itemRows = mappingContext.itemsByNormalized.get(itemKey) ?? [];
+  const unitRows = mappingContext.unitsByNormalized.get(unitKey) ?? [];
+
+  const selectedStore = resolveMappedId(
+    storeRows,
+    mappingContext.storesByNormalized,
+    overrides?.storeId,
+    mappingContext.persistedMappings.store.get(storeKey),
+  );
+  const selectedItem = resolveMappedId(
+    itemRows,
+    mappingContext.itemsByNormalized,
+    overrides?.itemId,
+    mappingContext.persistedMappings.item.get(itemKey),
+  );
+  const selectedUnit = resolveMappedId(
+    unitRows,
+    mappingContext.unitsByNormalized,
+    overrides?.unitId,
+    mappingContext.persistedMappings.unit.get(unitKey),
+  );
+
+  let mappingStatus: OpeningStockMappingStatus = "MAPPED";
+  if (storeRows.length > 1 && !selectedStore.id) {
+    mappingStatus = "AMBIGUOUS_STORE";
+  } else if (!selectedStore.id || !selectedStore.entity) {
+    mappingStatus = "UNMAPPED_STORE";
+  } else if (itemRows.length > 1 && !selectedItem.id) {
+    mappingStatus = "AMBIGUOUS_ITEM";
+  } else if (!selectedItem.id || !selectedItem.entity) {
+    mappingStatus = "UNMAPPED_ITEM";
+  } else if (unitRows.length > 1 && !selectedUnit.id) {
+    mappingStatus = "AMBIGUOUS_UNIT";
+  } else if (!selectedUnit.id || !selectedUnit.entity) {
+    mappingStatus = "UNMAPPED_UNIT";
+  } else if (selectedItem.entity.unitId !== selectedUnit.entity.id) {
+    mappingStatus = "UNIT_MISMATCH";
+  }
+
+  const validationErrors = buildLineValidationErrors({
+    row,
+    mappingStatus,
+    selectedStore: selectedStore.entity,
+    selectedItem: selectedItem.entity,
+    selectedUnit: selectedUnit.entity,
+  });
 
   return {
-    id: line.id,
-    sourceRowNumber: Number(line.sourceRowNumber),
-    legacyStoreName: line.legacyStoreName,
-    legacyCategoryName: line.legacyCategoryName,
-    legacyItemName: line.legacyItemName,
-    legacyUnitName: line.legacyUnitName,
-    itemRate: String(line.itemRate),
-    openingQuantity: String(line.sourceOpeningQuantity),
-    openingAmount: String(line.sourceOpeningAmount),
-    purchaseQuantity: String(line.sourcePurchaseQuantity),
-    purchaseAmount: String(line.sourcePurchaseAmount),
-    receivedQuantity: String(line.sourceReceivedQuantity),
-    receivedAmount: String(line.sourceReceivedAmount),
-    consumptionQuantity: String(line.sourceConsumptionQuantity),
-    consumptionAmount: String(line.sourceConsumptionAmount),
-    transferQuantity: String(line.sourceTransferQuantity),
-    transferAmount: String(line.sourceTransferAmount),
-    inTransitQuantity: String(line.sourceInTransitQuantity),
-    inTransitAmount: String(line.sourceInTransitAmount),
-    closingQuantity: String(line.openingQuantity),
-    closingAmount: String(line.openingAmount),
-    storeId: line.storeId,
-    itemId: line.itemId,
-    unitId: line.unitId,
-    mappingStatus: line.mappingStatus,
-    validationErrors: [...line.validationErrors],
-    isIncludedForPosting: line.isIncludedForPosting,
-    store,
-    item,
-    unit,
+    storeId: selectedStore.id,
+    itemId: selectedItem.id,
+    unitId: selectedUnit.id,
+    mappingStatus,
+    validationErrors,
   };
 }
 
@@ -387,7 +854,7 @@ async function buildPreview(batchId: string): Promise<OpeningStockPreview> {
       asc(openingStockLines.id),
     );
 
-  const lines = await Promise.all(lineRows.map((line) => mapLineRow(line)));
+  const lines = await mapLineRows(lineRows);
   const batchRow = await getDb()
     .select()
     .from(openingStockBatches)
@@ -426,6 +893,17 @@ async function buildPreview(batchId: string): Promise<OpeningStockPreview> {
     summary,
     lines,
   };
+}
+
+async function assertNoDuplicateFileHash(sourceFileHash: string): Promise<void> {
+  const rows = await getDb()
+    .select({ id: openingStockBatches.id })
+    .from(openingStockBatches)
+    .where(eq(openingStockBatches.sourceFileHash, sourceFileHash))
+    .limit(1);
+  if (rows[0]) {
+    throw new AppError("This source file hash has already been imported.", 409);
+  }
 }
 
 function generateBatchNumber(prefix: string): string {
@@ -491,22 +969,6 @@ export async function createManualOpeningStockBatch(
 ): Promise<OpeningStockPreview> {
   requireOpeningStockAdmin(actor);
 
-  const [activeStoreCountRows, activeItemCountRows] = await Promise.all([
-    getDb()
-      .select({ value: count() })
-      .from(stores)
-      .where(eq(stores.isActive, true)),
-    getDb()
-      .select({ value: count() })
-      .from(items)
-      .where(eq(items.isActive, true)),
-  ]);
-  const activeStoreCount = Number(activeStoreCountRows[0]?.value ?? 0);
-  const activeItemCount = Number(activeItemCountRows[0]?.value ?? 0);
-  if (activeStoreCount === 0 || activeItemCount === 0) {
-    throw new AppError(MASTER_DATA_REQUIRED_MESSAGE, 400);
-  }
-
   const storeRows = await getDb()
     .select({ id: stores.id, storeName: stores.storeName, isActive: stores.isActive })
     .from(stores)
@@ -552,7 +1014,7 @@ export async function createManualOpeningStockBatch(
       throw new AppError("Failed to create opening stock batch.", 500);
     }
 
-    const lineValues: Array<typeof openingStockLines.$inferInsert> = input.lines.map((line, index) => {
+      const lineValues: Array<typeof openingStockLines.$inferInsert> = input.lines.map((line, index) => {
       const item = itemById.get(line.itemId);
       if (!item) {
         throw new AppError("Selected item was not found.", 400);
@@ -601,16 +1063,329 @@ export async function createManualOpeningStockBatch(
   return buildPreview(inserted);
 }
 
+export async function previewLegacyOpeningStockImport(
+  actor: AuthenticatedUser,
+  file: Express.Multer.File,
+): Promise<OpeningStockPreview> {
+  requireOpeningStockAdmin(actor);
+  if (!file) {
+    throw new AppError("A legacy .xls file is required.", 400);
+  }
+  if (!file.originalname.toLowerCase().endsWith(".xls")) {
+    throw new AppError("Only the HTML-exported legacy .xls file is accepted.", 400);
+  }
+
+  const sourceFileHash = createHash("sha256").update(file.buffer).digest("hex");
+  await assertNoDuplicateFileHash(sourceFileHash);
+
+  const parsed = parseLegacyOpeningStockHtml(file.buffer, file.originalname);
+  const mappingContext = await loadMappingContext();
+  const { fromDate, toDate } = parseDateRangeFromTitle(parsed.reportTitle);
+  if (!toDate) {
+    throw new AppError("Legacy report end date was not found.", 400);
+  }
+
+  const batchId = await getDb().transaction(async (tx) => {
+    const insertedBatch = await tx
+      .insert(openingStockBatches)
+      .values({
+        batchNumber: generateBatchNumber("OSI"),
+        sourceType: "LEGACY_IMPORT",
+        sourceFilename: file.originalname,
+        sourceFileHash,
+        reportTitle: parsed.reportTitle,
+        sourceReportFromDate: fromDate,
+        sourceReportToDate: toDate,
+        cutoverDate: toDate,
+        status: "DRAFT",
+        remarks: HISTORICAL_CUTOVER_WARNING,
+        createdByApplicationUserId: actor.id,
+      })
+      .returning({ id: openingStockBatches.id });
+    const batchIdValue = insertedBatch[0]?.id;
+    if (!batchIdValue) {
+      throw new AppError("Failed to create opening stock import batch.", 500);
+    }
+
+    const lineValues: Array<typeof openingStockLines.$inferInsert> = [];
+    for (const row of parsed.rows) {
+      const resolved = await resolveMappingsForParsedRow(row, mappingContext);
+      lineValues.push({
+        openingStockBatchId: batchIdValue,
+        storeId: resolved.storeId,
+        itemId: resolved.itemId,
+        unitId: resolved.unitId,
+        legacyStoreName: row.legacyStoreName,
+        legacyCategoryName: row.legacyCategoryName,
+        legacyItemName: row.legacyItemName,
+        legacyUnitName: row.legacyUnitName,
+        itemRate: row.itemRate,
+        sourceOpeningQuantity: row.openingQuantity,
+        sourceOpeningAmount: row.openingAmount,
+        sourcePurchaseQuantity: row.purchaseQuantity,
+        sourcePurchaseAmount: row.purchaseAmount,
+        sourceReceivedQuantity: row.receivedQuantity,
+        sourceReceivedAmount: row.receivedAmount,
+        sourceConsumptionQuantity: row.consumptionQuantity,
+        sourceConsumptionAmount: row.consumptionAmount,
+        sourceTransferQuantity: row.transferQuantity,
+        sourceTransferAmount: row.transferAmount,
+        sourceInTransitQuantity: row.inTransitQuantity,
+        sourceInTransitAmount: row.inTransitAmount,
+        openingQuantity: row.closingQuantity,
+        openingAmount: row.closingAmount,
+        mappingStatus: resolved.mappingStatus,
+        validationErrors: resolved.validationErrors,
+        sourceRowNumber: String(row.sourceRowNumber),
+        isIncludedForPosting: parseScaled(row.closingQuantity, 4) !== 0n,
+      });
+    }
+    await tx.insert(openingStockLines).values(lineValues);
+    return batchIdValue;
+  });
+
+  return buildPreview(batchId);
+}
+
+export async function updateOpeningStockMappings(
+  actor: AuthenticatedUser,
+  batchId: string,
+  mappings: OpeningStockMappingChoice[],
+): Promise<OpeningStockPreview> {
+  requireOpeningStockAdmin(actor);
+  const batchRows = await getDb()
+    .select()
+    .from(openingStockBatches)
+    .where(eq(openingStockBatches.id, batchId))
+    .limit(1);
+  const batch = batchRows[0];
+  if (!batch) {
+    throw new AppError("Opening stock batch not found", 404);
+  }
+  if (batch.status === "POSTED") {
+    throw new AppError("Posted opening-stock batches cannot be edited.", 409);
+  }
+
+  const lineRows = await getDb()
+    .select()
+    .from(openingStockLines)
+    .where(eq(openingStockLines.openingStockBatchId, batchId));
+  const lineById = new Map(lineRows.map((line) => [line.id, line]));
+  const mappingContext = await loadMappingContext();
+
+  await getDb().transaction(async (tx) => {
+    for (const mapping of mappings) {
+      const line = lineById.get(mapping.lineId);
+      if (!line) {
+        throw new AppError("One or more opening stock lines were not found.", 404);
+      }
+
+      const resolved = await resolveMappingsForParsedRow(
+        {
+          sourceRowNumber: Number(line.sourceRowNumber),
+          legacyStoreName: line.legacyStoreName,
+          legacyCategoryName: line.legacyCategoryName,
+          legacyItemName: line.legacyItemName,
+          legacyUnitName: line.legacyUnitName,
+          itemRate: String(line.itemRate),
+          openingQuantity: String(line.sourceOpeningQuantity),
+          openingAmount: String(line.sourceOpeningAmount),
+          purchaseQuantity: String(line.sourcePurchaseQuantity),
+          purchaseAmount: String(line.sourcePurchaseAmount),
+          receivedQuantity: String(line.sourceReceivedQuantity),
+          receivedAmount: String(line.sourceReceivedAmount),
+          consumptionQuantity: String(line.sourceConsumptionQuantity),
+          consumptionAmount: String(line.sourceConsumptionAmount),
+          transferQuantity: String(line.sourceTransferQuantity),
+          transferAmount: String(line.sourceTransferAmount),
+          inTransitQuantity: String(line.sourceInTransitQuantity),
+          inTransitAmount: String(line.sourceInTransitAmount),
+          closingQuantity: String(line.openingQuantity),
+          closingAmount: String(line.openingAmount),
+        },
+        mappingContext,
+        mapping,
+      );
+
+      await tx
+        .update(openingStockLines)
+        .set({
+          storeId: resolved.storeId,
+          itemId: resolved.itemId,
+          unitId: resolved.unitId,
+          mappingStatus: resolved.mappingStatus,
+          validationErrors: resolved.validationErrors,
+          isIncludedForPosting: mapping.includeInPosting ?? line.isIncludedForPosting,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(openingStockLines.id, mapping.lineId));
+
+      const persistenceTasks: Promise<unknown>[] = [];
+      if (resolved.storeId) {
+        persistenceTasks.push(
+          tx
+            .insert(openingStockNameMappings)
+            .values({
+              entityType: "STORE",
+              legacyName: line.legacyStoreName,
+              normalizedLegacyName: normalizeLegacyName(line.legacyStoreName),
+              storeId: resolved.storeId,
+              createdByApplicationUserId: actor.id,
+            })
+            .onConflictDoUpdate({
+              target: [
+                openingStockNameMappings.entityType,
+                openingStockNameMappings.normalizedLegacyName,
+              ],
+              set: { storeId: resolved.storeId, updatedAt: sql`now()` },
+            }),
+        );
+      }
+      if (resolved.itemId) {
+        persistenceTasks.push(
+          tx
+            .insert(openingStockNameMappings)
+            .values({
+              entityType: "ITEM",
+              legacyName: line.legacyItemName,
+              normalizedLegacyName: normalizeLegacyName(line.legacyItemName),
+              itemId: resolved.itemId,
+              createdByApplicationUserId: actor.id,
+            })
+            .onConflictDoUpdate({
+              target: [
+                openingStockNameMappings.entityType,
+                openingStockNameMappings.normalizedLegacyName,
+              ],
+              set: { itemId: resolved.itemId, updatedAt: sql`now()` },
+            }),
+        );
+      }
+      if (resolved.unitId) {
+        persistenceTasks.push(
+          tx
+            .insert(openingStockNameMappings)
+            .values({
+              entityType: "UNIT",
+              legacyName: line.legacyUnitName,
+              normalizedLegacyName: normalizeLegacyName(line.legacyUnitName),
+              unitId: resolved.unitId,
+              createdByApplicationUserId: actor.id,
+            })
+            .onConflictDoUpdate({
+              target: [
+                openingStockNameMappings.entityType,
+                openingStockNameMappings.normalizedLegacyName,
+              ],
+              set: { unitId: resolved.unitId, updatedAt: sql`now()` },
+            }),
+        );
+      }
+      await Promise.all(persistenceTasks);
+    }
+  });
+
+  return buildPreview(batchId);
+}
+
+async function rematchOpeningStockBatchLines(batchId: string): Promise<void> {
+  const batchRows = await getDb()
+    .select()
+    .from(openingStockBatches)
+    .where(eq(openingStockBatches.id, batchId))
+    .limit(1);
+  const batch = batchRows[0];
+  if (!batch || batch.status === "POSTED" || batch.status === "CANCELLED") {
+    return;
+  }
+
+  const lineRows = await getDb()
+    .select()
+    .from(openingStockLines)
+    .where(eq(openingStockLines.openingStockBatchId, batchId));
+  const mappingContext = await loadMappingContext();
+
+  const updates = await Promise.all(
+    lineRows.map(async (line) => {
+      const resolved = await resolveMappingsForParsedRow(
+        {
+          sourceRowNumber: Number(line.sourceRowNumber),
+          legacyStoreName: line.legacyStoreName,
+          legacyCategoryName: line.legacyCategoryName,
+          legacyItemName: line.legacyItemName,
+          legacyUnitName: line.legacyUnitName,
+          itemRate: String(line.itemRate),
+          openingQuantity: String(line.sourceOpeningQuantity),
+          openingAmount: String(line.sourceOpeningAmount),
+          purchaseQuantity: String(line.sourcePurchaseQuantity),
+          purchaseAmount: String(line.sourcePurchaseAmount),
+          receivedQuantity: String(line.sourceReceivedQuantity),
+          receivedAmount: String(line.sourceReceivedAmount),
+          consumptionQuantity: String(line.sourceConsumptionQuantity),
+          consumptionAmount: String(line.sourceConsumptionAmount),
+          transferQuantity: String(line.sourceTransferQuantity),
+          transferAmount: String(line.sourceTransferAmount),
+          inTransitQuantity: String(line.sourceInTransitQuantity),
+          inTransitAmount: String(line.sourceInTransitAmount),
+          closingQuantity: String(line.openingQuantity),
+          closingAmount: String(line.openingAmount),
+        },
+        mappingContext,
+      );
+
+      const sameMapping =
+        line.storeId === resolved.storeId &&
+        line.itemId === resolved.itemId &&
+        line.unitId === resolved.unitId &&
+        line.mappingStatus === resolved.mappingStatus &&
+        JSON.stringify(line.validationErrors) === JSON.stringify(resolved.validationErrors);
+      if (sameMapping) {
+        return null;
+      }
+
+      return {
+        id: line.id,
+        storeId: resolved.storeId,
+        itemId: resolved.itemId,
+        unitId: resolved.unitId,
+        mappingStatus: resolved.mappingStatus,
+        validationErrors: resolved.validationErrors,
+      };
+    }),
+  );
+
+  const changed = updates.filter((update): update is NonNullable<typeof update> => update !== null);
+  if (changed.length === 0) {
+    return;
+  }
+
+  await getDb().transaction(async (tx) => {
+    for (const update of changed) {
+      await tx
+        .update(openingStockLines)
+        .set({
+          storeId: update.storeId,
+          itemId: update.itemId,
+          unitId: update.unitId,
+          mappingStatus: update.mappingStatus,
+          validationErrors: update.validationErrors,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(openingStockLines.id, update.id));
+    }
+  });
+}
+
 export async function validateOpeningStockBatch(
   actor: AuthenticatedUser,
   batchId: string,
 ): Promise<OpeningStockValidationResult> {
   requireOpeningStockAdmin(actor);
+  await rematchOpeningStockBatchLines(batchId);
   const preview = await buildPreview(batchId);
   const canPost = preview.lines.every(
     (line) =>
       line.mappingStatus === "MAPPED" &&
-      line.validationErrors.every((error) => !error.includes("separate migration")) &&
       !line.validationErrors.some((error) =>
         /reconcile|Negative closing quantity|inactive|does not match/i.test(error),
       ),
@@ -688,11 +1463,7 @@ export async function postOpeningStockBatch(
         }
       }
 
-      for (const line of postableLines) {
-        if (parseScaled(String(line.sourceInTransitQuantity), 4) > 0n) {
-          throw new AppError("Rows with In Transit quantity cannot be posted as ordinary opening stock.", 409);
-        }
-      }
+      // In-transit quantities are ignored on purpose: only Closing Stock Qty posts as opening stock.
 
       const duplicateConflictChecks = await Promise.all(
         postableLines.map((line) =>
