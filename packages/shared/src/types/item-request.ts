@@ -8,6 +8,7 @@ import type {
   updateItemRequestInputSchema,
   itemRequestActionInputSchema,
   itemRequestListQuerySchema,
+  itemRequestQueueSchema,
   eligibleItemRequestItemListQuerySchema,
   itemRequestSchema,
   itemRequestListItemSchema,
@@ -28,6 +29,7 @@ export type ItemRequestStatus = z.infer<typeof itemRequestStatusSchema>;
 export type ItemRequestStatusFilter = z.infer<
   typeof itemRequestStatusFilterSchema
 >;
+export type ItemRequestQueue = z.infer<typeof itemRequestQueueSchema>;
 export type ItemRequestActionType = z.infer<typeof itemRequestActionTypeSchema>;
 export type ItemRequestTerminalStatus = z.infer<
   typeof itemRequestTerminalStatusSchema

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth/auth-context";
+import { ITEM_REQUEST_SIDEBAR_QUEUES } from "@/lib/item-requests/queues";
 
 type NavItem = {
   label: string;
@@ -10,12 +11,18 @@ type NavItem = {
   soon?: boolean;
   /** When true, only users who can mutate master data (ADMIN) see this link. */
   adminSetup?: boolean;
+  children?: NavItem[];
 };
 
 type NavSection = {
   title: string;
   items: NavItem[];
 };
+
+const REQUEST_CHILDREN: NavItem[] = ITEM_REQUEST_SIDEBAR_QUEUES.map((queue) => ({
+  label: queue.sidebarLabel,
+  href: queue.href,
+}));
 
 const NAV_SECTIONS: NavSection[] = [
   {
@@ -25,8 +32,11 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Items", href: "#", soon: true },
       { label: "Purchases", href: "#", soon: true },
       { label: "Opening Stock", href: "/stock/opening-stock", adminSetup: true },
-      { label: "Requests", href: "/requests/item-requests" },
-      { label: "Approvals", href: "#", soon: true },
+      {
+        label: "Requests",
+        href: "/requests/item-requests",
+        children: REQUEST_CHILDREN,
+      },
     ],
   },
   {
@@ -57,6 +67,86 @@ type SidebarProps = {
   open: boolean;
   onClose: () => void;
 };
+
+function isPathActive(pathname: string, href: string): boolean {
+  if (href === "/") {
+    return pathname === "/";
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+const REQUEST_QUEUE_HREFS = new Set(
+  ITEM_REQUEST_SIDEBAR_QUEUES.filter((queue) => queue.key !== "request-list").map(
+    (queue) => queue.href,
+  ),
+);
+
+function isRequestQueueActive(pathname: string, href: string): boolean {
+  if (href === "/requests/item-requests") {
+    if (pathname === "/requests/item-requests") {
+      return true;
+    }
+    if (
+      REQUEST_QUEUE_HREFS.has(pathname) ||
+      [...REQUEST_QUEUE_HREFS].some((queueHref) =>
+        pathname.startsWith(`${queueHref}/`),
+      )
+    ) {
+      return false;
+    }
+    return pathname.startsWith("/requests/item-requests/");
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function NavLink({
+  item,
+  pathname,
+  onClose,
+  nested = false,
+}: {
+  item: NavItem;
+  pathname: string;
+  onClose: () => void;
+  nested?: boolean;
+}) {
+  if (item.soon || item.href === "#") {
+    return (
+      <span
+        className={`cursor-default rounded-md py-2 text-sm text-ink-muted opacity-70 ${
+          nested ? "px-3" : "px-3"
+        }`}
+      >
+        {item.label}
+        <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-ink-muted">
+          Soon
+        </span>
+      </span>
+    );
+  }
+
+  const isActive = nested
+    ? isRequestQueueActive(pathname, item.href)
+    : isPathActive(pathname, item.href);
+
+  return (
+    <Link
+      href={item.href}
+      onClick={onClose}
+      aria-current={isActive ? "page" : undefined}
+      className={`rounded-md py-2 text-sm transition-colors ${
+        nested ? "px-3" : "px-3"
+      } ${
+        isActive
+          ? "bg-accent-soft font-medium text-accent"
+          : "text-ink-muted hover:bg-paper hover:text-ink"
+      }`}
+    >
+      {item.label}
+    </Link>
+  );
+}
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
@@ -106,41 +196,34 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 </p>
                 <div className="flex flex-col gap-1">
                   {filteredItems.map((item) => {
-                    const isActive =
-                      !item.soon &&
-                      (item.href === "/"
-                        ? pathname === "/"
-                        : pathname === item.href ||
-                          pathname.startsWith(`${item.href}/`));
-
-                    if (item.soon || item.href === "#") {
+                    if (item.children && item.children.length > 0) {
                       return (
-                        <span
-                          key={item.label}
-                          className="cursor-default rounded-md px-3 py-2 text-sm text-ink-muted opacity-70"
-                        >
-                          {item.label}
-                          <span className="ml-2 text-[0.65rem] uppercase tracking-wide text-ink-muted">
-                            Soon
-                          </span>
-                        </span>
+                        <div key={item.label} className="flex flex-col gap-0.5">
+                          <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                            {item.label}
+                          </p>
+                          <div className="ml-2 flex flex-col gap-0.5 border-l border-border pl-2">
+                            {item.children.map((child) => (
+                              <NavLink
+                                key={child.href}
+                                item={child}
+                                pathname={pathname}
+                                onClose={onClose}
+                                nested
+                              />
+                            ))}
+                          </div>
+                        </div>
                       );
                     }
 
                     return (
-                      <Link
+                      <NavLink
                         key={item.label}
-                        href={item.href}
-                        onClick={onClose}
-                        aria-current={isActive ? "page" : undefined}
-                        className={`rounded-md px-3 py-2 text-sm transition-colors ${
-                          isActive
-                            ? "bg-accent-soft font-medium text-accent"
-                            : "text-ink-muted hover:bg-paper hover:text-ink"
-                        }`}
-                      >
-                        {item.label}
-                      </Link>
+                        item={item}
+                        pathname={pathname}
+                        onClose={onClose}
+                      />
                     );
                   })}
                 </div>

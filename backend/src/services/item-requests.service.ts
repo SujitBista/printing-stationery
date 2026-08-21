@@ -32,7 +32,10 @@ import type {
   PaginatedItemRequestResponse,
   UpdateItemRequestInput,
 } from "@printing-stationery/shared";
-import { userHasRole } from "@printing-stationery/shared";
+import {
+  ITEM_REQUEST_QUEUE_STATUSES,
+  userHasRole,
+} from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
 import {
   applicationUsers,
@@ -602,7 +605,17 @@ function buildListFilters(
     conditions.push(visibility);
   }
 
-  if (query.status !== "ALL") {
+  if (query.queue) {
+    const queueStatuses = ITEM_REQUEST_QUEUE_STATUSES[query.queue];
+    if (queueStatuses !== "ALL") {
+      conditions.push(
+        inArray(
+          itemRequests.status,
+          [...queueStatuses] as ItemRequestStatus[],
+        ),
+      );
+    }
+  } else if (query.status !== "ALL") {
     conditions.push(eq(itemRequests.status, query.status));
   }
 

@@ -43,6 +43,38 @@ export const itemRequestStatusFilterSchema = z.enum([
   ...ITEM_REQUEST_STATUSES,
 ]);
 
+/** Legacy-aligned request queues (sidebar + tabs). */
+export const ITEM_REQUEST_QUEUES = [
+  "request-list",
+  "recommend",
+  "review",
+  "approve",
+  "approved",
+  "partial-pending",
+  "issued",
+  "rejected",
+] as const;
+
+export const itemRequestQueueSchema = z.enum(ITEM_REQUEST_QUEUES);
+
+/**
+ * Statuses shown in each queue. Partial pending / issued currently use APPROVED
+ * until remaining-qty filters are added.
+ */
+export const ITEM_REQUEST_QUEUE_STATUSES = {
+  "request-list": "ALL",
+  recommend: ["PENDING_BRANCH_CHECKER"],
+  review: ["PENDING_CORPORATE_MAKER", "RETURNED_TO_CORPORATE_MAKER"],
+  approve: ["PENDING_CORPORATE_CHECKER"],
+  approved: ["APPROVED"],
+  "partial-pending": ["APPROVED"],
+  issued: ["APPROVED"],
+  rejected: ["REJECTED"],
+} as const satisfies Record<
+  (typeof ITEM_REQUEST_QUEUES)[number],
+  "ALL" | readonly (typeof ITEM_REQUEST_STATUSES)[number][]
+>;
+
 const optionalUuidFilterSchema = z.preprocess(
   (value) => {
     if (value === "" || value === null || value === undefined) {
@@ -183,6 +215,8 @@ export const itemRequestListQuerySchema = z.object({
     .optional()
     .transform((value) => (value && value.length > 0 ? value : undefined)),
   status: itemRequestStatusFilterSchema.default("ALL"),
+  /** When set, overrides `status` with the queue’s status set. */
+  queue: itemRequestQueueSchema.optional(),
   requestingStoreId: optionalUuidFilterSchema,
   branchId: optionalUuidFilterSchema,
 });
