@@ -3,6 +3,8 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, useTransition, type FormEvent } from "react";
 import { login } from "@/lib/api/auth";
+import { BrandLogo } from "@/components/layout/brand-logo";
+import { Button } from "@/components/ui/button";
 
 function safeReturnTo(value: string | null): string {
   if (!value) {
@@ -61,17 +63,17 @@ function LoginForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl border border-border bg-paper-elevated/95 p-6 shadow-sm"
+      className="ps-card p-6 sm:p-8"
       noValidate
     >
       <div className="mb-6">
-        <p
-          className="text-2xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
+        <BrandLogo height={44} priority className="mb-4" />
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-secondary">
           Printing Stationery
         </p>
-        <h1 className="mt-2 text-lg font-medium text-ink">Sign in</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight text-accent">
+          Sign in
+        </h1>
         <p className="mt-1 text-sm text-ink-muted">
           Use your application username and password.
         </p>
@@ -86,7 +88,7 @@ function LoginForm() {
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             required
-            className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="ps-input"
           />
         </label>
 
@@ -99,7 +101,7 @@ function LoginForm() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             required
-            className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="ps-input"
           />
         </label>
       </div>
@@ -113,13 +115,9 @@ function LoginForm() {
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="mt-6 w-full rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
-      >
+      <Button type="submit" disabled={submitting} className="mt-6 w-full py-2.5">
         {submitting ? "Signing in…" : "Sign in"}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -128,9 +126,7 @@ export function LoginClientPage() {
   return (
     <Suspense
       fallback={
-        <div className="rounded-xl border border-border bg-paper-elevated/95 p-6 text-sm text-ink-muted">
-          Loading…
-        </div>
+        <div className="ps-card p-6 text-sm text-ink-muted">Loading…</div>
       }
     >
       <LoginForm />

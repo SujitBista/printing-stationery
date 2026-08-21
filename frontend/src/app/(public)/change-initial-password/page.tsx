@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { ChangeInitialPasswordForm } from "@/components/auth/change-initial-password-form";
+import { BrandLogo } from "@/components/layout/brand-logo";
 import { fetchCurrentUserServer } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";
@@ -16,15 +17,13 @@ export default async function ChangeInitialPasswordPage() {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-paper-elevated/95 p-6 shadow-sm">
+    <div className="ps-card p-6 sm:p-8">
       <div className="mb-6">
-        <p
-          className="text-2xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
+        <BrandLogo height={44} priority className="mb-4" />
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-secondary">
           Printing Stationery
         </p>
-        <h1 className="mt-2 text-lg font-medium text-ink">
+        <h1 className="mt-2 text-2xl font-bold tracking-tight text-accent">
           Change initial password
         </h1>
         <p className="mt-1 text-sm text-ink-muted">

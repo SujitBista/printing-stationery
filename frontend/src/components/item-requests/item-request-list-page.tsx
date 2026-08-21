@@ -19,12 +19,15 @@ import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
 import { getItemRequestQueue } from "@/lib/item-requests/queues";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import { ItemRequestQueueTabs } from "./item-request-queue-tabs";
+import { Badge } from "@/components/ui/badge";
 import {
   formatDateTime,
   ITEM_REQUEST_ACTION_LABELS,
   ITEM_REQUEST_STATUS_LABELS,
+  itemRequestStatusTone,
   personDisplayName,
 } from "./item-request-labels";
 
@@ -194,8 +197,7 @@ export function ItemRequestListPage({
     return (
       <section className="w-full max-w-7xl">
         <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
         >
           Item Requests
         </h1>
@@ -213,8 +215,7 @@ export function ItemRequestListPage({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
             {queueMeta.title}
           </h1>
@@ -223,7 +224,7 @@ export function ItemRequestListPage({
         {showCreate ? (
           <Link
             href="/requests/item-requests/new"
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
           >
             New Request
           </Link>
@@ -252,46 +253,42 @@ export function ItemRequestListPage({
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Request number, store, item or employee"
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
         {isAdmin ? (
           <>
             <label className="flex w-full flex-col gap-1 text-sm">
               <span className="font-medium text-ink">Requesting store</span>
-              <select
+              <SearchableSelect
                 value={requestingStoreId}
-                onChange={(event) => {
+                onChange={(nextValue) => {
                   setPage(1);
-                  setRequestingStoreId(event.target.value);
+                  setRequestingStoreId(nextValue);
                 }}
-                className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-              >
-                <option value="">All stores</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.storeCode} — {store.storeName}
-                  </option>
-                ))}
-              </select>
+                placeholder="All stores"
+                searchPlaceholder="Search stores…"
+                options={stores.map((store) => ({
+                  value: store.id,
+                  label: `${store.storeCode} — ${store.storeName}`,
+                }))}
+              />
             </label>
             <label className="flex w-full flex-col gap-1 text-sm">
               <span className="font-medium text-ink">Branch</span>
-              <select
+              <SearchableSelect
                 value={branchId}
-                onChange={(event) => {
+                onChange={(nextValue) => {
                   setPage(1);
-                  setBranchId(event.target.value);
+                  setBranchId(nextValue);
                 }}
-                className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-              >
-                <option value="">All branches</option>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.branchCode} — {branch.branchName}
-                  </option>
-                ))}
-              </select>
+                placeholder="All branches"
+                searchPlaceholder="Search branches…"
+                options={branches.map((branch) => ({
+                  value: branch.id,
+                  label: `${branch.branchCode} — ${branch.branchName}`,
+                }))}
+              />
             </label>
           </>
         ) : null}
@@ -324,7 +321,7 @@ export function ItemRequestListPage({
             <p className="mt-1 text-sm text-ink-muted">{loadError}</p>
           </div>
         ) : requests.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
             <p className="font-medium text-ink">No item requests found</p>
             <p className="mt-1 text-sm text-ink-muted">
               {search || requestingStoreId || branchId
@@ -336,9 +333,9 @@ export function ItemRequestListPage({
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
+            <div className="ps-table-shell">
               <table className="min-w-[72rem] w-full text-left text-sm">
-                <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
                       Request number
@@ -370,7 +367,7 @@ export function ItemRequestListPage({
                   {requests.map((request) => (
                     <tr
                       key={request.id}
-                      className="border-b border-border last:border-b-0"
+                      className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                     >
                       <td className="whitespace-nowrap px-3 py-3 font-medium">
                         {request.requestNumber}
@@ -393,7 +390,9 @@ export function ItemRequestListPage({
                         {request.itemCount}
                       </td>
                       <td className="min-w-[10rem] px-3 py-3">
-                        {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                        <Badge variant={itemRequestStatusTone(request.status)}>
+                          {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                        </Badge>
                       </td>
                       <td className="min-w-[10rem] px-3 py-3">
                         {personDisplayName(request.pendingWith)}
@@ -402,14 +401,14 @@ export function ItemRequestListPage({
                         <div className="flex min-w-[16rem] flex-wrap gap-2">
                           <Link
                             href={`/requests/item-requests/${request.id}`}
-                            className="text-accent hover:underline"
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
                           >
                             View
                           </Link>
                           {request.canCreateIssue ? (
                             <Link
                               href={`/requests/item-requests/${request.id}/issue`}
-                              className="text-accent hover:underline"
+                              className="font-medium text-accent hover:text-accent-dark hover:underline"
                             >
                               Create Item Issue
                             </Link>
@@ -417,7 +416,7 @@ export function ItemRequestListPage({
                           {request.canEdit ? (
                             <Link
                               href={`/requests/item-requests/${request.id}/edit`}
-                              className="text-accent hover:underline"
+                              className="font-medium text-accent hover:text-accent-dark hover:underline"
                             >
                               Edit
                             </Link>

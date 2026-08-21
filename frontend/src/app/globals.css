@@ -1,33 +1,55 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #1c1917;
-  --ink-muted: #57534e;
-  --paper: #fafaf9;
+  /* Saptakoshi-aligned institutional palette */
+  --ink: #323031;
+  --ink-muted: #656464;
+  --ink-subtle: #989798;
+  --paper: #f2f8fb;
   --paper-elevated: #ffffff;
-  --accent: #0f766e;
-  --accent-soft: #ccfbf1;
-  --border: #e7e5e4;
+  --accent: #007ab5;
+  --accent-dark: #005f8f;
+  --accent-soft: #f2f8fb;
+  --accent-tint: #d9ebf4;
+  --accent-mid: #80bcda;
+  --secondary: #74b53c;
+  --secondary-dark: #5c912f;
+  --secondary-soft: #f8fbf5;
+  --secondary-tint: #eaf4e2;
+  --border: #d9ebf4;
+  --border-strong: #e0e0e0;
   --danger: #b91c1c;
   --warning: #b45309;
-  --success: #047857;
-  --shell-width: 15rem;
-  --header-height: 3.5rem;
+  --success: #5c912f;
+  --shell-width: 16rem;
+  --header-height: 4rem;
+  --shadow-soft: 0 8px 24px rgba(0, 122, 181, 0.08);
 }
 
 @theme inline {
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
   --color-paper: var(--paper);
   --color-paper-elevated: var(--paper-elevated);
   --color-accent: var(--accent);
+  --color-accent-dark: var(--accent-dark);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-mid: var(--accent-mid);
+  --color-secondary: var(--secondary);
+  --color-secondary-dark: var(--secondary-dark);
+  --color-secondary-soft: var(--secondary-soft);
+  --color-secondary-tint: var(--secondary-tint);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-success: var(--success);
-  --font-sans: var(--font-source-sans), "Segoe UI", sans-serif;
-  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 * {
@@ -41,10 +63,7 @@ body {
 }
 
 body {
-  background:
-    radial-gradient(ellipse 80% 50% at 0% 0%, #ccfbf133, transparent 55%),
-    radial-gradient(ellipse 60% 40% at 100% 0%, #fef3c733, transparent 50%),
-    var(--paper);
+  background: var(--paper);
   color: var(--ink);
   font-family: var(--font-sans);
 }
@@ -52,4 +71,85 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 22%, white);
+  color: var(--ink);
+}
+
+@layer components {
+  .ps-card {
+    border-radius: 1rem;
+    border: 1px solid var(--border);
+    background: var(--paper-elevated);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .ps-table-shell {
+    overflow-x: auto;
+    border-radius: 0.75rem;
+    border: 1px solid var(--border);
+    background: var(--paper-elevated);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .ps-input {
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--paper-elevated);
+    padding: 0.5rem 0.75rem;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .ps-input:focus {
+    border-color: color-mix(in srgb, var(--accent) 45%, white);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .ps-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: background-color 0.15s ease, border-color 0.15s ease,
+      color 0.15s ease, opacity 0.15s ease;
+  }
+
+  .ps-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .ps-btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+
+  .ps-btn-primary:hover:not(:disabled) {
+    background: var(--accent-dark);
+  }
+
+  .ps-btn-secondary {
+    background: var(--secondary);
+    color: white;
+  }
+
+  .ps-btn-secondary:hover:not(:disabled) {
+    background: var(--secondary-dark);
+  }
+
+  .ps-btn-outline {
+    border: 1px solid var(--accent-tint);
+    background: white;
+    color: var(--accent);
+  }
+
+  .ps-btn-outline:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
 }

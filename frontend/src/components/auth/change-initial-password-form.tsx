@@ -3,6 +3,7 @@
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { changeInitialPassword } from "@/lib/api/auth";
+import { Button } from "@/components/ui/button";
 
 export function ChangeInitialPasswordForm() {
   const router = useRouter();
@@ -51,7 +52,7 @@ export function ChangeInitialPasswordForm() {
           value={currentPassword}
           onChange={(event) => setCurrentPassword(event.target.value)}
           required
-          className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+          className="ps-input"
         />
       </label>
 
@@ -64,7 +65,7 @@ export function ChangeInitialPasswordForm() {
           value={newPassword}
           onChange={(event) => setNewPassword(event.target.value)}
           required
-          className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+          className="ps-input"
         />
       </label>
 
@@ -77,7 +78,7 @@ export function ChangeInitialPasswordForm() {
           value={confirmPassword}
           onChange={(event) => setConfirmPassword(event.target.value)}
           required
-          className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+          className="ps-input"
         />
       </label>
 
@@ -87,13 +88,9 @@ export function ChangeInitialPasswordForm() {
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="mt-2 w-full rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
-      >
+      <Button type="submit" disabled={submitting} className="mt-2 w-full py-2.5">
         {submitting ? "Updating…" : "Update password"}
-      </button>
+      </Button>
     </form>
   );
 }

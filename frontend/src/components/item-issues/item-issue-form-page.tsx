@@ -254,8 +254,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
     return (
       <section className="w-full max-w-6xl">
         <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
         >
           Item Issues
         </h1>
@@ -274,7 +273,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
             ? `/requests/item-requests/${request.id}`
             : "/requests/item-requests"
         }
-        className="text-sm text-accent hover:underline"
+        className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
       >
         Back to Request
       </Link>
@@ -298,8 +297,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h1
-                className="text-3xl font-semibold tracking-tight text-ink"
-                style={{ fontFamily: "var(--font-display)" }}
+                className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
               >
                 {issue?.issueNumber ?? "New Item Issue"}
               </h1>
@@ -399,13 +397,13 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               maxLength={500}
               disabled={saving || !canEdit}
               readOnly={!canEdit}
-              className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-70"
+              className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20 disabled:opacity-70"
             />
           </label>
 
-          <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
+          <div className="ps-table-shell">
             <table className="min-w-[72rem] w-full text-left text-sm">
-              <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+              <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Item</th>
                   <th className="px-3 py-2 font-semibold">Unit</th>
@@ -420,7 +418,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 {availability.map((line) => (
                   <tr
                     key={line.requestLineId}
-                    className="border-b border-border last:border-b-0"
+                    className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                   >
                     <td className="px-3 py-3">
                       <div className="font-medium">
@@ -450,7 +448,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                         inputMode="decimal"
                         disabled={saving || !canEdit}
                         readOnly={!canEdit}
-                        className="w-28 rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-70"
+                        className="w-28 rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20 disabled:opacity-70"
                       />
                     </td>
                   </tr>
@@ -465,7 +463,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-60"
+                  className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft disabled:opacity-60"
                 >
                   {saving ? "Saving…" : "Save Draft"}
                 </button>
@@ -474,7 +472,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                     type="button"
                     disabled={saving}
                     onClick={() => setSubmitDialogOpen(true)}
-                    className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+                    className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
                   >
                     Submit for Approval
                   </button>
@@ -483,7 +481,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
             ) : null}
             <Link
               href={`/requests/item-requests/${request.id}`}
-              className="rounded-md border border-border px-4 py-2 text-sm"
+              className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
             >
               {isSubmitted ? "Back to Request" : "Cancel"}
             </Link>
@@ -506,7 +504,6 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
           <div className="w-full max-w-xl rounded-lg border border-border bg-paper-elevated p-5 shadow-lg">
             <h2
               className="text-xl font-semibold tracking-tight"
-              style={{ fontFamily: "var(--font-display)" }}
             >
               Submit Item Issue
             </h2>
@@ -519,7 +516,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 type="button"
                 disabled={saving}
                 onClick={() => setSubmitDialogOpen(false)}
-                className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-60"
+                className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft disabled:opacity-60"
               >
                 Back
               </button>
@@ -527,7 +524,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 type="button"
                 disabled={saving}
                 onClick={() => void handleSubmitIssue()}
-                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
               >
                 {saving ? "Working…" : "Submit for Approval"}
               </button>

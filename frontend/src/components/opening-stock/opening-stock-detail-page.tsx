@@ -22,6 +22,7 @@ import { fetchStores } from "@/lib/api/stores";
 import { fetchUnits } from "@/lib/api/units";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 const ITEM_MATCH_COLUMN_HELP =
   "Shows whether each imported store, item, and unit name is linked to master data already set up in this system. Only matched items can be posted.";
@@ -185,40 +186,26 @@ const MappingSelect = memo(function MappingSelect({
   options: Array<{ id: string; label: string }>;
   onChange: (value: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const selected = options.find((option) => option.id === value);
-
   return (
     <div className="mt-2 flex items-center gap-2">
-      <select
+      <SearchableSelect
         value={value}
         disabled={disabled}
-        aria-busy={loading || undefined}
-        onFocus={() => setExpanded(true)}
-        onBlur={() => setExpanded(false)}
-        onChange={(event) => {
-          const nextValue = event.target.value;
-          // Show loading in the same event tick, before React/table work.
+        aria-busy={loading}
+        aria-label={placeholder}
+        placeholder={placeholder}
+        searchPlaceholder={`Search ${placeholder.toLowerCase()}…`}
+        size="sm"
+        className="w-full max-w-56"
+        options={options.map((option) => ({
+          value: option.id,
+          label: option.label,
+        }))}
+        onChange={(nextValue) => {
           showImmediateSavingOverlay(savingMessage);
           onChange(nextValue);
-          // Collapse options after this tick so removing thousands of <option>s
-          // does not delay the loading overlay paint.
-          queueMicrotask(() => setExpanded(false));
         }}
-        className="w-full max-w-56 rounded-md border border-border bg-paper px-2 py-1 text-xs disabled:cursor-wait disabled:opacity-60"
-      >
-        <option value="">{placeholder}</option>
-        {!expanded && selected ? (
-          <option value={selected.id}>{selected.label}</option>
-        ) : null}
-        {expanded
-          ? options.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))
-          : null}
-      </select>
+      />
       {loading ? <LoadingSpinner className="h-3.5 w-3.5 shrink-0 text-warning" /> : null}
     </div>
   );
@@ -448,8 +435,7 @@ export function OpeningStockDetailPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
             Opening Stock Batch No. {preview.batch.batchNumber}
           </h1>
@@ -485,7 +471,7 @@ export function OpeningStockDetailPage() {
       ) : null}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <div className="rounded-md border border-border bg-paper-elevated p-4">
+        <div className="ps-card p-5">
           <h2 className="font-semibold text-ink">Summary</h2>
           <dl className="mt-3 space-y-2 text-sm text-ink-muted">
             <div>
@@ -532,7 +518,7 @@ export function OpeningStockDetailPage() {
           </details>
         </div>
 
-        <div className="rounded-md border border-border bg-paper-elevated p-4 lg:col-span-2">
+        <div className="ps-card p-5 lg:col-span-2">
           <h2 className="font-semibold text-ink">Warnings</h2>
           {displayWarnings.length > 0 ? (
             <ul className="mt-3 space-y-2 text-sm text-ink-muted">
@@ -589,7 +575,7 @@ export function OpeningStockDetailPage() {
             <button
               type="button"
               disabled={saving || Boolean(savingLineId) || !editable}
-              className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
               onClick={async () => {
                 showImmediateSavingOverlay("Posting opening stock…");
                 setSaving(true);
@@ -659,13 +645,13 @@ export function OpeningStockDetailPage() {
       </div>
 
       <div
-        className={`mt-6 overflow-x-auto rounded-md border border-border bg-paper-elevated ${
+        className={`mt-6 ps-table-shell ${
           savingLineId ? "cursor-wait" : ""
         }`}
         style={savingLineId ? { pointerEvents: "none" } : undefined}
       >
         <table className="min-w-[120rem] w-full text-left text-sm">
-          <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+          <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
             <tr>
               <th className="px-3 py-2 font-semibold">Store</th>
               <th className="px-3 py-2 font-semibold">Category</th>

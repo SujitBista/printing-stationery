@@ -13,10 +13,10 @@ export function ItemRequestQueueTabs({
 }: ItemRequestQueueTabsProps) {
   return (
     <nav
-      className="-mx-1 overflow-x-auto border-b border-border"
+      className="-mx-1 overflow-x-auto rounded-xl border border-border bg-paper-elevated px-1 shadow-sm shadow-accent/5"
       aria-label="Item request queues"
     >
-      <ul className="flex min-w-max gap-1 px-1">
+      <ul className="flex min-w-max gap-1">
         {ITEM_REQUEST_TAB_QUEUES.map((queue) => {
           const isActive = queue.key === activeQueue;
           return (
@@ -26,8 +26,8 @@ export function ItemRequestQueueTabs({
                 aria-current={isActive ? "page" : undefined}
                 className={`inline-block whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition-colors ${
                   isActive
-                    ? "border-accent font-medium text-accent"
-                    : "border-transparent text-ink-muted hover:border-border hover:text-ink"
+                    ? "border-accent font-semibold text-accent"
+                    : "border-transparent text-ink-muted hover:border-accent-tint hover:text-accent"
                 }`}
               >
                 {queue.tabLabel}

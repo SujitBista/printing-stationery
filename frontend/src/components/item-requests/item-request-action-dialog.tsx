@@ -111,7 +111,6 @@ export function ItemRequestActionDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             {confirmLabel}
           </h2>
@@ -141,7 +140,7 @@ export function ItemRequestActionDialog({
             rows={4}
             maxLength={500}
             disabled={saving}
-            className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
 
@@ -154,14 +153,14 @@ export function ItemRequestActionDialog({
               }
             }}
             disabled={saving}
-            className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-60"
+            className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft disabled:opacity-60"
           >
             Back
           </button>
           <button
             type="submit"
             disabled={saving || !action}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving ? "Working…" : confirmLabel}
           </button>
