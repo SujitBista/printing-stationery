@@ -12,6 +12,7 @@ import {
 import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 export function OpeningStockListPage() {
   const { canAccessOpeningStock } = useAuth();
@@ -62,7 +63,7 @@ export function OpeningStockListPage() {
   if (!canAccessOpeningStock) {
     return (
       <section className="w-full max-w-7xl">
-        <h1 className="text-3xl font-semibold tracking-tight text-ink" style={{ fontFamily: "var(--font-display)" }}>
+        <h1 className="text-2xl font-bold tracking-tight text-accent sm:text-3xl">
           Opening Stock
         </h1>
         <p className="mt-4 border-l-2 border-danger pl-3 text-sm text-danger">
@@ -78,7 +79,7 @@ export function OpeningStockListPage() {
     <section className="w-full max-w-7xl">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-ink" style={{ fontFamily: "var(--font-display)" }}>
+          <h1 className="text-2xl font-bold tracking-tight text-accent sm:text-3xl">
             Opening Stock
           </h1>
           <p className="mt-2 max-w-3xl text-ink-muted">
@@ -102,7 +103,7 @@ export function OpeningStockListPage() {
       {error ? <p className="mt-4 border-l-2 border-danger pl-3 text-sm text-danger">{error}</p> : null}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-md border border-border bg-paper-elevated p-4">
+        <div className="ps-card p-5">
           <h2 className="text-lg font-semibold text-ink">Import Legacy Stock</h2>
           <p className="mt-2 text-sm text-ink-muted">
             Upload the HTML-exported `ConsolidateStockRateWise.xls` report. Uploading creates a draft preview only and does not affect stock.
@@ -140,19 +141,22 @@ export function OpeningStockListPage() {
           {importingFile ? <p className="mt-2 text-sm text-ink-muted">Creating preview…</p> : null}
         </div>
 
-        <div className="rounded-md border border-border bg-paper-elevated p-4">
+        <div className="ps-card p-5">
           <h2 className="text-lg font-semibold text-ink">Manual Opening Stock</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
               <span className="font-medium text-ink">Store</span>
-              <select value={manualStoreId} onChange={(event) => setManualStoreId(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2">
-                <option value="">Select store</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.storeCode} - {store.storeName}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                className="mt-1"
+                value={manualStoreId}
+                onChange={setManualStoreId}
+                placeholder="Select store"
+                searchPlaceholder="Search stores…"
+                options={stores.map((store) => ({
+                  value: store.id,
+                  label: `${store.storeCode} - ${store.storeName}`,
+                }))}
+              />
             </label>
             <label className="text-sm">
               <span className="font-medium text-ink">Cutover date</span>
@@ -160,14 +164,17 @@ export function OpeningStockListPage() {
             </label>
             <label className="text-sm sm:col-span-2">
               <span className="font-medium text-ink">Item</span>
-              <select value={manualItemId} onChange={(event) => setManualItemId(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-paper px-3 py-2">
-                <option value="">Select item</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.itemCode} - {item.itemName}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                className="mt-1"
+                value={manualItemId}
+                onChange={setManualItemId}
+                placeholder="Select item"
+                searchPlaceholder="Search items…"
+                options={items.map((item) => ({
+                  value: item.id,
+                  label: `${item.itemCode} - ${item.itemName}`,
+                }))}
+              />
             </label>
             <label className="text-sm">
               <span className="font-medium text-ink">Unit</span>
@@ -189,7 +196,7 @@ export function OpeningStockListPage() {
           <button
             type="button"
             disabled={submittingManual}
-            className="mt-4 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
             onClick={async () => {
               setSubmittingManual(true);
               setError(null);
@@ -233,12 +240,12 @@ export function OpeningStockListPage() {
         </select>
       </div>
 
-      <div className="mt-6 overflow-x-auto rounded-md border border-border bg-paper-elevated">
+      <div className="mt-6 ps-table-shell">
         {loading ? (
           <p className="p-4 text-sm text-ink-muted">Loading opening-stock batches…</p>
         ) : (
           <table className="min-w-[72rem] w-full text-left text-sm">
-            <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+            <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
               <tr>
                 <th className="px-3 py-2 font-semibold">Batch</th>
                 <th className="px-3 py-2 font-semibold">Source</th>
@@ -252,7 +259,7 @@ export function OpeningStockListPage() {
             </thead>
             <tbody>
               {batches.map((batch) => (
-                <tr key={batch.id} className="border-b border-border last:border-b-0">
+                <tr key={batch.id} className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70">
                   <td className="px-3 py-3">
                     <div className="font-medium">{batch.batchNumber}</div>
                     <div className="text-xs text-ink-muted">{batch.sourceFilename ?? "Manual batch"}</div>
@@ -264,7 +271,7 @@ export function OpeningStockListPage() {
                   <td className="px-3 py-3">{batch.validLineCount}</td>
                   <td className="px-3 py-3">{batch.postableLineCount}</td>
                   <td className="px-3 py-3">
-                    <Link href={`/stock/opening-stock/${batch.id}`} className="text-accent hover:underline">
+                    <Link href={`/stock/opening-stock/${batch.id}`} className="font-medium text-accent hover:text-accent-dark hover:underline">
                       View details
                     </Link>
                   </td>

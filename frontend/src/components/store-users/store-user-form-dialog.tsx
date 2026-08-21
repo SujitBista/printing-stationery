@@ -22,6 +22,7 @@ import {
 } from "@printing-stationery/shared";
 import { fetchEligibleStoreApplicationUsers } from "@/lib/api/store-users";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 type StoreUserFormDialogProps = {
   open: boolean;
@@ -432,7 +433,6 @@ export function StoreUserFormDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             {mode === "create" ? "Add Store User" : "Edit Store User"}
           </h2>
@@ -458,22 +458,20 @@ export function StoreUserFormDialog({
             error={fieldErrors.storeId}
             htmlFor="store-user-store"
           >
-            <select
+            <SearchableSelect
               id="store-user-store"
               name="storeId"
               value={form.storeId}
-              onChange={(event) => updateField("storeId", event.target.value)}
+              onChange={(nextValue) => updateField("storeId", nextValue)}
               disabled={saving || mode === "edit"}
-              className={inputClassName(fieldErrors.storeId)}
-              aria-invalid={Boolean(fieldErrors.storeId)}
-            >
-              <option value="">Select a store</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.storeCode} — {store.storeName}
-                </option>
-              ))}
-            </select>
+              required
+              placeholder="Select a store"
+              searchPlaceholder="Search stores…"
+              options={stores.map((store) => ({
+                value: store.id,
+                label: `${store.storeCode} — ${store.storeName}`,
+              }))}
+            />
           </Field>
 
           <Field
@@ -482,30 +480,28 @@ export function StoreUserFormDialog({
             error={fieldErrors.makerApplicationUserId}
             htmlFor="store-user-maker"
           >
-            <select
+            <SearchableSelect
               id="store-user-maker"
               name="makerApplicationUserId"
               value={form.makerApplicationUserId}
-              onChange={(event) =>
-                updateField("makerApplicationUserId", event.target.value)
+              onChange={(nextValue) =>
+                updateField("makerApplicationUserId", nextValue)
               }
               disabled={saving || !form.storeId || optionsLoading}
-              className={inputClassName(fieldErrors.makerApplicationUserId)}
-              aria-invalid={Boolean(fieldErrors.makerApplicationUserId)}
-            >
-              <option value="">
-                {!form.storeId
+              required
+              placeholder={
+                !form.storeId
                   ? "Select a store first"
                   : optionsLoading
                     ? "Loading eligible makers…"
-                    : "Select a maker"}
-              </option>
-              {makerOptions.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {optionLabel(user)}
-                </option>
-              ))}
-            </select>
+                    : "Select a maker"
+              }
+              searchPlaceholder="Search makers…"
+              options={makerOptions.map((user) => ({
+                value: user.id,
+                label: optionLabel(user),
+              }))}
+            />
           </Field>
 
           {makerPreview ? (
@@ -518,32 +514,28 @@ export function StoreUserFormDialog({
             error={fieldErrors.supervisorApplicationUserId}
             htmlFor="store-user-supervisor"
           >
-            <select
+            <SearchableSelect
               id="store-user-supervisor"
               name="supervisorApplicationUserId"
               value={form.supervisorApplicationUserId}
-              onChange={(event) =>
-                updateField("supervisorApplicationUserId", event.target.value)
+              onChange={(nextValue) =>
+                updateField("supervisorApplicationUserId", nextValue)
               }
               disabled={saving || !form.storeId || optionsLoading}
-              className={inputClassName(
-                fieldErrors.supervisorApplicationUserId,
-              )}
-              aria-invalid={Boolean(fieldErrors.supervisorApplicationUserId)}
-            >
-              <option value="">
-                {!form.storeId
+              required
+              placeholder={
+                !form.storeId
                   ? "Select a store first"
                   : optionsLoading
                     ? "Loading eligible checkers…"
-                    : "Select a supervisor"}
-              </option>
-              {supervisorOptions.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {optionLabel(user)}
-                </option>
-              ))}
-            </select>
+                    : "Select a supervisor"
+              }
+              searchPlaceholder="Search supervisors…"
+              options={supervisorOptions.map((user) => ({
+                value: user.id,
+                label: optionLabel(user),
+              }))}
+            />
           </Field>
 
           {supervisorPreview ? (
@@ -577,7 +569,7 @@ export function StoreUserFormDialog({
             disabled={
               saving || !form.storeId || optionsLoading || Boolean(optionsError)
             }
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving
               ? "Saving…"

@@ -1,4 +1,6 @@
 import type { HealthFetchResult } from "@/lib/api/health";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/page-header";
 
 type HealthDashboardProps = {
   health: HealthFetchResult;
@@ -7,19 +9,15 @@ type HealthDashboardProps = {
 export function HealthDashboard({ health }: HealthDashboardProps) {
   if (!health.ok) {
     return (
-      <section className="max-w-2xl">
-        <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          System health
-        </h1>
-        <p className="mt-2 text-ink-muted">
-          Backend status could not be loaded.
-        </p>
-        <p className="mt-6 border-l-2 border-danger pl-4 text-sm text-danger">
-          {health.error}
-        </p>
+      <section className="w-full max-w-4xl">
+        <PageHeader
+          eyebrow="Dashboard"
+          title="System health"
+          description="Backend status could not be loaded."
+        />
+        <div className="ps-card mt-6 border-l-4 border-l-danger p-5">
+          <p className="text-sm text-danger">{health.error}</p>
+        </div>
       </section>
     );
   }
@@ -28,47 +26,39 @@ export function HealthDashboard({ health }: HealthDashboardProps) {
   const isOk = status === "ok";
 
   return (
-    <section className="max-w-2xl">
-      <h1
-        className="text-3xl font-semibold tracking-tight text-ink"
-        style={{ fontFamily: "var(--font-display)" }}
-      >
-        System health
-      </h1>
-      <p className="mt-2 text-ink-muted">
-        Live status from the API health endpoint.
-      </p>
+    <section className="w-full max-w-4xl">
+      <PageHeader
+        eyebrow="Dashboard"
+        title="System health"
+        description="Live status from the API health endpoint."
+      />
 
-      <dl className="mt-8 grid gap-6 sm:grid-cols-3">
-        <div>
-          <dt className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+      <dl className="mt-8 grid gap-4 sm:grid-cols-3">
+        <div className="ps-card p-5">
+          <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-secondary">
             API status
           </dt>
-          <dd
-            className={`mt-1 text-2xl font-semibold capitalize ${
-              isOk ? "text-success" : "text-warning"
-            }`}
-          >
-            {status}
+          <dd className="mt-3 flex items-center gap-2">
+            <Badge variant={isOk ? "success" : "warning"}>
+              {status}
+            </Badge>
           </dd>
         </div>
-        <div>
-          <dt className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+        <div className="ps-card p-5">
+          <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-secondary">
             Database
           </dt>
-          <dd
-            className={`mt-1 text-2xl font-semibold capitalize ${
-              database === "up" ? "text-success" : "text-danger"
-            }`}
-          >
-            {database}
+          <dd className="mt-3 flex items-center gap-2">
+            <Badge variant={database === "up" ? "success" : "danger"}>
+              {database}
+            </Badge>
           </dd>
         </div>
-        <div>
-          <dt className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+        <div className="ps-card p-5">
+          <dt className="text-xs font-semibold uppercase tracking-[0.16em] text-secondary">
             Checked at
           </dt>
-          <dd className="mt-1 text-sm text-ink sm:text-base">
+          <dd className="mt-3 text-sm font-medium text-ink sm:text-base">
             <time dateTime={timestamp}>{formatTimestamp(timestamp)}</time>
           </dd>
         </div>

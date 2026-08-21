@@ -6,7 +6,7 @@ import type {
   Branch,
   ItemRequestActionType,
   ItemRequestListItem,
-  ItemRequestStatusFilter,
+  ItemRequestQueue,
   Store,
 } from "@printing-stationery/shared";
 import { fetchBranches } from "@/lib/api/branches";
@@ -18,30 +18,29 @@ import {
 import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
+import { getItemRequestQueue } from "@/lib/item-requests/queues";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
+import { ItemRequestQueueTabs } from "./item-request-queue-tabs";
+import { Badge } from "@/components/ui/badge";
 import {
   formatDateTime,
   ITEM_REQUEST_ACTION_LABELS,
   ITEM_REQUEST_STATUS_LABELS,
+  itemRequestStatusTone,
   personDisplayName,
 } from "./item-request-labels";
 
 const PAGE_SIZE = 20;
 
-const STATUS_FILTERS: ItemRequestStatusFilter[] = [
-  "ALL",
-  "DRAFT",
-  "PENDING_BRANCH_CHECKER",
-  "RETURNED_TO_BRANCH_MAKER",
-  "PENDING_CORPORATE_MAKER",
-  "PENDING_CORPORATE_CHECKER",
-  "RETURNED_TO_CORPORATE_MAKER",
-  "APPROVED",
-  "REJECTED",
-  "CANCELLED",
-];
+type ItemRequestListPageProps = {
+  queue?: ItemRequestQueue;
+};
 
-export function ItemRequestListPage() {
+export function ItemRequestListPage({
+  queue = "request-list",
+}: ItemRequestListPageProps) {
+  const queueMeta = getItemRequestQueue(queue);
   const { canAccessItemRequests, isAdmin } = useAuth();
   const [requests, setRequests] = useState<ItemRequestListItem[]>([]);
   const [page, setPage] = useState(1);
@@ -49,7 +48,6 @@ export function ItemRequestListPage() {
   const [totalItems, setTotalItems] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<ItemRequestStatusFilter>("ALL");
   const [requestingStoreId, setRequestingStoreId] = useState("");
   const [branchId, setBranchId] = useState("");
   const [canCreate, setCanCreate] = useState(false);
@@ -71,6 +69,15 @@ export function ItemRequestListPage() {
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    setPage(1);
+    setSearchInput("");
+    setSearch("");
+    setRequestingStoreId("");
+    setBranchId("");
+    setFeedback(null);
+  }, [queue]);
 
   useEffect(() => {
     async function loadContextAndFilters() {
@@ -121,7 +128,7 @@ export function ItemRequestListPage() {
       page,
       pageSize: PAGE_SIZE,
       search: search || undefined,
-      status,
+      queue,
       requestingStoreId: isAdmin ? requestingStoreId || undefined : undefined,
       branchId: isAdmin ? branchId || undefined : undefined,
     });
@@ -140,7 +147,7 @@ export function ItemRequestListPage() {
     setTotalItems(result.data.totalItems);
     setTotalPages(result.data.totalPages);
     setLoading(false);
-  }, [page, search, status, requestingStoreId, branchId, isAdmin]);
+  }, [page, search, queue, requestingStoreId, branchId, isAdmin]);
 
   useEffect(() => {
     if (!canAccessItemRequests) {
@@ -190,8 +197,7 @@ export function ItemRequestListPage() {
     return (
       <section className="w-full max-w-7xl">
         <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
         >
           Item Requests
         </h1>
@@ -202,32 +208,44 @@ export function ItemRequestListPage() {
     );
   }
 
+  const showCreate = Boolean(queueMeta.showCreate) && canCreate;
+
   return (
     <section className="w-full max-w-7xl">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
-            Item Requests
+            {queueMeta.title}
           </h1>
-          <p className="mt-2 max-w-2xl text-ink-muted">
-            Create and route stationery requests from a branch store through
-            checker and corporate approval.
-          </p>
+          <p className="mt-2 max-w-2xl text-ink-muted">{queueMeta.description}</p>
         </div>
-        {canCreate ? (
+        {showCreate ? (
           <Link
             href="/requests/item-requests/new"
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
           >
             New Request
           </Link>
         ) : null}
       </div>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-6">
+        <ItemRequestQueueTabs activeQueue={queue} />
+      </div>
+
+      {queueMeta.showCreate && !canCreate && !isAdmin ? (
+        <div className="mt-4 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm text-ink">
+          <p className="font-semibold text-warning">Cannot create requests yet</p>
+          <p className="mt-1 text-ink-muted">
+            You need an active Store User assignment as the maker of a branch store.
+            Ask an admin to set this up in Store User Setup, then refresh this page.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="flex min-w-0 flex-col gap-1 text-sm sm:col-span-2 lg:col-span-1">
           <span className="font-medium text-ink">Search</span>
           <input
@@ -235,65 +253,42 @@ export function ItemRequestListPage() {
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Request number, store, item or employee"
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
-        </label>
-        <label className="flex w-full flex-col gap-1 text-sm">
-          <span className="font-medium text-ink">Status</span>
-          <select
-            value={status}
-            onChange={(event) => {
-              setPage(1);
-              setStatus(event.target.value as ItemRequestStatusFilter);
-            }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-          >
-            {STATUS_FILTERS.map((option) => (
-              <option key={option} value={option}>
-                {option === "ALL"
-                  ? "All"
-                  : ITEM_REQUEST_STATUS_LABELS[option]}
-              </option>
-            ))}
-          </select>
         </label>
         {isAdmin ? (
           <>
             <label className="flex w-full flex-col gap-1 text-sm">
               <span className="font-medium text-ink">Requesting store</span>
-              <select
+              <SearchableSelect
                 value={requestingStoreId}
-                onChange={(event) => {
+                onChange={(nextValue) => {
                   setPage(1);
-                  setRequestingStoreId(event.target.value);
+                  setRequestingStoreId(nextValue);
                 }}
-                className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-              >
-                <option value="">All stores</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.storeCode} — {store.storeName}
-                  </option>
-                ))}
-              </select>
+                placeholder="All stores"
+                searchPlaceholder="Search stores…"
+                options={stores.map((store) => ({
+                  value: store.id,
+                  label: `${store.storeCode} — ${store.storeName}`,
+                }))}
+              />
             </label>
             <label className="flex w-full flex-col gap-1 text-sm">
               <span className="font-medium text-ink">Branch</span>
-              <select
+              <SearchableSelect
                 value={branchId}
-                onChange={(event) => {
+                onChange={(nextValue) => {
                   setPage(1);
-                  setBranchId(event.target.value);
+                  setBranchId(nextValue);
                 }}
-                className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-              >
-                <option value="">All branches</option>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.branchCode} — {branch.branchName}
-                  </option>
-                ))}
-              </select>
+                placeholder="All branches"
+                searchPlaceholder="Search branches…"
+                options={branches.map((branch) => ({
+                  value: branch.id,
+                  label: `${branch.branchCode} — ${branch.branchName}`,
+                }))}
+              />
             </label>
           </>
         ) : null}
@@ -326,21 +321,21 @@ export function ItemRequestListPage() {
             <p className="mt-1 text-sm text-ink-muted">{loadError}</p>
           </div>
         ) : requests.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
             <p className="font-medium text-ink">No item requests found</p>
             <p className="mt-1 text-sm text-ink-muted">
-              {search || status !== "ALL" || requestingStoreId || branchId
+              {search || requestingStoreId || branchId
                 ? "Try adjusting search or filters."
-                : canCreate
+                : showCreate
                   ? "Create a request to get started."
-                  : "No requests are currently visible to you."}
+                  : "No requests are in this queue for you right now."}
             </p>
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
+            <div className="ps-table-shell">
               <table className="min-w-[72rem] w-full text-left text-sm">
-                <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
                       Request number
@@ -372,7 +367,7 @@ export function ItemRequestListPage() {
                   {requests.map((request) => (
                     <tr
                       key={request.id}
-                      className="border-b border-border last:border-b-0"
+                      className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                     >
                       <td className="whitespace-nowrap px-3 py-3 font-medium">
                         {request.requestNumber}
@@ -395,7 +390,9 @@ export function ItemRequestListPage() {
                         {request.itemCount}
                       </td>
                       <td className="min-w-[10rem] px-3 py-3">
-                        {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                        <Badge variant={itemRequestStatusTone(request.status)}>
+                          {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                        </Badge>
                       </td>
                       <td className="min-w-[10rem] px-3 py-3">
                         {personDisplayName(request.pendingWith)}
@@ -404,14 +401,14 @@ export function ItemRequestListPage() {
                         <div className="flex min-w-[16rem] flex-wrap gap-2">
                           <Link
                             href={`/requests/item-requests/${request.id}`}
-                            className="text-accent hover:underline"
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
                           >
                             View
                           </Link>
                           {request.canCreateIssue ? (
                             <Link
                               href={`/requests/item-requests/${request.id}/issue`}
-                              className="text-accent hover:underline"
+                              className="font-medium text-accent hover:text-accent-dark hover:underline"
                             >
                               Create Item Issue
                             </Link>
@@ -419,7 +416,7 @@ export function ItemRequestListPage() {
                           {request.canEdit ? (
                             <Link
                               href={`/requests/item-requests/${request.id}/edit`}
-                              className="text-accent hover:underline"
+                              className="font-medium text-accent hover:text-accent-dark hover:underline"
                             >
                               Edit
                             </Link>

@@ -20,6 +20,7 @@ import {
 import { fetchBranches } from "@/lib/api/branches";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { fetchStores } from "@/lib/api/stores";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 type StoreFormDialogProps = {
   open: boolean;
@@ -437,7 +438,6 @@ export function StoreFormDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             {mode === "create" ? "Add Store" : "Edit Store"}
           </h2>
@@ -497,23 +497,20 @@ export function StoreFormDialog({
             error={fieldErrors.branchId}
             htmlFor="store-branch"
           >
-            <select
+            <SearchableSelect
               id="store-branch"
               name="branchId"
               value={form.branchId}
-              onChange={(event) => updateField("branchId", event.target.value)}
+              onChange={(nextValue) => updateField("branchId", nextValue)}
               disabled={saving || optionsLoading}
-              className={inputClassName(fieldErrors.branchId)}
-              aria-invalid={Boolean(fieldErrors.branchId)}
-            >
-              <option value="">Select a branch</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.branchCode} — {branch.branchName}
-                  {branch.isActive ? "" : " (Inactive)"}
-                </option>
-              ))}
-            </select>
+              required
+              placeholder="Select a branch"
+              searchPlaceholder="Search branches…"
+              options={branches.map((branch) => ({
+                value: branch.id,
+                label: `${branch.branchCode} — ${branch.branchName}${branch.isActive ? "" : " (Inactive)"}`,
+              }))}
+            />
           </Field>
 
           <Field
@@ -522,25 +519,21 @@ export function StoreFormDialog({
             htmlFor="under-store"
             hint="Optional. Select an existing store under which this store operates."
           >
-            <select
+            <SearchableSelect
               id="under-store"
               name="underStoreId"
               value={form.underStoreId}
-              onChange={(event) =>
-                updateField("underStoreId", event.target.value)
-              }
+              onChange={(nextValue) => updateField("underStoreId", nextValue)}
               disabled={saving || optionsLoading}
-              className={inputClassName(fieldErrors.underStoreId)}
-              aria-invalid={Boolean(fieldErrors.underStoreId)}
-            >
-              <option value="">No Under Store</option>
-              {underStoreOptions.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {underStoreLabelById.get(store.id) ??
-                    formatUnderStoreOptionLabel(store)}
-                </option>
-              ))}
-            </select>
+              placeholder="No Under Store"
+              searchPlaceholder="Search stores…"
+              options={underStoreOptions.map((store) => ({
+                value: store.id,
+                label:
+                  underStoreLabelById.get(store.id) ??
+                  formatUnderStoreOptionLabel(store),
+              }))}
+            />
           </Field>
 
           <label className="flex flex-col gap-1 text-sm text-ink">
@@ -620,7 +613,7 @@ export function StoreFormDialog({
           <button
             type="submit"
             disabled={saving || optionsLoading || Boolean(optionsError)}
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving
               ? "Saving…"

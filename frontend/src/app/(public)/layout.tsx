@@ -6,8 +6,10 @@ export default function PublicLayout({
   children: ReactNode;
 }>) {
   return (
-    <div className="min-h-screen bg-paper">
-      <div className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-4 py-10">
+    <div className="relative min-h-screen bg-paper">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-accent" />
+      <div className="pointer-events-none absolute inset-x-0 top-48 h-1 bg-secondary" />
+      <div className="relative mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-4 py-10">
         {children}
       </div>
     </div>

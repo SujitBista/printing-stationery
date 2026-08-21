@@ -23,6 +23,7 @@ import {
 import { fetchUnits } from "@/lib/api/units";
 import { ItemFormDialog, returnTypeLabel } from "./item-form-dialog";
 import { ItemImportDialog } from "./item-import-dialog";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 const PAGE_SIZE = 20;
 
@@ -227,8 +228,7 @@ export function ItemSetupPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
             Item Setup
           </h1>
@@ -241,14 +241,14 @@ export function ItemSetupPage() {
             <button
               type="button"
               onClick={() => setImportDialogOpen(true)}
-              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+              className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft font-medium text-ink hover:bg-paper"
             >
               Import Items
             </button>
             <button
               type="button"
               onClick={openCreateDialog}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
             >
               Add New
             </button>
@@ -264,7 +264,7 @@ export function ItemSetupPage() {
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Search by code, name, unit, or group"
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
@@ -275,7 +275,7 @@ export function ItemSetupPage() {
               setPage(1);
               setStatus(event.target.value as ItemStatusFilter);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="ALL">All</option>
             <option value="ACTIVE">Active</option>
@@ -284,39 +284,35 @@ export function ItemSetupPage() {
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
           <span className="font-medium text-ink">Unit</span>
-          <select
+          <SearchableSelect
             value={unitId}
-            onChange={(event) => {
+            onChange={(nextValue) => {
               setPage(1);
-              setUnitId(event.target.value);
+              setUnitId(nextValue);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-          >
-            <option value="">All units</option>
-            {units.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.unitName}
-              </option>
-            ))}
-          </select>
+            placeholder="All units"
+            searchPlaceholder="Search units…"
+            options={units.map((unit) => ({
+              value: unit.id,
+              label: unit.unitName,
+            }))}
+          />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
           <span className="font-medium text-ink">Item Group</span>
-          <select
+          <SearchableSelect
             value={itemGroupId}
-            onChange={(event) => {
+            onChange={(nextValue) => {
               setPage(1);
-              setItemGroupId(event.target.value);
+              setItemGroupId(nextValue);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-          >
-            <option value="">All item groups</option>
-            {itemGroups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.groupCode} — {group.groupName}
-              </option>
-            ))}
-          </select>
+            placeholder="All item groups"
+            searchPlaceholder="Search item groups…"
+            options={itemGroups.map((group) => ({
+              value: group.id,
+              label: `${group.groupCode} — ${group.groupName}`,
+            }))}
+          />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
           <span className="font-medium text-ink">Group Type</span>
@@ -326,7 +322,7 @@ export function ItemSetupPage() {
               setPage(1);
               setGroupType(event.target.value as GroupType | "");
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="">All group types</option>
             <option value="INVENTORY">{groupTypeLabel("INVENTORY")}</option>
@@ -368,7 +364,7 @@ export function ItemSetupPage() {
             <p className="mt-1 text-sm text-ink-muted">{loadError}</p>
           </div>
         ) : items.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
             <p className="font-medium text-ink">No items found</p>
             <p className="mt-1 text-sm text-ink-muted">
               {search ||
@@ -382,9 +378,9 @@ export function ItemSetupPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
+            <div className="ps-table-shell">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
                       Item Code
@@ -428,7 +424,7 @@ export function ItemSetupPage() {
                   {items.map((item) => (
                     <tr
                       key={item.id}
-                      className="border-b border-border last:border-b-0"
+                      className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                     >
                       <td className="whitespace-nowrap px-3 py-3 font-medium">
                         {item.itemCode}
@@ -462,9 +458,7 @@ export function ItemSetupPage() {
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
                         <span
-                          className={
-                            item.isActive ? "text-success" : "text-ink-muted"
-                          }
+                          className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${item.isActive ? "border-secondary-tint bg-secondary-soft text-secondary-dark" : "border-border-strong bg-paper text-ink-muted"}`}
                         >
                           {item.isActive ? "Active" : "Inactive"}
                         </span>
@@ -475,7 +469,7 @@ export function ItemSetupPage() {
                           <button
                             type="button"
                             onClick={() => openEditDialog(item)}
-                            className="text-accent hover:underline"
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
                           >
                             Edit
                           </button>

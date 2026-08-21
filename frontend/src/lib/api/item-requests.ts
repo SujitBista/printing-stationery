@@ -26,6 +26,9 @@ function buildListQueryString(query: ItemRequestListQuery): string {
   params.set("page", String(query.page));
   params.set("pageSize", String(query.pageSize));
   params.set("status", query.status);
+  if (query.queue) {
+    params.set("queue", query.queue);
+  }
   if (query.search) {
     params.set("search", query.search);
   }
