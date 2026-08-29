@@ -191,11 +191,17 @@ function CollapsibleNavGroup({
         <span>{item.label}</span>
         <span
           aria-hidden="true"
-          className={`inline-block text-[0.65rem] leading-none transition-transform duration-200 ${
-            expanded ? "rotate-90" : ""
-          }`}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-current/35 bg-paper-elevated p-1.5"
         >
-          ▸
+          <svg
+            viewBox="0 0 20 12"
+            fill="currentColor"
+            className={`h-full w-full transition-transform duration-200 ${
+              expanded ? "rotate-180" : ""
+            }`}
+          >
+            <path d="M0 0h20L10 12 0 0Z" />
+          </svg>
         </span>
       </button>
 

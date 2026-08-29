@@ -48,28 +48,6 @@ function getPortalRoot(node: HTMLElement | null): HTMLElement | null {
   return node.closest("dialog") ?? document.body;
 }
 
-function computePanelStyle(trigger: HTMLElement): CSSProperties {
-  const rect = trigger.getBoundingClientRect();
-  const gap = 4;
-  const preferredHeight = 288;
-  const spaceBelow = window.innerHeight - rect.bottom - gap;
-  const spaceAbove = rect.top - gap;
-  const openUpward = spaceBelow < 180 && spaceAbove > spaceBelow;
-  const available = openUpward ? spaceAbove : spaceBelow;
-  const height = Math.min(preferredHeight, Math.max(180, available));
-
-  return {
-    position: "fixed",
-    left: Math.max(8, rect.left),
-    width: Math.max(rect.width, 240),
-    zIndex: 2147483646,
-    maxHeight: height,
-    ...(openUpward
-      ? { bottom: window.innerHeight - rect.top + gap, top: "auto" }
-      : { top: rect.bottom + gap, bottom: "auto" }),
-  };
-}
-
 export function SearchableSelect({
   value,
   options,
@@ -96,7 +74,7 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
-  const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
 
   const selected = useMemo(
@@ -115,37 +93,44 @@ export function SearchableSelect({
   const visible = filtered.slice(0, maxVisibleOptions);
   const hiddenCount = Math.max(0, filtered.length - visible.length);
 
-  function openPanel() {
-    const trigger = triggerRef.current;
-    if (!trigger) {
-      return;
-    }
-    setPortalRoot(getPortalRoot(trigger));
-    setPanelStyle(computePanelStyle(trigger));
-    setOpen(true);
-  }
-
-  function closePanel() {
-    setOpen(false);
-    setPortalRoot(null);
-    setPanelStyle(null);
-  }
-
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) {
       return;
     }
+
+    const root = getPortalRoot(triggerRef.current);
+    setPortalRoot(root);
 
     function updatePosition() {
       const trigger = triggerRef.current;
       if (!trigger) {
         return;
       }
-      setPanelStyle(computePanelStyle(trigger));
+      const rect = trigger.getBoundingClientRect();
+      const gap = 4;
+      const preferredHeight = 288;
+      const spaceBelow = window.innerHeight - rect.bottom - gap;
+      const spaceAbove = rect.top - gap;
+      const openUpward = spaceBelow < 180 && spaceAbove > spaceBelow;
+      const available = openUpward ? spaceAbove : spaceBelow;
+      const height = Math.min(preferredHeight, Math.max(180, available));
+
+      // Fixed coords are viewport-relative; works for dialog top-layer and body.
+      setPanelStyle({
+        position: "fixed",
+        left: Math.max(8, rect.left),
+        width: Math.max(rect.width, 240),
+        zIndex: 2147483646,
+        maxHeight: height,
+        ...(openUpward
+          ? { bottom: window.innerHeight - rect.top + gap }
+          : { top: rect.bottom + gap }),
+      });
     }
 
     updatePosition();
     window.addEventListener("resize", updatePosition);
+    // Capture scroll from dialog and page.
     window.addEventListener("scroll", updatePosition, true);
     return () => {
       window.removeEventListener("resize", updatePosition);
@@ -175,11 +160,13 @@ export function SearchableSelect({
       ) {
         return;
       }
-      closePanel();
+      setOpen(false);
+      setPortalRoot(null);
     }
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
-        closePanel();
+        setOpen(false);
+        setPortalRoot(null);
       }
     }
     document.addEventListener("mousedown", onPointerDown);
@@ -195,12 +182,14 @@ export function SearchableSelect({
       return;
     }
     onChange(option.value);
-    closePanel();
+    setOpen(false);
+    setPortalRoot(null);
   }
 
   function clearSelection() {
     onChange("");
-    closePanel();
+    setOpen(false);
+    setPortalRoot(null);
   }
 
   function moveHighlight(delta: number) {
@@ -225,7 +214,10 @@ export function SearchableSelect({
     }
     if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      openPanel();
+      if (triggerRef.current) {
+        setPortalRoot(getPortalRoot(triggerRef.current));
+      }
+      setOpen(true);
     }
   }
 
@@ -250,7 +242,8 @@ export function SearchableSelect({
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      closePanel();
+      setOpen(false);
+      setPortalRoot(null);
     }
   }
 
@@ -260,7 +253,7 @@ export function SearchableSelect({
       : "min-h-10 rounded-lg border border-border bg-paper-elevated px-3 py-2 text-sm";
 
   const panel =
-    open && portalRoot && panelStyle
+    open && portalRoot
       ? createPortal(
           <div
             ref={panelRef}
@@ -344,10 +337,12 @@ export function SearchableSelect({
             return;
           }
           if (open) {
-            closePanel();
+            setOpen(false);
+            setPortalRoot(null);
             return;
           }
-          openPanel();
+          setPortalRoot(getPortalRoot(triggerRef.current));
+          setOpen(true);
         }}
         onKeyDown={onTriggerKeyDown}
         className={`flex w-full items-center justify-between gap-2 text-left outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60 ${triggerClass}`}
