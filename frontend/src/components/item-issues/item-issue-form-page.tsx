@@ -18,6 +18,7 @@ import {
 import { useAuth } from "@/lib/auth/auth-context";
 import { isItemIssueAccessDenied } from "@/lib/item-issues/permissions";
 import {
+  formatAvailableStockQuantity,
   formatDateTime,
   ITEM_ISSUE_STATUS_LABELS,
   personDisplayName,
@@ -329,7 +330,8 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
           ) : null}
           {!availability.some((line) => line.stockBalanceKnown) ? (
             <p className="border-l-2 border-warning pl-3 text-sm text-warning">
-              Stock balance unavailable. Stock validation will be enforced in a later posting milestone.
+              Stock balances could not be loaded for this store. Available stock will
+              show as 0 until the ledger can be read.
             </p>
           ) : null}
 
@@ -431,10 +433,11 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                       {line.previouslyIssuedQuantity}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">{line.remainingQuantity}</td>
-                    <td className="whitespace-nowrap px-3 py-3 text-ink-muted">
-                      {line.stockBalanceKnown
-                        ? line.availableStockQuantity ?? "0"
-                        : "Stock balance unavailable"}
+                    <td className="whitespace-nowrap px-3 py-3">
+                      {formatAvailableStockQuantity(
+                        line.availableStockQuantity,
+                        line.unit.unitName,
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">
                       <input

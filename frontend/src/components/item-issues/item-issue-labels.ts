@@ -29,3 +29,18 @@ export function formatDateTime(value: string): string {
   }
   return date.toLocaleString();
 }
+
+export function formatAvailableStockQuantity(
+  quantity: string | null | undefined,
+  unitName: string,
+): string {
+  const raw = quantity?.trim() || "0";
+  const sign = raw.startsWith("-") ? "-" : "";
+  const unsigned = sign ? raw.slice(1) : raw;
+  const [wholePart = "0", fractionPart] = unsigned.split(".");
+  const groupedWhole = wholePart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const formatted = fractionPart
+    ? `${sign}${groupedWhole}.${fractionPart}`
+    : `${sign}${groupedWhole}`;
+  return `${formatted} ${unitName}`;
+}

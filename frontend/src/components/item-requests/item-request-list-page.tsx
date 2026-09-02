@@ -18,7 +18,14 @@ import {
 import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
-import { getItemRequestQueue } from "@/lib/item-requests/queues";
+import {
+  shouldShowItemRequestCreateAction,
+  shouldShowItemRequestCreateAssignmentWarning,
+} from "@/lib/item-requests/permissions";
+import {
+  getItemRequestListRowActions,
+  getItemRequestQueue,
+} from "@/lib/item-requests/queues";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import { ItemRequestQueueTabs } from "./item-request-queue-tabs";
@@ -41,7 +48,7 @@ export function ItemRequestListPage({
   queue = "request-list",
 }: ItemRequestListPageProps) {
   const queueMeta = getItemRequestQueue(queue);
-  const { canAccessItemRequests, isAdmin } = useAuth();
+  const { canAccessItemRequests, isAdmin, user } = useAuth();
   const [requests, setRequests] = useState<ItemRequestListItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -208,7 +215,18 @@ export function ItemRequestListPage({
     );
   }
 
-  const showCreate = Boolean(queueMeta.showCreate) && canCreate;
+  const showCreate = shouldShowItemRequestCreateAction({
+    queueShowsCreate: Boolean(queueMeta.showCreate),
+    canCreate,
+    user,
+  });
+  const showCreateAssignmentWarning =
+    shouldShowItemRequestCreateAssignmentWarning({
+      queueShowsCreate: Boolean(queueMeta.showCreate),
+      canCreate,
+      isAdmin,
+      user,
+    });
 
   return (
     <section className="w-full max-w-7xl">
@@ -235,7 +253,7 @@ export function ItemRequestListPage({
         <ItemRequestQueueTabs activeQueue={queue} />
       </div>
 
-      {queueMeta.showCreate && !canCreate && !isAdmin ? (
+      {showCreateAssignmentWarning ? (
         <div className="mt-4 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm text-ink">
           <p className="font-semibold text-warning">Cannot create requests yet</p>
           <p className="mt-1 text-ink-muted">
@@ -364,79 +382,78 @@ export function ItemRequestListPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {requests.map((request) => (
-                    <tr
-                      key={request.id}
-                      className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
-                    >
-                      <td className="whitespace-nowrap px-3 py-3 font-medium">
-                        {request.requestNumber}
-                      </td>
-                      <td className="min-w-[12rem] px-3 py-3">
-                        <div className="font-medium">
-                          {request.requestingStore.storeName}
-                        </div>
-                        <div className="text-xs text-ink-muted">
-                          {request.requestingStore.storeCode}
-                        </div>
-                      </td>
-                      <td className="min-w-[10rem] px-3 py-3">
-                        {personDisplayName(request.createdBy)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        {formatDateTime(request.createdAt)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        {request.itemCount}
-                      </td>
-                      <td className="min-w-[10rem] px-3 py-3">
-                        <Badge variant={itemRequestStatusTone(request.status)}>
-                          {ITEM_REQUEST_STATUS_LABELS[request.status]}
-                        </Badge>
-                      </td>
-                      <td className="min-w-[10rem] px-3 py-3">
-                        {personDisplayName(request.pendingWith)}
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex min-w-[16rem] flex-wrap gap-2">
-                          <Link
-                            href={`/requests/item-requests/${request.id}`}
-                            className="font-medium text-accent hover:text-accent-dark hover:underline"
-                          >
-                            View
-                          </Link>
-                          {request.canCreateIssue ? (
+                  {requests.map((request) => {
+                    const rowActions = getItemRequestListRowActions(
+                      queue,
+                      request,
+                    );
+
+                    return (
+                      <tr
+                        key={request.id}
+                        className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
+                      >
+                        <td className="whitespace-nowrap px-3 py-3 font-medium">
+                          {request.requestNumber}
+                        </td>
+                        <td className="min-w-[12rem] px-3 py-3">
+                          <div className="font-medium">
+                            {request.requestingStore.storeName}
+                          </div>
+                          <div className="text-xs text-ink-muted">
+                            {request.requestingStore.storeCode}
+                          </div>
+                        </td>
+                        <td className="min-w-[10rem] px-3 py-3">
+                          {personDisplayName(request.createdBy)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          {formatDateTime(request.createdAt)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          {request.itemCount}
+                        </td>
+                        <td className="min-w-[10rem] px-3 py-3">
+                          <Badge variant={itemRequestStatusTone(request.status)}>
+                            {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                          </Badge>
+                        </td>
+                        <td className="min-w-[10rem] px-3 py-3">
+                          {personDisplayName(request.pendingWith)}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex min-w-[16rem] flex-wrap gap-2">
                             <Link
-                              href={`/requests/item-requests/${request.id}/issue`}
+                              href={`/requests/item-requests/${request.id}`}
                               className="font-medium text-accent hover:text-accent-dark hover:underline"
                             >
-                              Create Item Issue
+                              View
                             </Link>
-                          ) : null}
-                          {request.canEdit ? (
-                            <Link
-                              href={`/requests/item-requests/${request.id}/edit`}
-                              className="font-medium text-accent hover:text-accent-dark hover:underline"
-                            >
-                              Edit
-                            </Link>
-                          ) : null}
-                          {request.allowedActions.map((action) => (
-                            <button
-                              key={action}
-                              type="button"
-                              onClick={() =>
-                                setActionTarget({ request, action })
-                              }
-                              className="text-ink-muted hover:text-ink hover:underline"
-                            >
-                              {ITEM_REQUEST_ACTION_LABELS[action]}
-                            </button>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {rowActions.showCreateIssue ? (
+                              <Link
+                                href={`/requests/item-requests/${request.id}/issue`}
+                                className="font-medium text-accent hover:text-accent-dark hover:underline"
+                              >
+                                Create Item Issue
+                              </Link>
+                            ) : null}
+                            {rowActions.workflowActions.map((action) => (
+                              <button
+                                key={action}
+                                type="button"
+                                onClick={() =>
+                                  setActionTarget({ request, action })
+                                }
+                                className="text-ink-muted hover:text-ink hover:underline"
+                              >
+                                {ITEM_REQUEST_ACTION_LABELS[action]}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

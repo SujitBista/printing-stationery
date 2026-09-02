@@ -97,6 +97,7 @@ async function loadBranchLookups(): Promise<Map<string, BranchLookup[]>> {
 async function loadStoreLookups(): Promise<{
   byCode: Map<string, StoreLookup>;
   byName: Map<string, StoreLookup[]>;
+  byBranchId: Map<string, StoreLookup>;
 }> {
   const rows = await getDb()
     .select({
@@ -110,6 +111,7 @@ async function loadStoreLookups(): Promise<{
 
   const byCode = new Map<string, StoreLookup>();
   const byName = new Map<string, StoreLookup[]>();
+  const byBranchId = new Map<string, StoreLookup>();
   for (const row of rows) {
     byCode.set(normalizeNameKey(row.storeCode), row);
     const nameKey = normalizeNameKey(row.storeName);
@@ -119,8 +121,9 @@ async function loadStoreLookups(): Promise<{
     } else {
       byName.set(nameKey, [row]);
     }
+    byBranchId.set(row.branchId, row);
   }
-  return { byCode, byName };
+  return { byCode, byName, byBranchId };
 }
 
 function resolveBranch(
@@ -237,7 +240,7 @@ export async function previewStoreImport(
     }
   }
 
-  const branchNameByBranchInFile = new Map<string, Set<string>>();
+  const branchIdsInFile = new Set<string>();
 
   for (const row of parsedRows) {
     const validationError = validateParsedRow(row);
@@ -293,29 +296,23 @@ export async function previewStoreImport(
       continue;
     }
 
-    const namesForBranch =
-      branchNameByBranchInFile.get(branchResult.branch.id) ?? new Set();
-    if (namesForBranch.has(normalizeNameKey(row.storeName))) {
+    const existingOnBranch = storeLookups.byBranchId.get(branchResult.branch.id);
+    if (existingOnBranch) {
       invalidRows.push({
         rowNumber: row.rowNumber,
-        reason: `Duplicate store name "${row.storeName}" for branch "${branchResult.branch.branchName}" in the workbook.`,
+        reason: `Branch "${branchResult.branch.branchName}" already has a store.`,
       });
       continue;
     }
-    namesForBranch.add(normalizeNameKey(row.storeName));
-    branchNameByBranchInFile.set(branchResult.branch.id, namesForBranch);
 
-    const existingSameBranchName = (
-      storeLookups.byName.get(normalizeNameKey(row.storeName)) ?? []
-    ).some((store) => store.branchId === branchResult.branch!.id);
-    if (existingSameBranchName) {
-      existing.push({
+    if (branchIdsInFile.has(branchResult.branch.id)) {
+      invalidRows.push({
         rowNumber: row.rowNumber,
-        storeCode: row.storeCode,
-        storeName: row.storeName,
+        reason: `Another store in this workbook is already assigned to branch "${branchResult.branch.branchName}".`,
       });
       continue;
     }
+    branchIdsInFile.add(branchResult.branch.id);
 
     ready.push({
       rowNumber: row.rowNumber,
@@ -399,7 +396,8 @@ export async function confirmStoreImport(
         ),
       ];
 
-      const [existingCodeRows, branchRows, underStoreRows] = await Promise.all([
+      const [existingCodeRows, branchRows, underStoreRows, existingBranchStoreRows] =
+        await Promise.all([
         tx
           .select({
             storeCode: stores.storeCode,
@@ -430,6 +428,13 @@ export async function confirmStoreImport(
               .from(stores)
               .where(inArray(stores.id, underStoreIds))
           : Promise.resolve([]),
+        tx
+          .select({
+            id: stores.id,
+            branchId: stores.branchId,
+          })
+          .from(stores)
+          .where(inArray(stores.branchId, branchIds)),
       ]);
 
       const existingCodes = new Set(
@@ -437,6 +442,9 @@ export async function confirmStoreImport(
       );
       const branchById = new Map(branchRows.map((row) => [row.id, row]));
       const underStoreById = new Map(underStoreRows.map((row) => [row.id, row]));
+      const occupiedBranchIds = new Set(
+        existingBranchStoreRows.map((row) => row.branchId),
+      );
 
       for (const row of storesToImport) {
         const branch = branchById.get(row.branchId);
@@ -466,6 +474,17 @@ export async function confirmStoreImport(
       const toInsert = storesToImport.filter(
         (row) => !existingCodes.has(normalizeNameKey(row.storeCode)),
       );
+
+      const claimedBranchIds = new Set<string>();
+      for (const row of toInsert) {
+        if (occupiedBranchIds.has(row.branchId) || claimedBranchIds.has(row.branchId)) {
+          throw new AppError(
+            `This branch already has a store. A branch can have only one store. Cannot import ${row.storeCode}.`,
+            409,
+          );
+        }
+        claimedBranchIds.add(row.branchId);
+      }
 
       let importedCount = 0;
       for (const row of toInsert) {
@@ -512,6 +531,19 @@ export async function confirmStoreImport(
 
         if (existingNameRows.length > 0) {
           continue;
+        }
+
+        const existingBranchRows = await tx
+          .select({ id: stores.id })
+          .from(stores)
+          .where(sql`${stores.branchId} = ${row.branchId}`)
+          .limit(1);
+
+        if (existingBranchRows.length > 0) {
+          throw new AppError(
+            `This branch already has a store. A branch can have only one store. Cannot import ${row.storeCode}.`,
+            409,
+          );
         }
 
         await tx.insert(stores).values({

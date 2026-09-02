@@ -11,6 +11,7 @@ import {
 } from "@printing-stationery/shared";
 import {
   createStoreUser,
+  deleteStoreUser,
   getStoreUserById,
   listEligibleStoreApplicationUsers,
   listEligibleStores,
@@ -140,6 +141,20 @@ export async function updateStoreUserStatusHandler(
     );
     const assignment = await updateStoreUserStatus(id, input);
     res.status(200).json(assignment);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteStoreUserHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const id = parseOrThrow(storeUserIdSchema.safeParse(req.params.id));
+    await deleteStoreUser(id);
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

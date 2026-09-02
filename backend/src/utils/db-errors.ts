@@ -12,6 +12,9 @@ const ITEM_CODE_UNIQUE_INDEX = "items_item_code_lower_uidx";
 const ITEM_NAME_UNIQUE_INDEX = "items_item_name_lower_uidx";
 const STORE_CODE_UNIQUE_INDEX = "stores_store_code_lower_uidx";
 const STORE_BRANCH_NAME_UNIQUE_INDEX = "stores_branch_store_name_lower_uidx";
+const STORE_BRANCH_UNIQUE_INDEX = "stores_branch_id_uidx";
+const BRANCH_ALREADY_HAS_STORE_MESSAGE =
+  "This branch already has a store. A branch can have only one store.";
 const EMPLOYEE_CODE_UNIQUE_INDEX = "employees_employee_code_lower_uidx";
 const APPLICATION_USER_EMPLOYEE_UNIQUE_INDEX =
   "application_users_employee_id_uidx";
@@ -246,9 +249,25 @@ export function isStoreBranchNameUniqueViolation(error: unknown): boolean {
   return constraint === STORE_BRANCH_NAME_UNIQUE_INDEX;
 }
 
+export function isStoreBranchUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STORE_BRANCH_UNIQUE_INDEX;
+}
+
 export function mapStoreDatabaseError(error: unknown): never {
   if (isStoreCodeUniqueViolation(error)) {
     throw new AppError("A store with this code already exists.", 409, {
+      cause: error,
+    });
+  }
+
+  if (isStoreBranchUniqueViolation(error)) {
+    throw new AppError(BRANCH_ALREADY_HAS_STORE_MESSAGE, 409, {
       cause: error,
     });
   }

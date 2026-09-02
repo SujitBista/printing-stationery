@@ -14,6 +14,9 @@ import { stores, type StoreRow } from "../db/schema/stores.js";
 import { AppError } from "../utils/errors.js";
 import { mapStoreDatabaseError } from "../utils/db-errors.js";
 
+const BRANCH_ALREADY_HAS_STORE_MESSAGE =
+  "This branch already has a store. A branch can have only one store.";
+
 const underStores = alias(stores, "under_stores");
 
 type StoreJoinedRow = {
@@ -277,6 +280,33 @@ async function assertNoUnderStoreCycle(
   }
 }
 
+async function assertBranchHasNoOtherStore(
+  branchId: string,
+  excludeId?: string,
+): Promise<void> {
+  const conditions: SQL[] = [eq(stores.branchId, branchId)];
+  if (excludeId) {
+    conditions.push(sql`${stores.id} <> ${excludeId}`);
+  }
+
+  try {
+    const rows = await getDb()
+      .select({ id: stores.id })
+      .from(stores)
+      .where(and(...conditions))
+      .limit(1);
+
+    if (rows[0]) {
+      throw new AppError(BRANCH_ALREADY_HAS_STORE_MESSAGE, 409);
+    }
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    mapStoreDatabaseError(error);
+  }
+}
+
 export async function listStores(
   query: StoreListQuery,
 ): Promise<PaginatedStoreResponse> {
@@ -337,6 +367,7 @@ export async function getStoreById(id: string): Promise<Store> {
 
 export async function createStore(input: CreateStoreInput): Promise<Store> {
   await assertBranchForSave(input.branchId);
+  await assertBranchHasNoOtherStore(input.branchId);
   await assertUnderStoreForSave(input.underStoreId);
 
   const existingCode = await findStoreByCodeInsensitive(input.storeCode);
@@ -391,6 +422,7 @@ export async function updateStore(
   const existing = await getStoreById(id);
 
   await assertBranchForSave(input.branchId, existing.branchId);
+  await assertBranchHasNoOtherStore(input.branchId, id);
   await assertUnderStoreForSave(
     input.underStoreId,
     id,

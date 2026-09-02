@@ -7,6 +7,7 @@ import {
   listStoreUsersHandler,
   updateStoreUserHandler,
   updateStoreUserStatusHandler,
+  deleteStoreUserHandler,
 } from "../controllers/store-users.controller.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 
@@ -36,3 +37,4 @@ storeUsersRouter.patch(
   updateStoreUserStatusHandler,
 );
 storeUsersRouter.patch("/:id", requireAuth, adminOnly, updateStoreUserHandler);
+storeUsersRouter.delete("/:id", requireAuth, adminOnly, deleteStoreUserHandler);

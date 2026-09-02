@@ -860,3 +860,26 @@ export async function updateStoreUserStatus(
     mapStoreUserDatabaseError(error);
   }
 }
+
+export async function deleteStoreUser(id: string): Promise<void> {
+  const existing = await getJoinedStoreUserById(id);
+  if (!existing) {
+    throw new AppError("Store user configuration not found", 404);
+  }
+
+  try {
+    const rows = await getDb()
+      .delete(storeUsers)
+      .where(eq(storeUsers.id, id))
+      .returning({ id: storeUsers.id });
+
+    if (!rows[0]) {
+      throw new AppError("Store user configuration not found", 404);
+    }
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    mapStoreUserDatabaseError(error);
+  }
+}

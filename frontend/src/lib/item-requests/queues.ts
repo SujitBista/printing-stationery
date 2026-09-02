@@ -1,4 +1,7 @@
-import type { ItemRequestQueue } from "@printing-stationery/shared";
+import type {
+  ItemRequestActionType,
+  ItemRequestQueue,
+} from "@printing-stationery/shared";
 
 export type ItemRequestQueueDefinition = {
   key: ItemRequestQueue;
@@ -22,7 +25,7 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     tabLabel: "Request List",
     title: "Item Request",
     description:
-      "Create and manage stationery requests from your branch store.",
+      "Overview of stationery requests, including current status and who they are pending with.",
     href: "/requests/item-requests",
     showCreate: true,
   },
@@ -109,4 +112,52 @@ export function getItemRequestQueue(
     throw new Error(`Unknown item request queue: ${key}`);
   }
   return found;
+}
+
+/**
+ * Workflow decision actions that belong on each queue’s row actions.
+ * Request List is overview-only. Backend `allowedActions` remains the
+ * authorization source; this only chooses which of those actions to show.
+ */
+export const ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS: Record<
+  ItemRequestQueue,
+  readonly ItemRequestActionType[]
+> = {
+  "request-list": [],
+  recommend: ["RECOMMEND", "RETURN"],
+  review: ["FORWARD", "RETURN"],
+  approve: ["APPROVE", "REJECT", "RETURN"],
+  approved: [],
+  "partial-pending": [],
+  issued: [],
+  rejected: [],
+};
+
+const QUEUES_WITH_CREATE_ISSUE: ReadonlySet<ItemRequestQueue> = new Set([
+  "approved",
+  "issued",
+  "partial-pending",
+]);
+
+export type ItemRequestListRowActions = {
+  showCreateIssue: boolean;
+  workflowActions: ItemRequestActionType[];
+};
+
+export function getItemRequestListRowActions(
+  queue: ItemRequestQueue,
+  request: {
+    canCreateIssue: boolean;
+    allowedActions: readonly ItemRequestActionType[];
+  },
+): ItemRequestListRowActions {
+  const allowedOnQueue = ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS[queue];
+
+  return {
+    showCreateIssue:
+      request.canCreateIssue && QUEUES_WITH_CREATE_ISSUE.has(queue),
+    workflowActions: allowedOnQueue.filter((action) =>
+      request.allowedActions.includes(action),
+    ),
+  };
 }

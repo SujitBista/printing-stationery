@@ -20,6 +20,7 @@ import {
 import { fetchBranches } from "@/lib/api/branches";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { fetchStores } from "@/lib/api/stores";
+import { getOccupiedBranchIds } from "@/lib/stores/one-store-per-branch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 
 type StoreFormDialogProps = {
@@ -68,7 +69,9 @@ const EMPTY_FORM: FormState = {
 type BranchOption = Pick<
   Branch,
   "id" | "branchCode" | "branchName" | "isActive"
->;
+> & {
+  occupied?: boolean;
+};
 
 type UnderStoreOption = {
   id: string;
@@ -227,6 +230,15 @@ export function StoreFormDialog({
           ];
         }
       }
+
+      const occupiedBranchIds = getOccupiedBranchIds(
+        allStoresResult.data,
+        mode === "edit" && initialStore ? initialStore.id : null,
+      );
+      nextBranches = nextBranches.map((branch) => ({
+        ...branch,
+        occupied: occupiedBranchIds.has(branch.id),
+      }));
 
       const underStoreById = new Map(
         allStoresResult.data.map((store) => [store.id, store.underStoreId]),
@@ -496,6 +508,7 @@ export function StoreFormDialog({
             required
             error={fieldErrors.branchId}
             htmlFor="store-branch"
+            hint="Each branch can have only one store."
           >
             <SearchableSelect
               id="store-branch"
@@ -508,8 +521,12 @@ export function StoreFormDialog({
               searchPlaceholder="Search branches…"
               options={branches.map((branch) => ({
                 value: branch.id,
-                label: `${branch.branchCode} — ${branch.branchName}${branch.isActive ? "" : " (Inactive)"}`,
+                label: `${branch.branchCode} — ${branch.branchName}${
+                  branch.isActive ? "" : " (Inactive)"
+                }${branch.occupied ? " (already has a store)" : ""}`,
+                disabled: Boolean(branch.occupied),
               }))}
+              emptyMessage="No matching branches"
             />
           </Field>
 

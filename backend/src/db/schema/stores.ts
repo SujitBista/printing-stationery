@@ -40,7 +40,7 @@ export const stores = pgTable(
       table.branchId,
       sql`lower(${table.storeName})`,
     ),
-    index("stores_branch_id_idx").on(table.branchId),
+    uniqueIndex("stores_branch_id_uidx").on(table.branchId),
     index("stores_under_store_id_idx").on(table.underStoreId),
     index("stores_is_active_idx").on(table.isActive),
     foreignKey({
