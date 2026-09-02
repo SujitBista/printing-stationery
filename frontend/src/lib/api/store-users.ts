@@ -303,3 +303,19 @@ export async function updateStoreUserStatus(
     "Failed to update store user status",
   );
 }
+
+export async function deleteStoreUser(
+  id: string,
+): Promise<ApiResult<null>> {
+  const parsedId = storeUserIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid store user id", status: 400 };
+  }
+
+  return requestJson(
+    `/api/store-users/${parsedId.data}`,
+    { method: "DELETE" },
+    () => ({ success: true, data: null }),
+    "Failed to delete store user",
+  );
+}

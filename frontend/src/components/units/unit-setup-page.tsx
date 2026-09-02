@@ -171,8 +171,7 @@ export function UnitSetupPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
             Unit Setup
           </h1>
@@ -186,14 +185,14 @@ export function UnitSetupPage() {
             <button
               type="button"
               onClick={() => setImportDialogOpen(true)}
-              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+              className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft font-medium text-ink hover:bg-paper"
             >
               Import Units
             </button>
             <button
               type="button"
               onClick={openCreateDialog}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
             >
               Add Unit
             </button>
@@ -209,7 +208,7 @@ export function UnitSetupPage() {
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Search by unit name"
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm sm:w-48">
@@ -220,7 +219,7 @@ export function UnitSetupPage() {
               setPage(1);
               setStatus(event.target.value as UnitStatusFilter);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="ALL">All</option>
             <option value="ACTIVE">Active</option>
@@ -256,7 +255,7 @@ export function UnitSetupPage() {
             <p className="mt-1 text-sm text-ink-muted">{loadError}</p>
           </div>
         ) : units.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
             <p className="font-medium text-ink">No units found</p>
             <p className="mt-1 text-sm text-ink-muted">
               {search || status !== "ALL"
@@ -266,9 +265,9 @@ export function UnitSetupPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
+            <div className="ps-table-shell">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="px-3 py-2 font-semibold">Unit Name</th>
                     <th className="px-3 py-2 font-semibold">Status</th>
@@ -279,14 +278,12 @@ export function UnitSetupPage() {
                   {units.map((unit) => (
                     <tr
                       key={unit.id}
-                      className="border-b border-border last:border-b-0"
+                      className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                     >
                       <td className="px-3 py-3 font-medium">{unit.unitName}</td>
                       <td className="px-3 py-3">
                         <span
-                          className={
-                            unit.isActive ? "text-success" : "text-ink-muted"
-                          }
+                          className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${unit.isActive ? "border-secondary-tint bg-secondary-soft text-secondary-dark" : "border-border-strong bg-paper text-ink-muted"}`}
                         >
                           {unit.isActive ? "Active" : "Inactive"}
                         </span>
@@ -297,7 +294,7 @@ export function UnitSetupPage() {
                           <button
                             type="button"
                             onClick={() => openEditDialog(unit)}
-                            className="text-accent hover:underline"
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
                           >
                             Edit
                           </button>

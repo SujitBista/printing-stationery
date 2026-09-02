@@ -14,11 +14,13 @@ import {
 import { fetchItemIssueEligibility } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
 import { shouldShowCreateItemIssueButton } from "@/lib/item-issues/permissions";
+import { Badge } from "@/components/ui/badge";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import {
   formatDateTime,
   ITEM_REQUEST_ACTION_LABELS,
   ITEM_REQUEST_STATUS_LABELS,
+  itemRequestStatusTone,
   personDisplayName,
 } from "./item-request-labels";
 
@@ -132,8 +134,7 @@ export function ItemRequestDetailPage() {
     return (
       <section className="w-full max-w-5xl">
         <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
         >
           Item Requests
         </h1>
@@ -148,7 +149,7 @@ export function ItemRequestDetailPage() {
     <section className="w-full max-w-5xl">
       <Link
         href="/requests/item-requests"
-        className="text-sm text-accent hover:underline"
+        className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
       >
         Back to Item Requests
       </Link>
@@ -164,23 +165,24 @@ export function ItemRequestDetailPage() {
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h1
-                className="text-3xl font-semibold tracking-tight text-ink"
-                style={{ fontFamily: "var(--font-display)" }}
+                className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
               >
                 {request.requestNumber}
               </h1>
-              <p className="mt-1 text-ink-muted">
-                {ITEM_REQUEST_STATUS_LABELS[request.status]}
+              <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-muted">
+                <Badge variant={itemRequestStatusTone(request.status)}>
+                  {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                </Badge>
                 {request.pendingWith
-                  ? ` · Pending with ${personDisplayName(request.pendingWith)}`
-                  : ""}
+                  ? `Pending with ${personDisplayName(request.pendingWith)}`
+                  : null}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {canCreateIssue ? (
                 <Link
                   href={`/requests/item-requests/${request.id}/issue`}
-                  className="rounded-md border border-border px-4 py-2 text-sm"
+                  className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
                 >
                   Create Item Issue
                 </Link>
@@ -188,7 +190,7 @@ export function ItemRequestDetailPage() {
               {request.canEdit ? (
                 <Link
                   href={`/requests/item-requests/${request.id}/edit`}
-                  className="rounded-md border border-border px-4 py-2 text-sm"
+                  className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
                 >
                   Edit
                 </Link>
@@ -198,7 +200,7 @@ export function ItemRequestDetailPage() {
                   key={action}
                   type="button"
                   onClick={() => setPendingAction(action)}
-                  className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
                 >
                   {ITEM_REQUEST_ACTION_LABELS[action]}
                 </button>
@@ -255,9 +257,9 @@ export function ItemRequestDetailPage() {
             </p>
           ) : null}
 
-          <div className="mt-6 overflow-x-auto rounded-md border border-border bg-paper-elevated">
+          <div className="mt-6 ps-table-shell">
             <table className="min-w-[40rem] w-full text-left text-sm">
-              <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+              <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2 font-semibold">
                     Item
@@ -274,7 +276,7 @@ export function ItemRequestDetailPage() {
                 {request.lines.map((line) => (
                   <tr
                     key={line.id}
-                    className="border-b border-border last:border-b-0"
+                    className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                   >
                     <td className="px-3 py-3">
                       <div className="font-medium">
@@ -301,7 +303,6 @@ export function ItemRequestDetailPage() {
           <div className="mt-8">
             <h2
               className="text-xl font-semibold tracking-tight"
-              style={{ fontFamily: "var(--font-display)" }}
             >
               Workflow history
             </h2>

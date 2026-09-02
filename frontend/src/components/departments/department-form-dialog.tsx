@@ -195,7 +195,6 @@ export function DepartmentFormDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             {mode === "create" ? "Add Department" : "Edit Department"}
           </h2>
@@ -263,7 +262,7 @@ export function DepartmentFormDialog({
           ) : (
             <div className="rounded-md border border-border bg-paper px-3 py-2 text-sm">
               <span className="text-ink-muted">Status: </span>
-              <span className={form.isActive ? "text-success" : "text-ink-muted"}>
+              <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${form.isActive ? "border-secondary-tint bg-secondary-soft text-secondary-dark" : "border-border-strong bg-paper text-ink-muted"}`}>
                 {form.isActive ? "Active" : "Inactive"}
               </span>
               <p className="mt-1 text-xs text-ink-muted">
@@ -291,7 +290,7 @@ export function DepartmentFormDialog({
           <button
             type="submit"
             disabled={saving}
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving
               ? "Saving…"

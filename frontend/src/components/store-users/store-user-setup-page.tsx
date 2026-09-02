@@ -16,12 +16,15 @@ import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import {
   createStoreUser,
+  deleteStoreUser,
   fetchEligibleStores,
   fetchStoreUsers,
   updateStoreUser,
   updateStoreUserStatus,
 } from "@/lib/api/store-users";
 import { StoreUserFormDialog } from "./store-user-form-dialog";
+import { StoreUserDeleteDialog } from "./store-user-delete-dialog";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 const PAGE_SIZE = 20;
 
@@ -65,7 +68,12 @@ export function StoreUserSetupPage() {
     null,
   );
   const [saving, setSaving] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [deletingAssignment, setDeletingAssignment] = useState<StoreUser | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
   const [, startTransition] = useTransition();
 
   const loadEligibleStores = useCallback(async () => {
@@ -144,6 +152,11 @@ export function StoreUserSetupPage() {
     setAssignments(result.data.items);
     setTotalItems(result.data.totalItems);
     setTotalPages(result.data.totalPages);
+    setSelectedId((current) =>
+      current && result.data.items.some((item) => item.id === current)
+        ? current
+        : null,
+    );
     setLoading(false);
   }, [page, search, status, storeId, branchId]);
 
@@ -246,12 +259,33 @@ export function StoreUserSetupPage() {
     await Promise.all([loadAssignments(), loadEligibleStores()]);
   }
 
+  async function handleDelete() {
+    if (!deletingAssignment) {
+      return;
+    }
+
+    setDeleting(true);
+    const result = await deleteStoreUser(deletingAssignment.id);
+    setDeleting(false);
+
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+
+    setDeletingAssignment(null);
+    setSelectedId(null);
+    setFeedback({
+      type: "success",
+      message: "Store user assignment deleted.",
+    });
+    await Promise.all([loadAssignments(), loadEligibleStores()]);
+  }
+
   if (!canManageStoreUsers) {
     return (
       <section className="w-full max-w-7xl">
         <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
         >
           Store User Setup
         </h1>
@@ -266,14 +300,37 @@ export function StoreUserSetupPage() {
     dialogMode === "edit" && editingAssignment
       ? [editingAssignment.store]
       : eligibleStores;
+  const selectedAssignment =
+    assignments.find((assignment) => assignment.id === selectedId) ?? null;
+
+  function handleToolbarEdit() {
+    if (!selectedAssignment) {
+      setFeedback({
+        type: "error",
+        message: "Select a store user assignment to edit.",
+      });
+      return;
+    }
+    openEditDialog(selectedAssignment);
+  }
+
+  function handleToolbarDelete() {
+    if (!selectedAssignment) {
+      setFeedback({
+        type: "error",
+        message: "Select a store user assignment to delete.",
+      });
+      return;
+    }
+    setDeletingAssignment(selectedAssignment);
+  }
 
   return (
     <section className="w-full max-w-7xl">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
             Store User Setup
           </h1>
@@ -281,15 +338,6 @@ export function StoreUserSetupPage() {
             Assign a Maker and their Checker/Supervisor to each Store. Employee
             and Branch details come from Application User Setup.
           </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={openCreateDialog}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
-          >
-            Add New
-          </button>
         </div>
       </div>
 
@@ -301,7 +349,7 @@ export function StoreUserSetupPage() {
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Store, maker, supervisor or username"
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
@@ -312,7 +360,7 @@ export function StoreUserSetupPage() {
               setPage(1);
               setStatus(event.target.value as StoreUserStatusFilter);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="ALL">All</option>
             <option value="ACTIVE">Active</option>
@@ -321,40 +369,76 @@ export function StoreUserSetupPage() {
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
           <span className="font-medium text-ink">Store</span>
-          <select
+          <SearchableSelect
             value={storeId}
-            onChange={(event) => {
+            onChange={(nextValue) => {
               setPage(1);
-              setStoreId(event.target.value);
+              setStoreId(nextValue);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-          >
-            <option value="">All stores</option>
-            {stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.storeCode} — {store.storeName}
-              </option>
-            ))}
-          </select>
+            placeholder="All stores"
+            searchPlaceholder="Search stores…"
+            options={stores.map((store) => ({
+              value: store.id,
+              label: `${store.storeCode} — ${store.storeName}`,
+            }))}
+          />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
           <span className="font-medium text-ink">Branch</span>
-          <select
+          <SearchableSelect
             value={branchId}
-            onChange={(event) => {
+            onChange={(nextValue) => {
               setPage(1);
-              setBranchId(event.target.value);
+              setBranchId(nextValue);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-          >
-            <option value="">All branches</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.branchCode} — {branch.branchName}
-              </option>
-            ))}
-          </select>
+            placeholder="All branches"
+            searchPlaceholder="Search branches…"
+            options={branches.map((branch) => ({
+              value: branch.id,
+              label: `${branch.branchCode} — ${branch.branchName}`,
+            }))}
+          />
         </label>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={openCreateDialog}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
+        >
+          Add New
+        </button>
+        <button
+          type="button"
+          onClick={handleToolbarEdit}
+          disabled={!selectedAssignment}
+          className="rounded-lg border border-border bg-paper-elevated px-4 py-2 text-sm font-semibold text-ink hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={handleToolbarDelete}
+          disabled={!selectedAssignment || deleting}
+          className="rounded-lg border border-danger/40 bg-paper-elevated px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {deleting ? "Deleting…" : "Delete"}
+        </button>
+        {selectedAssignment ? (
+          <button
+            type="button"
+            onClick={() => void handleToggleStatus(selectedAssignment)}
+            disabled={statusUpdatingId === selectedAssignment.id}
+            className="rounded-lg border border-border bg-paper-elevated px-4 py-2 text-sm font-semibold text-ink hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {statusUpdatingId === selectedAssignment.id
+              ? "Updating…"
+              : selectedAssignment.isActive
+                ? "Deactivate"
+                : "Activate"}
+          </button>
+        ) : null}
       </div>
 
       {feedback ? (
@@ -384,7 +468,7 @@ export function StoreUserSetupPage() {
             <p className="mt-1 text-sm text-ink-muted">{loadError}</p>
           </div>
         ) : assignments.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
             <p className="font-medium text-ink">No store user assignments found</p>
             <p className="mt-1 text-sm text-ink-muted">
               {search || status !== "ALL" || storeId || branchId
@@ -394,104 +478,104 @@ export function StoreUserSetupPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
-              <table className="min-w-[64rem] w-full text-left text-sm">
-                <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+            <div className="ps-table-shell">
+              <table className="min-w-[72rem] w-full text-left text-sm">
+                <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Store
+                      S.N.
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Store User
+                      StoreName
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Maker Username
+                      Employee Code
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Supervisor
+                      Employee Name
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Supervisor Username
+                      SupervisorCode
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Branch
+                      SupervisorName
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 font-semibold">
+                      UserSource
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 font-semibold">
+                      EmpUser
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 font-semibold">
+                      SupervisorUser
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
                       Status
                     </th>
-                    <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Actions
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {assignments.map((assignment) => (
-                    <tr
-                      key={assignment.id}
-                      className="border-b border-border last:border-b-0"
-                    >
-                      <td className="min-w-[12rem] px-3 py-3">
-                        <div className="font-medium">
-                          {assignment.store.storeName}
-                        </div>
-                        <div className="text-xs text-ink-muted">
-                          {assignment.store.storeCode}
-                        </div>
-                      </td>
-                      <td className="min-w-[10rem] px-3 py-3 font-medium">
-                        {employeeDisplayName(assignment.maker.employee)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        {assignment.maker.username}
-                      </td>
-                      <td className="min-w-[10rem] px-3 py-3">
-                        {employeeDisplayName(assignment.supervisor.employee)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        {assignment.supervisor.username}
-                      </td>
-                      <td className="min-w-[10rem] px-3 py-3">
-                        <div>{assignment.store.branch.branchName}</div>
-                        <div className="text-xs text-ink-muted">
-                          {assignment.store.branch.branchCode}
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        <span
-                          className={
-                            assignment.isActive
-                              ? "text-success"
-                              : "text-ink-muted"
+                  {assignments.map((assignment, index) => {
+                    const isSelected = assignment.id === selectedId;
+                    return (
+                      <tr
+                        key={assignment.id}
+                        tabIndex={0}
+                        aria-selected={isSelected}
+                        onClick={() => setSelectedId(assignment.id)}
+                        onDoubleClick={() => openEditDialog(assignment)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            openEditDialog(assignment);
                           }
-                        >
-                          {assignment.isActive ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditDialog(assignment)}
-                            className="text-accent hover:underline"
+                        }}
+                        className={`cursor-pointer border-b border-border last:border-b-0 ${
+                          isSelected
+                            ? "bg-accent-tint [&>td]:bg-accent-tint"
+                            : "hover:bg-accent-tint/40 hover:[&>td]:bg-accent-tint/40"
+                        }`}
+                      >
+                        <td className="whitespace-nowrap px-3 py-3 text-ink-muted">
+                          {(page - 1) * PAGE_SIZE + index + 1}
+                        </td>
+                        <td className="min-w-[12rem] px-3 py-3">
+                          <div className="font-medium">
+                            {assignment.store.storeName}
+                          </div>
+                          <div className="text-xs text-ink-muted">
+                            {assignment.store.storeCode}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          {assignment.maker.employee.employeeCode}
+                        </td>
+                        <td className="min-w-[12rem] px-3 py-3 font-medium">
+                          {employeeDisplayName(assignment.maker.employee)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          {assignment.supervisor.employee.employeeCode}
+                        </td>
+                        <td className="min-w-[12rem] px-3 py-3">
+                          {employeeDisplayName(assignment.supervisor.employee)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">E</td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          {assignment.maker.username}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          {assignment.supervisor.username}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${assignment.isActive ? "border-secondary-tint bg-secondary-soft text-secondary-dark" : "border-border-strong bg-paper text-ink-muted"}`}
                           >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleToggleStatus(assignment)}
-                            disabled={statusUpdatingId === assignment.id}
-                            className="text-ink-muted hover:text-ink hover:underline disabled:opacity-60"
-                          >
-                            {statusUpdatingId === assignment.id
-                              ? "Updating…"
-                              : assignment.isActive
-                                ? "Deactivate"
-                                : "Activate"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {assignment.isActive ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -544,6 +628,18 @@ export function StoreUserSetupPage() {
         }}
         onSubmitCreate={handleCreate}
         onSubmitEdit={handleEdit}
+      />
+
+      <StoreUserDeleteDialog
+        open={Boolean(deletingAssignment)}
+        assignment={deletingAssignment}
+        deleting={deleting}
+        onClose={() => {
+          if (!deleting) {
+            setDeletingAssignment(null);
+          }
+        }}
+        onConfirm={handleDelete}
       />
     </section>
   );

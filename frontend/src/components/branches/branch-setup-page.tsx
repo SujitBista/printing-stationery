@@ -169,8 +169,7 @@ export function BranchSetupPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
             Branch Setup
           </h1>
@@ -184,14 +183,14 @@ export function BranchSetupPage() {
             <button
               type="button"
               onClick={() => setImportDialogOpen(true)}
-              className="rounded-md border border-border bg-paper-elevated px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+              className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
             >
               Import Branches
             </button>
             <button
               type="button"
               onClick={openCreateDialog}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
             >
               Add Branch
             </button>
@@ -207,7 +206,7 @@ export function BranchSetupPage() {
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Search by code or name"
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm sm:w-48">
@@ -218,7 +217,7 @@ export function BranchSetupPage() {
               setPage(1);
               setStatus(event.target.value as BranchStatusFilter);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="ALL">All</option>
             <option value="ACTIVE">Active</option>
@@ -254,7 +253,7 @@ export function BranchSetupPage() {
             <p className="mt-1 text-sm text-ink-muted">{loadError}</p>
           </div>
         ) : branches.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
             <p className="font-medium text-ink">No branches found</p>
             <p className="mt-1 text-sm text-ink-muted">
               {search || status !== "ALL"
@@ -264,9 +263,9 @@ export function BranchSetupPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
+            <div className="ps-table-shell">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="px-3 py-2 font-semibold">Branch Code</th>
                     <th className="px-3 py-2 font-semibold">Branch Name</th>
@@ -278,7 +277,7 @@ export function BranchSetupPage() {
                 </thead>
                 <tbody>
                   {branches.map((branch) => (
-                    <tr key={branch.id} className="border-b border-border last:border-b-0">
+                    <tr key={branch.id} className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70">
                       <td className="px-3 py-3 font-medium">{branch.branchCode}</td>
                       <td className="px-3 py-3">{branch.branchName}</td>
                       <td className="px-3 py-3">{branchTypeLabel(branch.branchType)}</td>
@@ -287,9 +286,7 @@ export function BranchSetupPage() {
                       </td>
                       <td className="px-3 py-3">
                         <span
-                          className={
-                            branch.isActive ? "text-success" : "text-ink-muted"
-                          }
+                          className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${branch.isActive ? "border-secondary-tint bg-secondary-soft text-secondary-dark" : "border-border-strong bg-paper text-ink-muted"}`}
                         >
                           {branch.isActive ? "Active" : "Inactive"}
                         </span>
@@ -300,7 +297,7 @@ export function BranchSetupPage() {
                           <button
                             type="button"
                             onClick={() => openEditDialog(branch)}
-                            className="text-accent hover:underline"
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
                           >
                             Edit
                           </button>

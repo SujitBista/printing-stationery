@@ -28,6 +28,32 @@ export const ITEM_REQUEST_ACTION_LABELS: Record<ItemRequestActionType, string> =
     CANCEL: "Cancel Request",
   };
 
+export type ItemRequestStatusTone =
+  | "success"
+  | "warning"
+  | "danger"
+  | "neutral"
+  | "info";
+
+export function itemRequestStatusTone(
+  status: ItemRequestStatus,
+): ItemRequestStatusTone {
+  switch (status) {
+    case "APPROVED":
+      return "success";
+    case "REJECTED":
+    case "CANCELLED":
+      return "danger";
+    case "RETURNED_TO_BRANCH_MAKER":
+    case "RETURNED_TO_CORPORATE_MAKER":
+      return "warning";
+    case "DRAFT":
+      return "neutral";
+    default:
+      return "info";
+  }
+}
+
 export function personDisplayName(
   person: ItemRequestPersonSummary | null | undefined,
 ): string {

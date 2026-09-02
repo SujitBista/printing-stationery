@@ -36,6 +36,10 @@ import {
   actorMayOperateItemIssue,
   isCorporateSupplyingStore,
 } from "./item-issue-authorization.js";
+import {
+  getOperationalAvailableQuantities,
+  operationalStockKey,
+} from "./opening-stocks.service.js";
 import { getDb } from "../db/client.js";
 import {
   applicationUsers,
@@ -413,6 +417,7 @@ async function loadSubmittedIssueTotalsByRequestLine(
 
 async function buildAvailability(
   requestId: string,
+  fromStoreId: string,
   excludeIssueId?: string,
 ): Promise<ItemIssueLineAvailability[]> {
   const [requestLineRows, submittedTotals] = await Promise.all([
@@ -420,10 +425,23 @@ async function buildAvailability(
     loadSubmittedIssueTotalsByRequestLine(requestId, excludeIssueId),
   ]);
 
+  const itemIds = [...new Set(requestLineRows.map((row) => row.item.id))];
+  const stockRows = await getOperationalAvailableQuantities({
+    storeId: fromStoreId,
+    itemIds,
+  });
+  const stockByItemUnit = new Map(
+    stockRows.map((row) => [
+      operationalStockKey(row.storeId, row.itemId, row.unitId),
+      row.availableQuantity,
+    ]),
+  );
+
   return requestLineRows.map((row) => {
     const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
     const previouslyIssued = submittedTotals.get(row.line.id) ?? 0n;
     const remaining = requested - previouslyIssued;
+    const stockKey = operationalStockKey(fromStoreId, row.item.id, row.unitId);
 
     return {
       requestLineId: row.line.id,
@@ -437,8 +455,8 @@ async function buildAvailability(
       requestedQuantity: scaledToQuantity(requested),
       previouslyIssuedQuantity: scaledToQuantity(previouslyIssued),
       remainingQuantity: scaledToQuantity(remaining < 0n ? 0n : remaining),
-      availableStockQuantity: null,
-      stockBalanceKnown: false,
+      availableStockQuantity: stockByItemUnit.get(stockKey) ?? "0",
+      stockBalanceKnown: true,
     };
   });
 }
@@ -697,7 +715,10 @@ export async function getItemIssueEligibility(
     actor,
     request.corporateStore.id,
   );
-  const availability = await buildAvailability(requestId);
+  const availability = await buildAvailability(
+    requestId,
+    request.corporateStore.id,
+  );
 
   const draftRows = await getDb()
     .select({ id: itemIssues.id })
@@ -897,7 +918,11 @@ export async function getItemIssueById(
         .innerJoin(units, eq(items.unitId, units.id))
         .where(eq(itemIssueLines.itemIssueId, issueId))
         .orderBy(asc(items.itemName), asc(items.itemCode), asc(itemIssueLines.id)),
-      buildAvailability(header.issue.requestId, header.issue.id),
+      buildAvailability(
+        header.issue.requestId,
+        header.issue.fromStoreId,
+        header.issue.id,
+      ),
     ]);
 
     return {

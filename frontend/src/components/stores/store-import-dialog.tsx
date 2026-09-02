@@ -145,7 +145,6 @@ export function StoreImportDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             Import Stores
           </h2>
@@ -188,7 +187,7 @@ export function StoreImportDialog({
             <button
               type="submit"
               disabled={!file || busy}
-              className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+              className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
             >
               {previewing ? "Validating…" : "Preview & Validate"}
             </button>
@@ -255,7 +254,7 @@ export function StoreImportDialog({
                     {preview.ready.map((row) => (
                       <tr
                         key={`ready-${row.rowNumber}`}
-                        className="border-b border-border last:border-b-0"
+                        className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                       >
                         <td className="px-2 py-1.5">{row.rowNumber}</td>
                         <td className="px-2 py-1.5 font-medium">{row.storeCode}</td>
@@ -333,7 +332,7 @@ export function StoreImportDialog({
                 type="button"
                 disabled={preview.ready.length === 0 || busy}
                 onClick={() => void handleConfirm()}
-                className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+                className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
               >
                 {importing
                   ? "Importing…"

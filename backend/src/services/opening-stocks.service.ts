@@ -18,8 +18,9 @@ import type {
   OpeningStockValidationResult,
   PaginatedOpeningStockResponse,
   PostOpeningStockInput,
-  StockBalanceResponse,
   StockBalanceListQuery,
+  StockBalanceResponse,
+  StockBalanceSummary,
 } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
 import {
@@ -198,6 +199,16 @@ function multiplyQuantityRateToAmount(quantity: string, rate: string): string {
   const productScaled8 = quantityScaled * rateScaled;
   const roundedToCents = (productScaled8 + 500_000n) / 1_000_000n;
   return formatScaled(roundedToCents, 2);
+}
+
+function availableQuantityFromLedgerTotals(
+  quantityIn: string,
+  quantityOut: string,
+): string {
+  return formatScaled(
+    parseScaled(quantityIn, 4) - parseScaled(quantityOut, 4),
+    4,
+  );
 }
 
 function extractRowsFromHtml(html: string): string[] {
@@ -1570,6 +1581,71 @@ export async function cancelOpeningStockBatch(
   return buildPreview(batchId);
 }
 
+export function operationalStockKey(
+  storeId: string,
+  itemId: string,
+  unitId: string,
+): string {
+  return `${storeId}|${itemId}|${unitId}`;
+}
+
+export async function getOperationalAvailableQuantities(params: {
+  storeId?: string;
+  itemId?: string;
+  itemIds?: string[];
+} = {}): Promise<StockBalanceSummary[]> {
+  const itemIds = [
+    ...new Set(
+      [
+        ...(params.itemId ? [params.itemId] : []),
+        ...(params.itemIds ?? []),
+      ].filter((id) => id.length > 0),
+    ),
+  ];
+  if (params.itemIds && params.itemIds.length === 0) {
+    return [];
+  }
+
+  const conditions: SQL[] = [];
+  if (params.storeId) {
+    conditions.push(eq(stockLedger.storeId, params.storeId));
+  }
+  if (itemIds.length === 1) {
+    conditions.push(eq(stockLedger.itemId, itemIds[0]!));
+  } else if (itemIds.length > 1) {
+    conditions.push(inArray(stockLedger.itemId, itemIds));
+  }
+
+  const where =
+    conditions.length === 0
+      ? undefined
+      : conditions.length === 1
+        ? conditions[0]
+        : and(...conditions);
+
+  const grouped = await getDb()
+    .select({
+      storeId: stockLedger.storeId,
+      itemId: stockLedger.itemId,
+      unitId: stockLedger.unitId,
+      quantityIn: sql<string>`coalesce(sum(${stockLedger.quantityIn}), 0)::text`,
+      quantityOut: sql<string>`coalesce(sum(${stockLedger.quantityOut}), 0)::text`,
+    })
+    .from(stockLedger)
+    .where(where)
+    .groupBy(stockLedger.storeId, stockLedger.itemId, stockLedger.unitId);
+
+  return grouped.map((row) => ({
+    storeId: row.storeId,
+    itemId: row.itemId,
+    unitId: row.unitId,
+    availableQuantity: availableQuantityFromLedgerTotals(
+      row.quantityIn,
+      row.quantityOut,
+    ),
+  }));
+}
+
 export async function listStockBalances(
   actor: AuthenticatedUser,
   query: StockBalanceListQuery,
@@ -1641,9 +1717,9 @@ export async function listStockBalances(
       rate: String(row.rate),
       quantityIn,
       quantityOut,
-      availableQuantity: formatScaled(
-        parseScaled(quantityIn, 4) - parseScaled(quantityOut, 4),
-        4,
+      availableQuantity: availableQuantityFromLedgerTotals(
+        quantityIn,
+        quantityOut,
       ),
       amountIn,
       amountOut,

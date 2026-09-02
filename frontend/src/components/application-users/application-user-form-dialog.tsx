@@ -19,6 +19,7 @@ import {
 } from "@printing-stationery/shared";
 import { fetchEligibleEmployees } from "@/lib/api/application-users";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 type ApplicationUserFormDialogProps = {
   open: boolean;
@@ -277,7 +278,6 @@ export function ApplicationUserFormDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             {mode === "create"
               ? "Add Application User"
@@ -307,24 +307,20 @@ export function ApplicationUserFormDialog({
               error={fieldErrors.employeeId}
               htmlFor="application-user-employee"
             >
-              <select
+              <SearchableSelect
                 id="application-user-employee"
                 name="employeeId"
                 value={form.employeeId}
-                onChange={(event) =>
-                  updateField("employeeId", event.target.value)
-                }
+                onChange={(nextValue) => updateField("employeeId", nextValue)}
                 disabled={saving || optionsLoading}
-                className={inputClassName(fieldErrors.employeeId)}
-                aria-invalid={Boolean(fieldErrors.employeeId)}
-              >
-                <option value="">Select an employee</option>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.employeeCode} — {employee.employeeName}
-                  </option>
-                ))}
-              </select>
+                required
+                placeholder="Select an employee"
+                searchPlaceholder="Search employees…"
+                options={employees.map((employee) => ({
+                  value: employee.id,
+                  label: `${employee.employeeCode} — ${employee.employeeName}`,
+                }))}
+              />
             </Field>
           ) : null}
 
@@ -461,7 +457,7 @@ export function ApplicationUserFormDialog({
               (mode === "create" &&
                 (optionsLoading || Boolean(optionsError)))
             }
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving
               ? "Saving…"

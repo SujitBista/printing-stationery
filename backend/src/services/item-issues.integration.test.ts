@@ -26,6 +26,7 @@ import {
   getItemIssueEligibility,
   updateItemIssue,
 } from "./item-issues.service.js";
+import { getOperationalAvailableQuantities } from "./opening-stocks.service.js";
 import { getItemRequestById } from "./item-requests.service.js";
 import { AppError } from "../utils/errors.js";
 import { generateSessionToken, hashPassword, hashSessionToken } from "../utils/password.js";
@@ -465,6 +466,26 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     );
     assert.equal(eligibility.canCreate, true);
     assert.equal(eligibility.request?.corporateStore?.id, corporate.storeId);
+    assert.ok(eligibility.lines.length > 0);
+    for (const line of eligibility.lines) {
+      assert.equal(line.stockBalanceKnown, true);
+      assert.equal(typeof line.availableStockQuantity, "string");
+      assert.match(line.availableStockQuantity ?? "", /^-?\d+(?:\.\d+)?$/);
+    }
+
+    const fromStoreStock = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: eligibility.lines.map((line) => line.itemId),
+    });
+    for (const line of eligibility.lines) {
+      const matching = fromStoreStock.find(
+        (row) =>
+          row.storeId === corporate.storeId &&
+          row.itemId === line.itemId &&
+          row.unitId === line.unit.id,
+      );
+      assert.equal(line.availableStockQuantity, matching?.availableQuantity ?? "0");
+    }
   });
 
   it("lets the supplying-store checker create an item issue draft", async () => {

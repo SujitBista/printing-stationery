@@ -23,6 +23,7 @@ import { fetchItemGroups } from "@/lib/api/item-groups";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { fetchUnits } from "@/lib/api/units";
 import { groupTypeLabel } from "@/components/item-groups/item-group-form-dialog";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 type ItemFormDialogProps = {
   open: boolean;
@@ -385,7 +386,6 @@ export function ItemFormDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             {mode === "create" ? "Add Item" : "Edit Item"}
           </h2>
@@ -445,23 +445,20 @@ export function ItemFormDialog({
             error={fieldErrors.unitId}
             htmlFor="item-unit"
           >
-            <select
+            <SearchableSelect
               id="item-unit"
               name="unitId"
               value={form.unitId}
-              onChange={(event) => updateField("unitId", event.target.value)}
+              onChange={(nextValue) => updateField("unitId", nextValue)}
               disabled={saving || optionsLoading}
-              className={inputClassName(fieldErrors.unitId)}
-              aria-invalid={Boolean(fieldErrors.unitId)}
-            >
-              <option value="">Select a unit</option>
-              {units.map((unit) => (
-                <option key={unit.id} value={unit.id}>
-                  {unit.unitName}
-                  {unit.isActive ? "" : " (Inactive)"}
-                </option>
-              ))}
-            </select>
+              required
+              placeholder="Select a unit"
+              searchPlaceholder="Search units…"
+              options={units.map((unit) => ({
+                value: unit.id,
+                label: `${unit.unitName}${unit.isActive ? "" : " (Inactive)"}`,
+              }))}
+            />
           </Field>
 
           <Field
@@ -470,26 +467,20 @@ export function ItemFormDialog({
             error={fieldErrors.itemGroupId}
             htmlFor="item-group"
           >
-            <select
+            <SearchableSelect
               id="item-group"
               name="itemGroupId"
               value={form.itemGroupId}
-              onChange={(event) =>
-                updateField("itemGroupId", event.target.value)
-              }
+              onChange={(nextValue) => updateField("itemGroupId", nextValue)}
               disabled={saving || optionsLoading}
-              className={inputClassName(fieldErrors.itemGroupId)}
-              aria-invalid={Boolean(fieldErrors.itemGroupId)}
-            >
-              <option value="">Select an item group</option>
-              {itemGroups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.groupCode} — {group.groupName} (
-                  {groupTypeLabel(group.groupType as GroupType)})
-                  {group.isActive ? "" : " (Inactive)"}
-                </option>
-              ))}
-            </select>
+              required
+              placeholder="Select an item group"
+              searchPlaceholder="Search item groups…"
+              options={itemGroups.map((group) => ({
+                value: group.id,
+                label: `${group.groupCode} — ${group.groupName} (${groupTypeLabel(group.groupType as GroupType)})${group.isActive ? "" : " (Inactive)"}`,
+              }))}
+            />
           </Field>
 
           <div className="rounded-md border border-border bg-paper px-3 py-2 text-sm">
@@ -642,7 +633,7 @@ export function ItemFormDialog({
           <button
             type="submit"
             disabled={saving || optionsLoading || Boolean(optionsError)}
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving
               ? "Saving…"

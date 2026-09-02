@@ -144,7 +144,6 @@ export function ResetPasswordDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             Reset Password
           </h2>
@@ -220,7 +219,7 @@ export function ResetPasswordDialog({
           <button
             type="submit"
             disabled={saving}
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving ? "Resetting…" : "Reset Password"}
           </button>

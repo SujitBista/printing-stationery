@@ -23,6 +23,7 @@ import {
 } from "@/lib/api/application-users";
 import { ApplicationUserFormDialog } from "./application-user-form-dialog";
 import { ResetPasswordDialog } from "./reset-password-dialog";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 const PAGE_SIZE = 20;
 
@@ -231,8 +232,7 @@ export function ApplicationUserSetupPage() {
     return (
       <section className="w-full max-w-7xl">
         <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
         >
           Application User Setup
         </h1>
@@ -248,8 +248,7 @@ export function ApplicationUserSetupPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
-            className="text-3xl font-semibold tracking-tight text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
+            className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
           >
             Application User Setup
           </h1>
@@ -262,7 +261,7 @@ export function ApplicationUserSetupPage() {
           <button
             type="button"
             onClick={openCreateDialog}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
           >
             Add New
           </button>
@@ -277,7 +276,7 @@ export function ApplicationUserSetupPage() {
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Search by username, code or name"
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
@@ -288,7 +287,7 @@ export function ApplicationUserSetupPage() {
               setPage(1);
               setRole(event.target.value as AppRole | "");
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="">All roles</option>
             {APP_ROLES.map((appRole) => (
@@ -306,7 +305,7 @@ export function ApplicationUserSetupPage() {
               setPage(1);
               setStatus(event.target.value as ApplicationUserStatusFilter);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+            className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="ALL">All</option>
             <option value="ACTIVE">Active</option>
@@ -315,21 +314,19 @@ export function ApplicationUserSetupPage() {
         </label>
         <label className="flex w-full flex-col gap-1 text-sm">
           <span className="font-medium text-ink">Branch</span>
-          <select
+          <SearchableSelect
             value={branchId}
-            onChange={(event) => {
+            onChange={(nextValue) => {
               setPage(1);
-              setBranchId(event.target.value);
+              setBranchId(nextValue);
             }}
-            className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-          >
-            <option value="">All branches</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.branchCode} — {branch.branchName}
-              </option>
-            ))}
-          </select>
+            placeholder="All branches"
+            searchPlaceholder="Search branches…"
+            options={branches.map((branch) => ({
+              value: branch.id,
+              label: `${branch.branchCode} — ${branch.branchName}`,
+            }))}
+          />
         </label>
       </div>
 
@@ -362,7 +359,7 @@ export function ApplicationUserSetupPage() {
             <p className="mt-1 text-sm text-ink-muted">{loadError}</p>
           </div>
         ) : users.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
             <p className="font-medium text-ink">No application users found</p>
             <p className="mt-1 text-sm text-ink-muted">
               {search || status !== "ALL" || role || branchId
@@ -372,9 +369,9 @@ export function ApplicationUserSetupPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border border-border bg-paper-elevated">
+            <div className="ps-table-shell">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-border bg-paper text-xs uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-accent-soft text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
                       Employee Code
@@ -406,7 +403,7 @@ export function ApplicationUserSetupPage() {
                   {users.map((user) => (
                     <tr
                       key={user.id}
-                      className="border-b border-border last:border-b-0"
+                      className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                     >
                       <td className="whitespace-nowrap px-3 py-3 font-medium">
                         {user.employee.employeeCode}
@@ -428,9 +425,7 @@ export function ApplicationUserSetupPage() {
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
                         <span
-                          className={
-                            user.isActive ? "text-success" : "text-ink-muted"
-                          }
+                          className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${user.isActive ? "border-secondary-tint bg-secondary-soft text-secondary-dark" : "border-border-strong bg-paper text-ink-muted"}`}
                         >
                           {user.isActive ? "Active" : "Inactive"}
                         </span>
@@ -443,14 +438,14 @@ export function ApplicationUserSetupPage() {
                           <button
                             type="button"
                             onClick={() => openEditDialog(user)}
-                            className="text-accent hover:underline"
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
                           >
                             Edit
                           </button>
                           <button
                             type="button"
                             onClick={() => setResetUser(user)}
-                            className="text-accent hover:underline"
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
                           >
                             Reset Password
                           </button>

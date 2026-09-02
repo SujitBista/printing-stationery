@@ -18,6 +18,7 @@ import {
 } from "@printing-stationery/shared";
 import { fetchBranches } from "@/lib/api/branches";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 type EmployeeFormDialogProps = {
   open: boolean;
@@ -279,7 +280,6 @@ export function EmployeeFormDialog({
           <h2
             id={titleId}
             className="text-xl font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
           >
             {mode === "create" ? "Add Employee" : "Edit Employee"}
           </h2>
@@ -346,23 +346,20 @@ export function EmployeeFormDialog({
             error={fieldErrors.branchId}
             htmlFor="employee-branch"
           >
-            <select
+            <SearchableSelect
               id="employee-branch"
               name="branchId"
               value={form.branchId}
-              onChange={(event) => updateField("branchId", event.target.value)}
+              onChange={(nextValue) => updateField("branchId", nextValue)}
               disabled={saving || optionsLoading}
-              className={inputClassName(fieldErrors.branchId)}
-              aria-invalid={Boolean(fieldErrors.branchId)}
-            >
-              <option value="">Select a branch</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.branchCode} — {branch.branchName}
-                  {branch.isActive ? "" : " (Inactive)"}
-                </option>
-              ))}
-            </select>
+              required
+              placeholder="Select a branch"
+              searchPlaceholder="Search branches…"
+              options={branches.map((branch) => ({
+                value: branch.id,
+                label: `${branch.branchCode} — ${branch.branchName}${branch.isActive ? "" : " (Inactive)"}`,
+              }))}
+            />
           </Field>
         </div>
 
@@ -387,7 +384,7 @@ export function EmployeeFormDialog({
           <button
             type="submit"
             disabled={saving || optionsLoading || Boolean(optionsError)}
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >
             {saving
               ? "Saving…"

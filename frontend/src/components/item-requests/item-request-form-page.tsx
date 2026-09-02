@@ -18,6 +18,7 @@ import {
   updateItemRequest,
 } from "@/lib/api/item-requests";
 import { useAuth } from "@/lib/auth/auth-context";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 
 type LineState = {
@@ -265,8 +266,7 @@ export function ItemRequestFormPage({
     return (
       <section className="w-full max-w-4xl">
         <h1
-          className="text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
+          className="text-2xl font-bold tracking-tight text-accent sm:text-3xl"
         >
           Item Requests
         </h1>
@@ -287,13 +287,12 @@ export function ItemRequestFormPage({
       <div className="mb-6">
         <Link
           href="/requests/item-requests"
-          className="text-sm text-accent hover:underline"
+          className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
         >
           Back to Item Requests
         </Link>
         <h1
           className="mt-3 text-3xl font-semibold tracking-tight text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
         >
           {mode === "create" ? "New Request" : "Edit Request"}
         </h1>
@@ -346,7 +345,7 @@ export function ItemRequestFormPage({
               rows={3}
               maxLength={500}
               disabled={saving}
-              className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+              className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
             />
           </label>
 
@@ -385,28 +384,22 @@ export function ItemRequestFormPage({
                 >
                   <label className="flex min-w-0 flex-col gap-1 text-sm">
                     <span className="font-medium text-ink">Item</span>
-                    <select
+                    <SearchableSelect
                       value={line.itemId}
                       disabled={saving}
-                      onChange={(event) =>
-                        updateLine(line.key, { itemId: event.target.value })
+                      placeholder="Select an item"
+                      searchPlaceholder="Search items…"
+                      options={allItemOptions.map((item) => ({
+                        value: item.id,
+                        label: itemOptionLabel(item),
+                        disabled:
+                          selectedItemIds.has(item.id) &&
+                          item.id !== line.itemId,
+                      }))}
+                      onChange={(nextValue) =>
+                        updateLine(line.key, { itemId: nextValue })
                       }
-                      className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-                    >
-                      <option value="">Select an item</option>
-                      {allItemOptions.map((item) => (
-                        <option
-                          key={item.id}
-                          value={item.id}
-                          disabled={
-                            selectedItemIds.has(item.id) &&
-                            item.id !== line.itemId
-                          }
-                        >
-                          {itemOptionLabel(item)}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium text-ink">Unit</span>
@@ -428,7 +421,7 @@ export function ItemRequestFormPage({
                           })
                         }
                         inputMode="decimal"
-                        className="rounded-md border border-border bg-paper px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+                        className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
                       />
                     </label>
                     <button
@@ -449,7 +442,7 @@ export function ItemRequestFormPage({
             <button
               type="submit"
               disabled={saving}
-              className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-60"
+              className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft disabled:opacity-60"
             >
               {saving ? "Saving…" : "Save Draft"}
             </button>
@@ -469,7 +462,7 @@ export function ItemRequestFormPage({
                   );
                 }
               }}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
             >
               Submit Request
             </button>
