@@ -220,7 +220,6 @@ export function EmployeeFormDialog({
     const parsed = updateEmployeeInputSchema.safeParse({
       employeeCode: form.employeeCode,
       employeeName: form.employeeName,
-      branchId: form.branchId,
     });
 
     if (!parsed.success) {
@@ -286,7 +285,7 @@ export function EmployeeFormDialog({
           <p className="mt-1 text-sm text-ink-muted">
             {mode === "create"
               ? "Create a local staff record for store-user and supervisor assignments."
-              : "Update employee details. Use Activate/Deactivate in the table to change status."}
+              : "Update employee details. Branch can only be changed with Transfer. Use Activate/Deactivate in the table to change status."}
           </p>
         </div>
 
@@ -340,27 +339,42 @@ export function EmployeeFormDialog({
             />
           </Field>
 
-          <Field
-            label="Branch"
-            required
-            error={fieldErrors.branchId}
-            htmlFor="employee-branch"
-          >
-            <SearchableSelect
-              id="employee-branch"
-              name="branchId"
-              value={form.branchId}
-              onChange={(nextValue) => updateField("branchId", nextValue)}
-              disabled={saving || optionsLoading}
+          {mode === "create" ? (
+            <Field
+              label="Branch"
               required
-              placeholder="Select a branch"
-              searchPlaceholder="Search branches…"
-              options={branches.map((branch) => ({
-                value: branch.id,
-                label: `${branch.branchCode} — ${branch.branchName}${branch.isActive ? "" : " (Inactive)"}`,
-              }))}
-            />
-          </Field>
+              error={fieldErrors.branchId}
+              htmlFor="employee-branch"
+            >
+              <SearchableSelect
+                id="employee-branch"
+                name="branchId"
+                value={form.branchId}
+                onChange={(nextValue) => updateField("branchId", nextValue)}
+                disabled={saving || optionsLoading}
+                required
+                placeholder="Select a branch"
+                searchPlaceholder="Search branches…"
+                options={branches.map((branch) => ({
+                  value: branch.id,
+                  label: `${branch.branchCode} — ${branch.branchName}${branch.isActive ? "" : " (Inactive)"}`,
+                }))}
+              />
+            </Field>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-ink">Branch</span>
+              <div className="rounded-md border border-border bg-paper px-3 py-2 text-sm">
+                {initialEmployee
+                  ? `${initialEmployee.branch.branchCode} — ${initialEmployee.branch.branchName}`
+                  : "—"}
+              </div>
+              <p className="text-xs text-ink-muted">
+                Branch is locked on edit. Use Transfer on the employee details
+                page to move this person to another branch.
+              </p>
+            </div>
+          )}
         </div>
 
         {formError ? (

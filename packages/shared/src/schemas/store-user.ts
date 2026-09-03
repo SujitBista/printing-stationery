@@ -133,18 +133,36 @@ export const eligibleStoreApplicationUserSchema = storeUserPersonSummarySchema.e
   },
 );
 
-export const eligibleStoreApplicationUserListQuerySchema = z.object({
-  storeId: z.string().uuid("Invalid store id"),
-  role: storeUserAssignableRoleSchema,
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(20),
-  search: z
-    .string()
-    .trim()
-    .optional()
-    .transform((value) => (value && value.length > 0 ? value : undefined)),
-  excludeAssignmentId: optionalUuidFilterSchema,
-});
+export const eligibleStoreApplicationUserListQuerySchema = z
+  .object({
+    storeId: optionalUuidFilterSchema,
+    branchId: optionalUuidFilterSchema,
+    role: storeUserAssignableRoleSchema,
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(100).default(20),
+    search: z
+      .string()
+      .trim()
+      .optional()
+      .transform((value) => (value && value.length > 0 ? value : undefined)),
+    excludeAssignmentId: optionalUuidFilterSchema,
+  })
+  .superRefine((value, ctx) => {
+    if (value.role === "MAKER" && !value.storeId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["storeId"],
+        message: "Store is required to list eligible store users",
+      });
+    }
+    if (value.role === "CHECKER" && !value.storeId && !value.branchId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["storeId"],
+        message: "Store or branch is required to list eligible supervisors",
+      });
+    }
+  });
 
 export const paginatedEligibleStoreApplicationUserResponseSchema = z.object({
   items: z.array(eligibleStoreApplicationUserSchema),

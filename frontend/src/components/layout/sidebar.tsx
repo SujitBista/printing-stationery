@@ -43,13 +43,13 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Organization",
     items: [
-      { label: "Branch Setup", href: "/organization/branches" },
-      { label: "Department Setup", href: "/organization/departments" },
-      { label: "Unit Setup", href: "/organization/units" },
-      { label: "Item Group Setup", href: "/organization/item-groups" },
-      { label: "Item Setup", href: "/organization/items" },
-      { label: "Store Setup", href: "/organization/stores" },
-      { label: "Employee Setup", href: "/organization/employees" },
+      { label: "Branch Setup", href: "/organization/branches", adminSetup: true },
+      { label: "Department Setup", href: "/organization/departments", adminSetup: true },
+      { label: "Unit Setup", href: "/organization/units", adminSetup: true },
+      { label: "Item Group Setup", href: "/organization/item-groups", adminSetup: true },
+      { label: "Item Setup", href: "/organization/items", adminSetup: true },
+      { label: "Store Setup", href: "/organization/stores", adminSetup: true },
+      { label: "Employee Setup", href: "/organization/employees", adminSetup: true },
       {
         label: "Application User Setup",
         href: "/organization/application-users",
@@ -226,8 +226,12 @@ function CollapsibleNavGroup({
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { canReadMasterData, isAdmin, canAccessItemRequests, canAccessOpeningStock } =
-    useAuth();
+  const {
+    canAccessOrganizationSetup,
+    isAdmin,
+    canAccessItemRequests,
+    canAccessOpeningStock,
+  } = useAuth();
 
   return (
     <>
@@ -247,7 +251,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <nav className="flex flex-1 flex-col gap-6 overflow-y-auto p-4" aria-label="Primary">
           {NAV_SECTIONS.map((section) => {
             const items = (
-              section.title === "Organization" && !canReadMasterData
+              section.title === "Organization" && !canAccessOrganizationSetup
                 ? []
                 : section.items
             )

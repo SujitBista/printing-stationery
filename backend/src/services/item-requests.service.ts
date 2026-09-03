@@ -389,11 +389,17 @@ async function getActiveMakerAssignment(
     .from(storeUsers)
     .innerJoin(stores, eq(storeUsers.storeId, stores.id))
     .innerJoin(branches, eq(stores.branchId, branches.id))
+    .innerJoin(
+      applicationUsers,
+      eq(storeUsers.makerApplicationUserId, applicationUsers.id),
+    )
+    .innerJoin(employees, eq(applicationUsers.employeeId, employees.id))
     .where(
       and(
         eq(storeUsers.makerApplicationUserId, applicationUserId),
         eq(storeUsers.isActive, true),
         eq(stores.isActive, true),
+        eq(employees.branchId, stores.branchId),
       ),
     )
     .limit(1);

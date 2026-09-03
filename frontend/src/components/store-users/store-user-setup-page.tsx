@@ -1,28 +1,22 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type {
   Branch,
-  CreateStoreUserInput,
   Store,
   StoreUser,
   StoreUserStatusFilter,
-  StoreUserStoreSummary,
-  UpdateStoreUserInput,
 } from "@printing-stationery/shared";
 import { fetchBranches } from "@/lib/api/branches";
 import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import {
-  createStoreUser,
   deleteStoreUser,
-  fetchEligibleStores,
   fetchStoreUsers,
-  updateStoreUser,
   updateStoreUserStatus,
 } from "@/lib/api/store-users";
-import { StoreUserFormDialog } from "./store-user-form-dialog";
 import { StoreUserDeleteDialog } from "./store-user-delete-dialog";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 
@@ -36,6 +30,7 @@ function employeeDisplayName(employee: {
 }
 
 export function StoreUserSetupPage() {
+  const router = useRouter();
   const { canManageStoreUsers } = useAuth();
   const [assignments, setAssignments] = useState<StoreUser[]>([]);
   const [page, setPage] = useState(1);
@@ -52,9 +47,6 @@ export function StoreUserSetupPage() {
   const [stores, setStores] = useState<
     Pick<Store, "id" | "storeCode" | "storeName" | "branchId" | "isActive">[]
   >([]);
-  const [eligibleStores, setEligibleStores] = useState<StoreUserStoreSummary[]>(
-    [],
-  );
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<
     { type: "success" | "error"; message: string } | null
@@ -62,12 +54,6 @@ export function StoreUserSetupPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isUnavailable, setIsUnavailable] = useState(false);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogMode, setDialogMode] = useState<"create" | "edit">("create");
-  const [editingAssignment, setEditingAssignment] = useState<StoreUser | null>(
-    null,
-  );
-  const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [deletingAssignment, setDeletingAssignment] = useState<StoreUser | null>(
@@ -75,20 +61,6 @@ export function StoreUserSetupPage() {
   );
   const [deleting, setDeleting] = useState(false);
   const [, startTransition] = useTransition();
-
-  const loadEligibleStores = useCallback(async () => {
-    const result = await loadAllPaginatedOptions(
-      (query) =>
-        fetchEligibleStores({
-          page: query.page,
-          pageSize: query.pageSize,
-        }),
-      "ALL",
-    );
-    if (result.ok) {
-      setEligibleStores(result.data);
-    }
-  }, []);
 
   useEffect(() => {
     async function loadFilterOptions() {
@@ -118,12 +90,10 @@ export function StoreUserSetupPage() {
           })),
         );
       }
-
-      await loadEligibleStores();
     }
 
     void loadFilterOptions();
-  }, [loadEligibleStores]);
+  }, []);
 
   const loadAssignments = useCallback(async () => {
     setLoading(true);
@@ -179,54 +149,12 @@ export function StoreUserSetupPage() {
     return () => window.clearTimeout(handle);
   }, [searchInput]);
 
-  function openCreateDialog() {
-    setDialogMode("create");
-    setEditingAssignment(null);
-    setDialogOpen(true);
+  function openCreatePage() {
+    router.push("/organization/store-users/new");
   }
 
-  function openEditDialog(assignment: StoreUser) {
-    setDialogMode("edit");
-    setEditingAssignment(assignment);
-    setDialogOpen(true);
-  }
-
-  async function handleCreate(input: CreateStoreUserInput) {
-    setSaving(true);
-    const result = await createStoreUser(input);
-    setSaving(false);
-
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-
-    setDialogOpen(false);
-    setFeedback({
-      type: "success",
-      message: "Store user configuration created successfully.",
-    });
-    await Promise.all([loadAssignments(), loadEligibleStores()]);
-  }
-
-  async function handleEdit(input: UpdateStoreUserInput) {
-    if (!editingAssignment) {
-      return;
-    }
-
-    setSaving(true);
-    const result = await updateStoreUser(editingAssignment.id, input);
-    setSaving(false);
-
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-
-    setDialogOpen(false);
-    setFeedback({
-      type: "success",
-      message: "Store user configuration updated successfully.",
-    });
-    await loadAssignments();
+  function openEditPage(assignment: StoreUser) {
+    router.push(`/organization/store-users/${assignment.id}/edit`);
   }
 
   async function handleToggleStatus(assignment: StoreUser) {
@@ -256,7 +184,7 @@ export function StoreUserSetupPage() {
         ? "Store user configuration activated successfully."
         : "Store user configuration deactivated successfully.",
     });
-    await Promise.all([loadAssignments(), loadEligibleStores()]);
+    await loadAssignments();
   }
 
   async function handleDelete() {
@@ -278,7 +206,7 @@ export function StoreUserSetupPage() {
       type: "success",
       message: "Store user assignment deleted.",
     });
-    await Promise.all([loadAssignments(), loadEligibleStores()]);
+    await loadAssignments();
   }
 
   if (!canManageStoreUsers) {
@@ -296,10 +224,6 @@ export function StoreUserSetupPage() {
     );
   }
 
-  const dialogStores: StoreUserStoreSummary[] =
-    dialogMode === "edit" && editingAssignment
-      ? [editingAssignment.store]
-      : eligibleStores;
   const selectedAssignment =
     assignments.find((assignment) => assignment.id === selectedId) ?? null;
 
@@ -311,7 +235,7 @@ export function StoreUserSetupPage() {
       });
       return;
     }
-    openEditDialog(selectedAssignment);
+    openEditPage(selectedAssignment);
   }
 
   function handleToolbarDelete() {
@@ -404,7 +328,7 @@ export function StoreUserSetupPage() {
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={openCreateDialog}
+          onClick={openCreatePage}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
         >
           Add New
@@ -523,11 +447,11 @@ export function StoreUserSetupPage() {
                         tabIndex={0}
                         aria-selected={isSelected}
                         onClick={() => setSelectedId(assignment.id)}
-                        onDoubleClick={() => openEditDialog(assignment)}
+                        onDoubleClick={() => openEditPage(assignment)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
                             event.preventDefault();
-                            openEditDialog(assignment);
+                            openEditPage(assignment);
                           }
                         }}
                         className={`cursor-pointer border-b border-border last:border-b-0 ${
@@ -559,7 +483,12 @@ export function StoreUserSetupPage() {
                         <td className="min-w-[12rem] px-3 py-3">
                           {employeeDisplayName(assignment.supervisor.employee)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3">E</td>
+                        <td
+                          className="whitespace-nowrap px-3 py-3"
+                          title="Employee"
+                        >
+                          E
+                        </td>
                         <td className="whitespace-nowrap px-3 py-3">
                           {assignment.maker.username}
                         </td>
@@ -614,21 +543,6 @@ export function StoreUserSetupPage() {
           </>
         )}
       </div>
-
-      <StoreUserFormDialog
-        open={dialogOpen}
-        mode={dialogMode}
-        initialAssignment={editingAssignment}
-        stores={dialogStores}
-        saving={saving}
-        onClose={() => {
-          if (!saving) {
-            setDialogOpen(false);
-          }
-        }}
-        onSubmitCreate={handleCreate}
-        onSubmitEdit={handleEdit}
-      />
 
       <StoreUserDeleteDialog
         open={Boolean(deletingAssignment)}

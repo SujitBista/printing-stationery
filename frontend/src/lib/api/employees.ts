@@ -6,7 +6,10 @@ import {
   employeeImportPreviewResponseSchema,
   employeeListQuerySchema,
   employeeSchema,
+  employeeTransferContextSchema,
+  employeeTransferListResponseSchema,
   paginatedEmployeeResponseSchema,
+  transferEmployeeInputSchema,
   updateEmployeeInputSchema,
   updateEmployeeStatusInputSchema,
   type CreateEmployeeInput,
@@ -15,7 +18,10 @@ import {
   type EmployeeImportConfirmResponse,
   type EmployeeImportPreviewResponse,
   type EmployeeListQuery,
+  type EmployeeTransferContext,
+  type EmployeeTransferListResponse,
   type PaginatedEmployeeResponse,
+  type TransferEmployeeInput,
   type UpdateEmployeeInput,
   type UpdateEmployeeStatusInput,
 } from "@printing-stationery/shared";
@@ -154,6 +160,97 @@ export async function updateEmployee(
       return { success: true, data: parsed.data };
     },
     "Failed to update employee",
+  );
+}
+
+export async function fetchEmployeeTransferContext(
+  id: string,
+): Promise<ApiResult<EmployeeTransferContext>> {
+  const parsedId = employeeIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid employee id", status: 400 };
+  }
+
+  return requestJson(
+    `/api/employees/${parsedId.data}/transfer-context`,
+    { method: "GET" },
+    (json) => {
+      const parsed = employeeTransferContextSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error:
+            "Employee transfer context response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to load transfer details",
+  );
+}
+
+export async function fetchEmployeeTransfers(
+  id: string,
+): Promise<ApiResult<EmployeeTransferListResponse>> {
+  const parsedId = employeeIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid employee id", status: 400 };
+  }
+
+  return requestJson(
+    `/api/employees/${parsedId.data}/transfers`,
+    { method: "GET" },
+    (json) => {
+      const parsed = employeeTransferListResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error:
+            "Employee transfer history response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to load transfer history",
+  );
+}
+
+export async function transferEmployee(
+  id: string,
+  input: TransferEmployeeInput,
+): Promise<ApiResult<Employee>> {
+  const parsedId = employeeIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid employee id", status: 400 };
+  }
+
+  const parsedInput = transferEmployeeInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    const issue = parsedInput.error.issues[0];
+    return {
+      ok: false,
+      error: issue?.message ?? "Invalid employee transfer",
+      status: 400,
+    };
+  }
+
+  return requestJson(
+    `/api/employees/${parsedId.data}/transfer`,
+    {
+      method: "POST",
+      body: JSON.stringify(parsedInput.data),
+    },
+    (json) => {
+      const parsed = employeeSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error: "Transfer employee response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to transfer employee",
   );
 }
 

@@ -56,6 +56,12 @@ export {
 } from "./auth.js";
 
 export {
+  employeeTransfers,
+  type EmployeeTransferRow,
+  type NewEmployeeTransferRow,
+} from "./employee-transfers.js";
+
+export {
   storeUsers,
   type StoreUserRow,
   type NewStoreUserRow,

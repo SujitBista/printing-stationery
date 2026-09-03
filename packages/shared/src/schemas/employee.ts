@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { appRoleSchema } from "./auth.js";
 
 export const employeeStatusFilterSchema = z.enum(["ALL", "ACTIVE", "INACTIVE"]);
 
@@ -23,6 +24,36 @@ const optionalUuidFilterSchema = z.preprocess(
   },
   z.string().uuid().optional(),
 );
+
+const optionalNullableUuidSchema = z.preprocess(
+  (value) => {
+    if (value === "" || value === undefined) {
+      return null;
+    }
+    return value;
+  },
+  z.string().uuid("Invalid id").nullable(),
+);
+
+const isoDateSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Effective date must be YYYY-MM-DD")
+  .refine((value) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) {
+      return false;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const utc = new Date(Date.UTC(year, month - 1, day));
+    return (
+      utc.getUTCFullYear() === year &&
+      utc.getUTCMonth() === month - 1 &&
+      utc.getUTCDate() === day
+    );
+  }, "Invalid effective date");
 
 export const employeeBranchSummarySchema = z.object({
   id: z.string().uuid(),
@@ -55,9 +86,105 @@ export const updateEmployeeInputSchema = z
   .object({
     employeeCode: employeeCodeSchema,
     employeeName: employeeNameSchema,
-    branchId: z.string().uuid("Invalid branch id"),
   })
   .strict();
+
+export const employeeTransferReasonSchema = z
+  .string()
+  .trim()
+  .min(1, "Transfer reason is required")
+  .max(500, "Transfer reason must be at most 500 characters");
+
+export const transferEmployeeInputSchema = z
+  .object({
+    toBranchId: z.string().uuid("Invalid branch id"),
+    effectiveDate: isoDateSchema,
+    reason: employeeTransferReasonSchema,
+    toStoreId: optionalNullableUuidSchema.optional().default(null),
+    toSupervisorApplicationUserId: optionalNullableUuidSchema
+      .optional()
+      .default(null),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const hasStore = value.toStoreId != null;
+    const hasSupervisor = value.toSupervisorApplicationUserId != null;
+    if (hasStore === hasSupervisor) {
+      return;
+    }
+
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: hasStore ? ["toSupervisorApplicationUserId"] : ["toStoreId"],
+      message: "New store and new supervisor must be provided together.",
+    });
+  });
+
+export const employeeTransferStoreSummarySchema = z.object({
+  id: z.string().uuid(),
+  storeCode: z.string(),
+  storeName: z.string(),
+  isActive: z.boolean(),
+});
+
+export const employeeTransferPersonSummarySchema = z.object({
+  id: z.string().uuid(),
+  username: z.string(),
+  employeeName: z.string().nullable(),
+  employeeCode: z.string().nullable(),
+});
+
+export const employeeTransferAssignmentRoleSchema = z.enum([
+  "MAKER",
+  "SUPERVISOR",
+]);
+
+export const employeeTransferAssignmentSchema = z.object({
+  role: employeeTransferAssignmentRoleSchema,
+  store: employeeTransferStoreSummarySchema,
+  supervisor: employeeTransferPersonSummarySchema,
+});
+
+export const employeeTransferApplicationUserSchema = z.object({
+  id: z.string().uuid(),
+  username: z.string(),
+  roles: z.array(appRoleSchema),
+});
+
+export const employeeTransferBlockerCodeSchema = z.enum(["EMPLOYEE_INACTIVE"]);
+
+export const employeeTransferBlockerSchema = z.object({
+  code: employeeTransferBlockerCodeSchema,
+  message: z.string(),
+});
+
+export const employeeTransferContextSchema = z.object({
+  employee: employeeSchema,
+  canTransfer: z.boolean(),
+  blockers: z.array(employeeTransferBlockerSchema),
+  currentAssignment: employeeTransferAssignmentSchema.nullable(),
+  applicationUser: employeeTransferApplicationUserSchema.nullable(),
+  latestEffectiveDate: z.string().nullable(),
+});
+
+export const employeeTransferSchema = z.object({
+  id: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  fromBranch: employeeBranchSummarySchema,
+  toBranch: employeeBranchSummarySchema,
+  effectiveDate: z.string(),
+  reason: z.string(),
+  transferredBy: employeeTransferPersonSummarySchema,
+  fromStore: employeeTransferStoreSummarySchema.nullable(),
+  toStore: employeeTransferStoreSummarySchema.nullable(),
+  fromSupervisor: employeeTransferPersonSummarySchema.nullable(),
+  toSupervisor: employeeTransferPersonSummarySchema.nullable(),
+  createdAt: z.string(),
+});
+
+export const employeeTransferListResponseSchema = z.object({
+  items: z.array(employeeTransferSchema),
+});
 
 export const updateEmployeeStatusInputSchema = z
   .object({

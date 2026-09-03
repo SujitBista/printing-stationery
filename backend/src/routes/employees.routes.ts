@@ -2,7 +2,10 @@ import { Router } from "express";
 import {
   createEmployeeHandler,
   getEmployeeHandler,
+  getEmployeeTransferContextHandler,
+  listEmployeeTransfersHandler,
   listEmployeesHandler,
+  transferEmployeeHandler,
   updateEmployeeHandler,
   updateEmployeeStatusHandler,
 } from "../controllers/employees.controller.js";
@@ -33,6 +36,24 @@ employeesRouter.post(
   confirmEmployeeImportHandler,
 );
 employeesRouter.get("/:id", requireAuth, readRoles, getEmployeeHandler);
+employeesRouter.get(
+  "/:id/transfer-context",
+  requireAuth,
+  readRoles,
+  getEmployeeTransferContextHandler,
+);
+employeesRouter.get(
+  "/:id/transfers",
+  requireAuth,
+  readRoles,
+  listEmployeeTransfersHandler,
+);
+employeesRouter.post(
+  "/:id/transfer",
+  requireAuth,
+  adminOnly,
+  transferEmployeeHandler,
+);
 employeesRouter.post("/", requireAuth, adminOnly, createEmployeeHandler);
 employeesRouter.patch(
   "/:id/status",

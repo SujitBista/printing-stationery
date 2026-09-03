@@ -16,6 +16,8 @@ const STORE_BRANCH_UNIQUE_INDEX = "stores_branch_id_uidx";
 const BRANCH_ALREADY_HAS_STORE_MESSAGE =
   "This branch already has a store. A branch can have only one store.";
 const EMPLOYEE_CODE_UNIQUE_INDEX = "employees_employee_code_lower_uidx";
+const EMPLOYEE_TRANSFER_DUPLICATE_INDEX =
+  "employee_transfers_employee_from_to_effective_uidx";
 const APPLICATION_USER_EMPLOYEE_UNIQUE_INDEX =
   "application_users_employee_id_uidx";
 const APPLICATION_USER_USERNAME_UNIQUE_INDEX =
@@ -297,11 +299,31 @@ export function isEmployeeCodeUniqueViolation(error: unknown): boolean {
   return constraint === EMPLOYEE_CODE_UNIQUE_INDEX;
 }
 
+export function isEmployeeTransferDuplicateViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === EMPLOYEE_TRANSFER_DUPLICATE_INDEX;
+}
+
 export function mapEmployeeDatabaseError(error: unknown): never {
   if (isEmployeeCodeUniqueViolation(error)) {
     throw new AppError("An employee with this code already exists.", 409, {
       cause: error,
     });
+  }
+
+  if (isEmployeeTransferDuplicateViolation(error)) {
+    throw new AppError(
+      "A transfer for this employee, branches, and effective date already exists.",
+      409,
+      { cause: error },
+    );
   }
 
   if (isDatabaseUnavailableError(error)) {

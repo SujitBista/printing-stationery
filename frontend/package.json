@@ -8,7 +8,7 @@
     "start": "next start --port 3000",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "tsx --test src/lib/item-issues/permissions.test.ts src/lib/item-requests/queues.test.ts src/lib/item-requests/permissions.test.ts src/lib/stores/one-store-per-branch.test.ts src/components/item-issues/item-issue-labels.test.ts"
+    "test": "tsx --test src/lib/auth/permissions.test.ts src/lib/item-issues/permissions.test.ts src/lib/item-requests/queues.test.ts src/lib/item-requests/permissions.test.ts src/lib/stores/one-store-per-branch.test.ts src/components/item-issues/item-issue-labels.test.ts src/components/employees/employee-transfer-labels.test.ts"
   },
   "dependencies": {
     "@printing-stationery/shared": "*",

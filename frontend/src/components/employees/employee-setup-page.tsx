@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import type {
   Branch,
   CreateEmployeeInput,
@@ -339,7 +340,12 @@ export function EmployeeSetupPage() {
                         {employee.employeeCode}
                       </td>
                       <td className="min-w-[10rem] px-3 py-3 font-medium">
-                        {employee.employeeName}
+                        <Link
+                          href={`/organization/employees/${employee.id}`}
+                          className="text-accent hover:text-accent-dark hover:underline"
+                        >
+                          {employee.employeeName}
+                        </Link>
                       </td>
                       <td className="min-w-[10rem] px-3 py-3">
                         <div>{employee.branch.branchName}</div>
@@ -357,6 +363,12 @@ export function EmployeeSetupPage() {
                       <td className="whitespace-nowrap px-3 py-3">
                         {canMutateMasterData ? (
                         <div className="flex flex-wrap gap-2">
+                          <Link
+                            href={`/organization/employees/${employee.id}`}
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
+                          >
+                            View
+                          </Link>
                           <button
                             type="button"
                             onClick={() => openEditDialog(employee)}
@@ -364,6 +376,12 @@ export function EmployeeSetupPage() {
                           >
                             Edit
                           </button>
+                          <Link
+                            href={`/organization/employees/${employee.id}/transfer`}
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
+                          >
+                            Transfer
+                          </Link>
                           <button
                             type="button"
                             onClick={() => void handleToggleStatus(employee)}
@@ -378,7 +396,12 @@ export function EmployeeSetupPage() {
                           </button>
                         </div>
                         ) : (
-                          <span className="text-ink-muted">—</span>
+                          <Link
+                            href={`/organization/employees/${employee.id}`}
+                            className="font-medium text-accent hover:text-accent-dark hover:underline"
+                          >
+                            View
+                          </Link>
                         )}
                       </td>
                     </tr>
