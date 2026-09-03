@@ -404,7 +404,7 @@ async function assertAssignablePerson(params: {
   if (context.employee.branchId !== params.storeBranchId) {
     throw new AppError(
       params.fieldLabel === "maker"
-        ? "The maker’s employee branch must match the store’s branch."
+        ? "The store user’s employee branch must match the store’s branch."
         : "The supervisor’s employee branch must match the store’s branch.",
       400,
     );
@@ -613,19 +613,36 @@ export async function listEligibleStores(
 export async function listEligibleStoreApplicationUsers(
   query: EligibleStoreApplicationUserListQuery,
 ): Promise<PaginatedEligibleStoreApplicationUserResponse> {
-  const { store } = await assertUsableStore(query.storeId);
-
   const conditions: SQL[] = [
     eq(applicationUsers.isActive, true),
     eq(employees.isActive, true),
-    eq(employees.branchId, store.branchId),
     isNotNull(applicationUsers.employeeId),
     eq(userRoles.role, query.role),
     isNull(forbiddenRoles.userId),
   ];
 
+  if (query.storeId) {
+    const { store } = await assertUsableStore(query.storeId);
+    conditions.push(eq(employees.branchId, store.branchId));
+  }
+
   if (query.role === "MAKER") {
+    if (!query.storeId) {
+      throw new AppError("Store is required to list eligible store users.", 400);
+    }
+
     conditions.push(isNull(activeMakerAssignments.id));
+  }
+
+  if (query.role === "CHECKER" && !query.storeId && !query.branchId) {
+    throw new AppError(
+      "Store or branch is required to list eligible supervisors.",
+      400,
+    );
+  }
+
+  if (query.branchId) {
+    conditions.push(eq(employees.branchId, query.branchId));
   }
 
   if (query.search) {

@@ -4,13 +4,17 @@ import {
   createEmployeeInputSchema,
   employeeIdSchema,
   employeeListQuerySchema,
+  transferEmployeeInputSchema,
   updateEmployeeInputSchema,
   updateEmployeeStatusInputSchema,
 } from "@printing-stationery/shared";
 import {
   createEmployee,
   getEmployeeById,
+  getEmployeeTransferContext,
+  listEmployeeTransfers,
   listEmployees,
+  transferEmployee,
   updateEmployee,
   updateEmployeeStatus,
 } from "../services/employees.service.js";
@@ -33,6 +37,13 @@ function parseOrThrow<T>(
     throw new AppError(validationMessage(result.error), 400);
   }
   return result.data;
+}
+
+function requireActor(req: Request) {
+  if (!req.auth) {
+    throw new AppError("Unauthorized", 401);
+  }
+  return req.auth.user;
 }
 
 export async function listEmployeesHandler(
@@ -72,6 +83,50 @@ export async function createEmployeeHandler(
     const input = parseOrThrow(createEmployeeInputSchema.safeParse(req.body));
     const employee = await createEmployee(input);
     res.status(201).json(employee);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getEmployeeTransferContextHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const id = parseOrThrow(employeeIdSchema.safeParse(req.params.id));
+    const context = await getEmployeeTransferContext(id);
+    res.status(200).json(context);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listEmployeeTransfersHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const id = parseOrThrow(employeeIdSchema.safeParse(req.params.id));
+    const result = await listEmployeeTransfers(id);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function transferEmployeeHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const id = parseOrThrow(employeeIdSchema.safeParse(req.params.id));
+    const input = parseOrThrow(transferEmployeeInputSchema.safeParse(req.body));
+    const employee = await transferEmployee(id, input, actor.id);
+    res.status(200).json(employee);
   } catch (error) {
     next(error);
   }

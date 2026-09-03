@@ -27,6 +27,12 @@ export function canMutateMasterData(
   return isAdmin(user);
 }
 
+export function canAccessOrganizationSetup(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  return isAdmin(user);
+}
+
 export function canManageApplicationUsers(
   user: AuthenticatedUser | null | undefined,
 ): boolean {

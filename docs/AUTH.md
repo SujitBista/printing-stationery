@@ -201,8 +201,9 @@ Branch vs Head Office maker/checker is derived later from role plus the employee
 
 Master-data API policy at this stage:
 
-- `GET`: authenticated `ADMIN`, `MAKER`, or `CHECKER`
+- `GET`: authenticated `ADMIN`, `MAKER`, or `CHECKER` (needed on request and issue screens)
 - `POST` / `PATCH` / status: `ADMIN` only
+- Organization Setup screens (branches, departments, units, item groups, items, stores, employees, application users, store users): `ADMIN` only. Branch makers and checkers cannot open these screens.
 - Application User Setup: `ADMIN` only. `HR` will maintain Employee Setup later, but cannot create application accounts or assign roles.
 
 UI visibility is convenience only; backend authorization is authoritative. Authorization uses database-derived roles; a null `employee_id` does not restrict `ADMIN`.

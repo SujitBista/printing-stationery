@@ -3,6 +3,13 @@ import type {
   employeeSchema,
   createEmployeeInputSchema,
   updateEmployeeInputSchema,
+  transferEmployeeInputSchema,
+  employeeTransferContextSchema,
+  employeeTransferBlockerSchema,
+  employeeTransferBlockerCodeSchema,
+  employeeTransferSchema,
+  employeeTransferListResponseSchema,
+  employeeTransferAssignmentSchema,
   updateEmployeeStatusInputSchema,
   employeeListQuerySchema,
   paginatedEmployeeResponseSchema,
@@ -23,6 +30,23 @@ export type EmployeeStatusFilter = z.infer<typeof employeeStatusFilterSchema>;
 export type EmployeeBranchSummary = z.infer<typeof employeeBranchSummarySchema>;
 export type CreateEmployeeInput = z.infer<typeof createEmployeeInputSchema>;
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeInputSchema>;
+export type TransferEmployeeInput = z.infer<typeof transferEmployeeInputSchema>;
+export type EmployeeTransferBlocker = z.infer<
+  typeof employeeTransferBlockerSchema
+>;
+export type EmployeeTransferBlockerCode = z.infer<
+  typeof employeeTransferBlockerCodeSchema
+>;
+export type EmployeeTransferContext = z.infer<
+  typeof employeeTransferContextSchema
+>;
+export type EmployeeTransfer = z.infer<typeof employeeTransferSchema>;
+export type EmployeeTransferListResponse = z.infer<
+  typeof employeeTransferListResponseSchema
+>;
+export type EmployeeTransferAssignment = z.infer<
+  typeof employeeTransferAssignmentSchema
+>;
 export type UpdateEmployeeStatusInput = z.infer<
   typeof updateEmployeeStatusInputSchema
 >;

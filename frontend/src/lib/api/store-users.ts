@@ -44,15 +44,20 @@ function buildEligibleUserQueryString(
   query: EligibleStoreApplicationUserListQuery,
 ): string {
   const params = new URLSearchParams();
-  params.set("storeId", query.storeId);
   params.set("role", query.role);
   params.set("page", String(query.page));
   params.set("pageSize", String(query.pageSize));
+  if (query.storeId) {
+    params.set("storeId", query.storeId);
+  }
   if (query.search) {
     params.set("search", query.search);
   }
   if (query.excludeAssignmentId) {
     params.set("excludeAssignmentId", query.excludeAssignmentId);
+  }
+  if (query.branchId) {
+    params.set("branchId", query.branchId);
   }
   return params.toString();
 }
