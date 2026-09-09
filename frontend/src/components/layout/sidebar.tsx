@@ -31,7 +31,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Dashboard", href: "/" },
       { label: "Items", href: "#", soon: true },
-      { label: "Purchases", href: "#", soon: true },
+      { label: "Purchases", href: "/purchases" },
       { label: "Opening Stock", href: "/stock/opening-stock", adminSetup: true },
       {
         label: "Requests",
@@ -58,6 +58,11 @@ const NAV_SECTIONS: NavSection[] = [
       {
         label: "Store User Setup",
         href: "/organization/store-users",
+        adminSetup: true,
+      },
+      {
+        label: "Party Setup",
+        href: "/organization/parties",
         adminSetup: true,
       },
     ],
@@ -231,6 +236,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     isAdmin,
     canAccessItemRequests,
     canAccessOpeningStock,
+    canAccessPurchases,
   } = useAuth();
 
   return (
@@ -261,9 +267,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   item.href !== "/requests/item-requests" ||
                   canAccessItemRequests,
               );
-            const filteredItems = items.filter(
-              (item) => item.href !== "/stock/opening-stock" || canAccessOpeningStock,
-            );
+            const filteredItems = items
+              .filter(
+                (item) =>
+                  item.href !== "/stock/opening-stock" || canAccessOpeningStock,
+              )
+              .filter(
+                (item) => item.href !== "/purchases" || canAccessPurchases,
+              );
 
             if (filteredItems.length === 0) {
               return null;

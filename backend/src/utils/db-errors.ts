@@ -37,6 +37,10 @@ const ITEM_ISSUE_LINE_REQUEST_LINE_UNIQUE_INDEX =
   "item_issue_lines_issue_request_line_uidx";
 const ITEM_ISSUE_LINE_QUANTITY_CHECK =
   "item_issue_lines_issue_quantity_positive";
+const PARTY_CODE_UNIQUE_INDEX = "parties_party_code_lower_uidx";
+const PURCHASE_NUMBER_UNIQUE_INDEX = "purchases_purchase_number_uidx";
+const PURCHASE_LINE_ITEM_UNIQUE_INDEX = "purchase_lines_purchase_item_uidx";
+const PURCHASE_LINE_QUANTITY_CHECK = "purchase_lines_quantity_positive";
 
 const CONNECTION_ERROR_CODES = new Set([
   "ECONNREFUSED",
@@ -556,6 +560,90 @@ export function mapItemIssueDatabaseError(error: unknown): never {
 
   if (isItemIssueLineQuantityCheckViolation(error)) {
     throw new AppError("Issue quantity must be greater than zero", 400, {
+      cause: error,
+    });
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function isPartyCodeUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === PARTY_CODE_UNIQUE_INDEX;
+}
+
+export function mapPartyDatabaseError(error: unknown): never {
+  if (isPartyCodeUniqueViolation(error)) {
+    throw new AppError("A party with this party code already exists", 409, {
+      cause: error,
+    });
+  }
+
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}
+
+export function isPurchaseNumberUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === PURCHASE_NUMBER_UNIQUE_INDEX;
+}
+
+export function isPurchaseLineItemUniqueViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === PURCHASE_LINE_ITEM_UNIQUE_INDEX;
+}
+
+export function isPurchaseLineQuantityCheckViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23514") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === PURCHASE_LINE_QUANTITY_CHECK;
+}
+
+export function mapPurchaseDatabaseError(error: unknown): never {
+  if (isPurchaseNumberUniqueViolation(error)) {
+    throw new AppError("A purchase with this number already exists.", 409, {
+      cause: error,
+    });
+  }
+
+  if (isPurchaseLineItemUniqueViolation(error)) {
+    throw new AppError(
+      "The same item cannot appear twice in one purchase",
+      409,
+      { cause: error },
+    );
+  }
+
+  if (isPurchaseLineQuantityCheckViolation(error)) {
+    throw new AppError("Purchase quantity must be greater than zero", 400, {
       cause: error,
     });
   }

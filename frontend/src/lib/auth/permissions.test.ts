@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   canAccessOrganizationSetup,
+  canAccessPurchases,
   canMutateMasterData,
+  canMutatePurchases,
   canReadMasterData,
 } from "./permissions.js";
 
@@ -32,5 +34,16 @@ describe("organization setup access", () => {
     assert.equal(canReadMasterData(userWithRoles(["CHECKER"])), true);
     assert.equal(canReadMasterData(userWithRoles(["ADMIN"])), true);
     assert.equal(canReadMasterData(userWithRoles(["HR"])), false);
+  });
+});
+
+describe("purchase access", () => {
+  it("lets inventory operators open purchase records", () => {
+    assert.equal(canAccessPurchases(userWithRoles(["ADMIN"])), true);
+    assert.equal(canAccessPurchases(userWithRoles(["MAKER"])), true);
+    assert.equal(canAccessPurchases(userWithRoles(["CHECKER"])), true);
+    assert.equal(canAccessPurchases(userWithRoles(["HR"])), false);
+    assert.equal(canMutatePurchases(userWithRoles(["CHECKER"])), false);
+    assert.equal(canMutatePurchases(userWithRoles(["MAKER"])), true);
   });
 });

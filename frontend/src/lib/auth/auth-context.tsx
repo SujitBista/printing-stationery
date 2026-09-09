@@ -11,13 +11,15 @@ import {
 import type { AuthenticatedUser } from "@printing-stationery/shared";
 import { fetchCurrentUser, logout as logoutRequest } from "@/lib/api/auth";
 import {
+  canAccessItemRequests,
   canAccessOpeningStock,
   canAccessOrganizationSetup,
+  canAccessPurchases,
   canManageApplicationUsers,
   canManageStoreUsers,
   canMutateMasterData,
+  canMutatePurchases,
   canReadMasterData,
-  canAccessItemRequests,
   isAdmin,
 } from "@/lib/auth/permissions";
 
@@ -33,6 +35,8 @@ type AuthContextValue = {
   canManageStoreUsers: boolean;
   canAccessItemRequests: boolean;
   canAccessOpeningStock: boolean;
+  canAccessPurchases: boolean;
+  canMutatePurchases: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -71,6 +75,8 @@ export function AuthProvider({ initialUser, children }: AuthProviderProps) {
       canManageStoreUsers: canManageStoreUsers(user),
       canAccessItemRequests: canAccessItemRequests(user),
       canAccessOpeningStock: canAccessOpeningStock(user),
+      canAccessPurchases: canAccessPurchases(user),
+      canMutatePurchases: canMutatePurchases(user),
     }),
     [user, refresh, logout],
   );

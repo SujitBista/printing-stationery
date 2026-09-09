@@ -134,6 +134,20 @@
       "when": 1788765000000,
       "tag": "0018_item_request_requested_by",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788770000000,
+      "tag": "0019_parties",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788775000000,
+      "tag": "0020_purchases",
+      "breakpoints": true
     }
   ]
 }

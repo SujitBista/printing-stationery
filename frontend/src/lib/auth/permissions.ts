@@ -60,6 +60,24 @@ export function canAccessOpeningStock(
   return isAdmin(user);
 }
 
+export function canAccessPurchases(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  if (!user) {
+    return false;
+  }
+  return userHasAnyRole(user.roles, ["ADMIN", "MAKER", "CHECKER"]);
+}
+
+export function canMutatePurchases(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  if (!user) {
+    return false;
+  }
+  return userHasRole(user.roles, "ADMIN") || userHasRole(user.roles, "MAKER");
+}
+
 export function hasRole(
   user: AuthenticatedUser | null | undefined,
   role: AppRole,
