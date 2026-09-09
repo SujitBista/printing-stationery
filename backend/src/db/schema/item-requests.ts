@@ -13,6 +13,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { applicationUsers } from "./auth.js";
+import { employees } from "./employees.js";
 import { items } from "./items.js";
 import { stores } from "./stores.js";
 
@@ -44,8 +45,15 @@ export const itemRequests = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     requestNumber: varchar("request_number", { length: 40 }).notNull(),
+    /** Request To / receiving / destination store. API: destinationStoreId. */
     requestingStoreId: uuid("requesting_store_id").notNull(),
+    /** Request From / supplying / source store. API: sourceStoreId. */
     corporateStoreId: uuid("corporate_store_id"),
+    /**
+     * Employee on whose behalf the request is made (Requested By).
+     * Distinct from createdByApplicationUserId (Created By).
+     */
+    requestedByEmployeeId: uuid("requested_by_employee_id"),
     createdByApplicationUserId: uuid(
       "created_by_application_user_id",
     ).notNull(),
@@ -92,6 +100,9 @@ export const itemRequests = pgTable(
     index("item_requests_created_by_application_user_id_idx").on(
       table.createdByApplicationUserId,
     ),
+    index("item_requests_requested_by_employee_id_idx").on(
+      table.requestedByEmployeeId,
+    ),
     foreignKey({
       columns: [table.requestingStoreId],
       foreignColumns: [stores.id],
@@ -103,6 +114,13 @@ export const itemRequests = pgTable(
       columns: [table.corporateStoreId],
       foreignColumns: [stores.id],
       name: "item_requests_corporate_store_id_fk",
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      columns: [table.requestedByEmployeeId],
+      foreignColumns: [employees.id],
+      name: "item_requests_requested_by_employee_id_fk",
     })
       .onDelete("restrict")
       .onUpdate("restrict"),

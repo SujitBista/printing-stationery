@@ -236,7 +236,8 @@ export function StoreUserFormPage({
         stores.find((store) => store.id === form.storeId)?.branch.id ??
         assignment?.store.branch.id;
       const currentSupervisor =
-        assignment?.supervisor.employee.branch.id === storeBranchId
+        assignment &&
+        assignment.supervisor.employee.branch.id === storeBranchId
           ? assignment.supervisor
           : undefined;
 

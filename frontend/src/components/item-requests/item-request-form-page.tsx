@@ -8,6 +8,8 @@ import {
   type EligibleItemRequestItem,
   type ItemRequest,
   type ItemRequestContext,
+  type ItemRequestRequestedByEmployee,
+  type ItemRequestStoreSummary,
 } from "@printing-stationery/shared";
 import {
   createItemRequest,
@@ -18,8 +20,21 @@ import {
   updateItemRequest,
 } from "@/lib/api/item-requests";
 import { useAuth } from "@/lib/auth/auth-context";
+import {
+  canSelectRequestedByEmployee,
+  defaultRequestedByEmployeeId,
+} from "@/lib/item-requests/permissions";
+import { formatAvailableStockQuantity } from "@/components/item-issues/item-issue-labels";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
+import { ItemRequestEmployeeSelect } from "./item-request-employee-select";
+import { ItemRequestStoreSelect } from "./item-request-store-select";
+import {
+  departmentDisplayName,
+  employeeDisplayName,
+  storeDisplayName,
+  storeOptionLabel,
+} from "./item-request-labels";
 
 type LineState = {
   key: string;
@@ -31,15 +46,6 @@ type ItemRequestFormPageProps = {
   mode: "create" | "edit";
   requestId?: string;
 };
-
-function storeLabel(
-  store: ItemRequestContext["requestingStore"] | ItemRequest["requestingStore"],
-): string {
-  if (!store) {
-    return "Not assigned";
-  }
-  return `${store.storeCode} — ${store.storeName} (${store.branch.branchName})`;
-}
 
 function itemOptionLabel(item: EligibleItemRequestItem): string {
   return `${item.itemCode} — ${item.itemName} (${item.unit.unitName})`;
@@ -54,12 +60,19 @@ export function ItemRequestFormPage({
   requestId,
 }: ItemRequestFormPageProps) {
   const router = useRouter();
-  const { canAccessItemRequests } = useAuth();
+  const { canAccessItemRequests, isAdmin, user } = useAuth();
   const [context, setContext] = useState<ItemRequestContext | null>(null);
   const [existing, setExisting] = useState<ItemRequest | null>(null);
   const [eligibleItems, setEligibleItems] = useState<EligibleItemRequestItem[]>(
     [],
   );
+  const [sourceStoreId, setSourceStoreId] = useState("");
+  const [sourceStore, setSourceStore] = useState<ItemRequestStoreSummary | null>(
+    null,
+  );
+  const [destinationStoreId, setDestinationStoreId] = useState("");
+  const [requestedByEmployee, setRequestedByEmployee] =
+    useState<ItemRequestRequestedByEmployee | null>(null);
   const [remarks, setRemarks] = useState("");
   const [lines, setLines] = useState<LineState[]>([
     { key: newLineKey(), itemId: "", requestedQuantity: "" },
@@ -75,9 +88,8 @@ export function ItemRequestFormPage({
       setLoading(true);
       setLoadError(null);
 
-      const [contextResult, itemsPages, existingResult] = await Promise.all([
+      const [contextResult, existingResult] = await Promise.all([
         fetchItemRequestContext(),
-        loadAllEligibleItems(),
         mode === "edit" && requestId
           ? fetchItemRequest(requestId)
           : Promise.resolve(null),
@@ -90,10 +102,6 @@ export function ItemRequestFormPage({
       }
 
       setContext(contextResult.data);
-
-      if (itemsPages.ok) {
-        setEligibleItems(itemsPages.data);
-      }
 
       if (existingResult) {
         if (!existingResult.ok) {
@@ -110,6 +118,10 @@ export function ItemRequestFormPage({
 
         setExisting(existingResult.data);
         setRemarks(existingResult.data.remarks ?? "");
+        setSourceStoreId(existingResult.data.sourceStoreId ?? "");
+        setSourceStore(existingResult.data.sourceStore);
+        setDestinationStoreId(existingResult.data.destinationStoreId);
+        setRequestedByEmployee(existingResult.data.requestedBy);
         setLines(
           existingResult.data.lines.map((line) => ({
             key: line.id,
@@ -119,8 +131,24 @@ export function ItemRequestFormPage({
         );
       } else if (!contextResult.data.canCreate) {
         setLoadError(
-          "You can create a request only when you are the active maker of a branch store.",
+          isAdmin
+            ? "You cannot create a request right now."
+            : "You can create a request only when you have an active store assignment as maker.",
         );
+      } else {
+        setDestinationStoreId(contextResult.data.destinationStore?.id ?? "");
+        setRequestedByEmployee(contextResult.data.requestedByEmployee);
+        if (
+          !canSelectRequestedByEmployee(user) &&
+          !defaultRequestedByEmployeeId({
+            user,
+            contextEmployeeId: contextResult.data.requestedByEmployee?.id,
+          })
+        ) {
+          setLoadError(
+            "Your account is not linked to an employee record.",
+          );
+        }
       }
 
       setLoading(false);
@@ -131,7 +159,28 @@ export function ItemRequestFormPage({
     } else {
       setLoading(false);
     }
-  }, [canAccessItemRequests, mode, requestId]);
+  }, [canAccessItemRequests, isAdmin, mode, requestId, user]);
+
+  useEffect(() => {
+    if (!sourceStoreId) {
+      setEligibleItems([]);
+      return;
+    }
+
+    let cancelled = false;
+    void loadAllEligibleItems(sourceStoreId).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (result.ok) {
+        setEligibleItems(result.data);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceStoreId]);
 
   const selectedItemIds = useMemo(
     () => new Set(lines.map((line) => line.itemId).filter(Boolean)),
@@ -143,15 +192,13 @@ export function ItemRequestFormPage({
       return [];
     }
     return existing.lines
-      .filter(
-        (line) =>
-          !eligibleItems.some((item) => item.id === line.itemId),
-      )
+      .filter((line) => !eligibleItems.some((item) => item.id === line.itemId))
       .map((line) => ({
         id: line.itemId,
         itemCode: line.item.itemCode,
         itemName: line.item.itemName,
         unit: line.item.unit,
+        availableStockQuantity: line.availableStockQuantity ?? "0",
       }));
   }, [eligibleItems, existing]);
 
@@ -159,6 +206,30 @@ export function ItemRequestFormPage({
     () => [...historicalItems, ...eligibleItems],
     [eligibleItems, historicalItems],
   );
+
+  const destinationStoreOptions = useMemo(() => {
+    const options = [...(context?.destinationStores ?? [])];
+    const existingDestination = existing?.destinationStore;
+    if (
+      existingDestination &&
+      !options.some((store) => store.id === existingDestination.id)
+    ) {
+      options.unshift(existingDestination);
+    }
+    return options;
+  }, [context?.destinationStores, existing?.destinationStore]);
+
+  const destinationReadOnly = !context?.canSelectDestinationStore;
+  const requestedByReadOnly = !context?.canSelectRequestedByEmployee;
+  const destinationStore =
+    destinationStoreOptions.find((store) => store.id === destinationStoreId) ??
+    existing?.destinationStore ??
+    context?.destinationStore ??
+    null;
+  const requestedByBranchDiffers =
+    Boolean(requestedByEmployee) &&
+    Boolean(destinationStore) &&
+    requestedByEmployee?.branch.id !== destinationStore?.branch.id;
 
   function updateLine(key: string, patch: Partial<LineState>) {
     setLines((current) =>
@@ -182,7 +253,23 @@ export function ItemRequestFormPage({
   }
 
   function buildPayload() {
+    if (!sourceStoreId) {
+      throw new Error("Select Request From Store");
+    }
+    if (!destinationStoreId) {
+      throw new Error("Select Request To Store");
+    }
+    if (!requestedByEmployee) {
+      throw new Error("Requested By is required");
+    }
+    if (sourceStoreId === destinationStoreId) {
+      throw new Error("Request From Store and Request To Store must be different");
+    }
+
     const payload = {
+      sourceStoreId,
+      destinationStoreId,
+      requestedByEmployeeId: requestedByEmployee.id,
       remarks: remarks.trim().length === 0 ? null : remarks,
       lines: lines.map((line) => ({
         itemId: line.itemId,
@@ -277,11 +364,6 @@ export function ItemRequestFormPage({
     );
   }
 
-  const requestingStore =
-    existing?.requestingStore ?? context?.requestingStore ?? null;
-  const corporateStore =
-    existing?.corporateStore ?? context?.corporateStore ?? null;
-
   return (
     <section className="w-full max-w-4xl">
       <div className="mb-6">
@@ -316,25 +398,96 @@ export function ItemRequestFormPage({
           ) : null}
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-ink">Requesting store</span>
-            <input
-              readOnly
-              value={storeLabel(requestingStore)}
-              className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
-            />
+            <span className="font-medium text-ink">Requested By</span>
+            {requestedByReadOnly ? (
+              <input
+                readOnly
+                value={employeeDisplayName(requestedByEmployee)}
+                className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
+              />
+            ) : (
+              <ItemRequestEmployeeSelect
+                value={requestedByEmployee}
+                disabled={saving}
+                onChange={setRequestedByEmployee}
+              />
+            )}
+            {requestedByEmployee ? (
+              <span className="text-xs text-ink-muted">
+                Branch: {requestedByEmployee.branch.branchCode} —{" "}
+                {requestedByEmployee.branch.branchName}
+                {requestedByBranchDiffers
+                  ? " (different from Request To Store)"
+                  : ""}
+              </span>
+            ) : (
+              <span className="text-xs text-ink-muted">
+                Employee on whose behalf this request is made
+              </span>
+            )}
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-ink">Corporate store</span>
+            <span className="font-medium text-ink">Department</span>
             <input
               readOnly
-              value={
-                corporateStore
-                  ? storeLabel(corporateStore)
-                  : "Determined automatically when recommended"
-              }
+              value={departmentDisplayName(requestedByEmployee?.department)}
               className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
             />
+            <span className="text-xs text-ink-muted">
+              Taken from the selected employee
+            </span>
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-ink">Request From Store</span>
+            <ItemRequestStoreSelect
+              value={sourceStoreId}
+              selectedStore={sourceStore ?? existing?.sourceStore ?? null}
+              excludeStoreId={destinationStoreId || undefined}
+              disabled={saving}
+              placeholder="Select supplying store"
+              onChange={(nextValue, store) => {
+                setSourceStoreId(nextValue);
+                setSourceStore(store);
+              }}
+            />
+            <span className="text-xs text-ink-muted">
+              Store that will supply the items
+            </span>
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-ink">Request To Store</span>
+            {destinationReadOnly ? (
+              <input
+                readOnly
+                value={storeDisplayName(destinationStore)}
+                className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
+              />
+            ) : (
+              <SearchableSelect
+                value={destinationStoreId}
+                disabled={saving}
+                placeholder="Select receiving store"
+                searchPlaceholder="Search stores…"
+                options={destinationStoreOptions.map((store) => ({
+                  value: store.id,
+                  label: storeOptionLabel(store),
+                  disabled: store.id === sourceStoreId,
+                }))}
+                onChange={(nextValue) => {
+                  setDestinationStoreId(nextValue);
+                  if (nextValue === sourceStoreId) {
+                    setSourceStoreId("");
+                    setSourceStore(null);
+                  }
+                }}
+              />
+            )}
+            <span className="text-xs text-ink-muted">
+              Store that will receive the items
+            </span>
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
@@ -373,6 +526,17 @@ export function ItemRequestFormPage({
               </p>
             ) : null}
 
+            {sourceStoreId ? (
+              <p className="text-xs text-ink-muted">
+                Available stock is the Request From Store balance and is not
+                reserved when this request is saved.
+              </p>
+            ) : (
+              <p className="text-xs text-ink-muted">
+                Select Request From Store to load available stock for each item.
+              </p>
+            )}
+
             {lines.map((line) => {
               const selected = allItemOptions.find(
                 (item) => item.id === line.itemId,
@@ -380,7 +544,7 @@ export function ItemRequestFormPage({
               return (
                 <div
                   key={line.key}
-                  className="grid gap-3 rounded-md border border-border bg-paper-elevated p-3 sm:grid-cols-[minmax(0,1fr)_8rem_auto]"
+                  className="grid gap-3 rounded-md border border-border bg-paper-elevated p-3 sm:grid-cols-[minmax(0,1fr)_8rem_9rem_auto]"
                 >
                   <label className="flex min-w-0 flex-col gap-1 text-sm">
                     <span className="font-medium text-ink">Item</span>
@@ -406,6 +570,21 @@ export function ItemRequestFormPage({
                     <input
                       readOnly
                       value={selected?.unit.unitName ?? ""}
+                      className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-ink">Available stock</span>
+                    <input
+                      readOnly
+                      value={
+                        selected
+                          ? formatAvailableStockQuantity(
+                              selected.availableStockQuantity,
+                              selected.unit.unitName,
+                            )
+                          : ""
+                      }
                       className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
                     />
                   </label>
@@ -485,12 +664,13 @@ export function ItemRequestFormPage({
   );
 }
 
-async function loadAllEligibleItems() {
+async function loadAllEligibleItems(sourceStoreId: string) {
   const allItems: EligibleItemRequestItem[] = [];
   for (let page = 1; page <= 50; page += 1) {
     const result = await fetchEligibleItemRequestItems({
       page,
       pageSize: 100,
+      sourceStoreId,
     });
     if (!result.ok) {
       return result;

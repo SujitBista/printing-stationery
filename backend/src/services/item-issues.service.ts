@@ -31,11 +31,13 @@ import {
 } from "../utils/db-errors.js";
 import {
   ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+  INELIGIBLE_SUPPLYING_STORE_MESSAGE,
   ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
   NON_CORPORATE_SUPPLYING_STORE_MESSAGE,
   actorMayOperateItemIssue,
-  isCorporateSupplyingStore,
+  isEligibleSupplyingStore,
 } from "./item-issue-authorization.js";
+import { toRequestedByEmployeeSummary } from "./item-request-requested-by.js";
 import {
   getOperationalAvailableQuantities,
   operationalStockKey,
@@ -85,6 +87,14 @@ const requestCreatedByUsers = alias(applicationUsers, "request_created_by_users"
 const requestCreatedByEmployees = alias(
   employees,
   "request_created_by_employees",
+);
+const requestRequestedByEmployees = alias(
+  employees,
+  "request_requested_by_employees",
+);
+const requestRequestedByBranches = alias(
+  branches,
+  "request_requested_by_branches",
 );
 
 type StoreAssignmentContext = {
@@ -298,15 +308,6 @@ async function requireSupplyingStoreChecker(
     throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
 
-  if (
-    !isCorporateSupplyingStore({
-      underStoreId: assignment.store.underStoreId,
-      branchType: assignment.branch.branchType,
-    })
-  ) {
-    throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
-  }
-
   return assignment;
 }
 
@@ -333,6 +334,8 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
   corporateBranch: BranchRow;
   createdByUser: ApplicationUserRow;
   createdByEmployee: EmployeeRow | null;
+  requestedByEmployee: EmployeeRow | null;
+  requestedByBranch: BranchRow | null;
 }> {
   const rows = await getDb()
     .select({
@@ -343,6 +346,8 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
       corporateBranch: corporateBranches,
       createdByUser: requestCreatedByUsers,
       createdByEmployee: requestCreatedByEmployees,
+      requestedByEmployee: requestRequestedByEmployees,
+      requestedByBranch: requestRequestedByBranches,
     })
     .from(itemRequests)
     .innerJoin(requestStores, eq(itemRequests.requestingStoreId, requestStores.id))
@@ -356,6 +361,14 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
     .leftJoin(
       requestCreatedByEmployees,
       eq(requestCreatedByUsers.employeeId, requestCreatedByEmployees.id),
+    )
+    .leftJoin(
+      requestRequestedByEmployees,
+      eq(itemRequests.requestedByEmployeeId, requestRequestedByEmployees.id),
+    )
+    .leftJoin(
+      requestRequestedByBranches,
+      eq(requestRequestedByEmployees.branchId, requestRequestedByBranches.id),
     )
     .where(eq(itemRequests.id, requestId))
     .limit(1);
@@ -371,18 +384,20 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
     );
   }
   if (!row.requestingStore.isActive) {
-    throw new AppError("The requesting store is inactive.", 409);
+    throw new AppError("The receiving store is inactive.", 409);
   }
   if (!row.corporateStore.isActive) {
     throw new AppError("The supplying store is inactive.", 409);
   }
   if (
-    !isCorporateSupplyingStore({
+    !isEligibleSupplyingStore({
+      isActive: row.corporateStore.isActive && row.corporateBranch.isActive,
+      allowTransfer: row.corporateStore.allowTransfer,
       underStoreId: row.corporateStore.underStoreId,
       branchType: row.corporateBranch.branchType,
     })
   ) {
-    throw new AppError(NON_CORPORATE_SUPPLYING_STORE_MESSAGE, 409);
+    throw new AppError(INELIGIBLE_SUPPLYING_STORE_MESSAGE, 409);
   }
 
   return row;
@@ -472,6 +487,7 @@ export function canCreateIssueFromAvailability(
 export function validateIssueLinesAgainstAvailability(params: {
   lines: Array<{ requestLineId: string; issueQuantity: string }>;
   availability: ItemIssueLineAvailability[];
+  enforceStock?: boolean;
 }): void {
   const availabilityByLine = new Map(
     params.availability.map((line) => [line.requestLineId, line]),
@@ -502,6 +518,16 @@ export function validateIssueLinesAgainstAvailability(params: {
         `Issue quantity for ${available.itemCode} exceeds the remaining requested quantity.`,
         409,
       );
+    }
+
+    if (params.enforceStock) {
+      const stock = parseQuantityToScaled(available.availableStockQuantity ?? "0");
+      if (issueQuantity > stock) {
+        throw new AppError(
+          `Issue quantity for ${available.itemCode} exceeds the supplying store available stock.`,
+          409,
+        );
+      }
     }
 
     positiveLineCount += 1;
@@ -676,10 +702,6 @@ function toIssueListItem(
   const submittedBy = toPersonSummary(row.submittedByUser, row.submittedByEmployee);
   const canEdit =
     row.issue.status === "DRAFT" &&
-    isCorporateSupplyingStore({
-      underStoreId: row.fromStore.underStoreId,
-      branchType: row.fromBranch.branchType,
-    }) &&
     actorMayOperateItemIssue({
       actor,
       supplyingStoreId: row.issue.fromStoreId,
@@ -704,6 +726,40 @@ function toIssueListItem(
     canEdit,
     canSubmit: canEdit,
   };
+}
+
+function toIssueRequestLines(
+  rows: RequestLineRow[],
+  availability: ItemIssueLineAvailability[],
+) {
+  const availabilityByLine = new Map(
+    availability.map((line) => [line.requestLineId, line]),
+  );
+
+  return rows.map((row) => {
+    const available = availabilityByLine.get(row.line.id);
+    return {
+      id: row.line.id,
+      itemId: row.line.itemId,
+      requestedQuantity: String(row.line.requestedQuantity),
+      issuedQuantity: available?.previouslyIssuedQuantity ?? "0",
+      remainingQuantity: available?.remainingQuantity ?? String(row.line.requestedQuantity),
+      availableStockQuantity: available?.availableStockQuantity ?? "0",
+      createdAt: row.line.createdAt.toISOString(),
+      updatedAt: row.line.updatedAt.toISOString(),
+      item: {
+        id: row.item.id,
+        itemCode: row.item.itemCode,
+        itemName: row.item.itemName,
+        isActive: row.item.isActive,
+        isRequestable: row.item.isRequestable,
+        unit: {
+          id: row.unitId,
+          unitName: row.unitName,
+        },
+      },
+    };
+  });
 }
 
 export async function getItemIssueEligibility(
@@ -756,28 +812,23 @@ export async function getItemIssueEligibility(
         request.corporateStore,
         request.corporateBranch,
       ),
+      sourceStore: toStoreSummary(
+        request.corporateStore,
+        request.corporateBranch,
+      ),
+      destinationStore: toStoreSummary(
+        request.requestingStore,
+        request.requestingBranch,
+      ),
       createdBy: toPersonSummary(
         request.createdByUser,
         request.createdByEmployee,
       )!,
-      lines: (await loadRequestLineRows(requestId)).map((row) => ({
-        id: row.line.id,
-        itemId: row.line.itemId,
-        requestedQuantity: String(row.line.requestedQuantity),
-        createdAt: row.line.createdAt.toISOString(),
-        updatedAt: row.line.updatedAt.toISOString(),
-        item: {
-          id: row.item.id,
-          itemCode: row.item.itemCode,
-          itemName: row.item.itemName,
-          isActive: row.item.isActive,
-          isRequestable: row.item.isRequestable,
-          unit: {
-            id: row.unitId,
-            unitName: row.unitName,
-          },
-        },
-      })),
+      requestedBy: toRequestedByEmployeeSummary(
+        request.requestedByEmployee,
+        request.requestedByBranch,
+      ),
+      lines: toIssueRequestLines(await loadRequestLineRows(requestId), availability),
     },
     lines: availability,
   };
@@ -942,28 +993,26 @@ export async function getItemIssueById(
           requestHeader.corporateStore,
           requestHeader.corporateBranch,
         ),
+        sourceStore: toStoreSummary(
+          requestHeader.corporateStore,
+          requestHeader.corporateBranch,
+        ),
+        destinationStore: toStoreSummary(
+          requestHeader.requestingStore,
+          requestHeader.requestingBranch,
+        ),
         createdBy: toPersonSummary(
           requestHeader.createdByUser,
           requestHeader.createdByEmployee,
         )!,
-        lines: (await loadRequestLineRows(header.issue.requestId)).map((row) => ({
-          id: row.line.id,
-          itemId: row.line.itemId,
-          requestedQuantity: String(row.line.requestedQuantity),
-          createdAt: row.line.createdAt.toISOString(),
-          updatedAt: row.line.updatedAt.toISOString(),
-          item: {
-            id: row.item.id,
-            itemCode: row.item.itemCode,
-            itemName: row.item.itemName,
-            isActive: row.item.isActive,
-            isRequestable: row.item.isRequestable,
-            unit: {
-              id: row.unitId,
-              unitName: row.unitName,
-            },
-          },
-        })),
+        requestedBy: toRequestedByEmployeeSummary(
+          requestHeader.requestedByEmployee,
+          requestHeader.requestedByBranch,
+        ),
+        lines: toIssueRequestLines(
+          await loadRequestLineRows(header.issue.requestId),
+          availability,
+        ),
       },
       lines: lineRows.map((row) => ({
         id: row.line.id,
@@ -1129,7 +1178,7 @@ export async function submitItemIssue(
         );
       }
       if (!requestRow.requestingStore.isActive) {
-        throw new AppError("The requesting store is inactive.", 409);
+        throw new AppError("The receiving store is inactive.", 409);
       }
       if (!requestRow.corporateStore.isActive) {
         throw new AppError("The supplying store is inactive.", 409);
@@ -1139,6 +1188,12 @@ export async function submitItemIssue(
       if (issue.fromStoreId !== requestRow.corporateStore.id) {
         throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
       }
+
+      const availability = await buildAvailability(
+        issue.requestId,
+        issue.fromStoreId,
+        issue.id,
+      );
 
       const issueLineRows = await tx
         .select({
@@ -1216,6 +1271,15 @@ export async function submitItemIssue(
           400,
         );
       }
+
+      validateIssueLinesAgainstAvailability({
+        lines: issueLineRows.map((line) => ({
+          requestLineId: line.requestLineId,
+          issueQuantity: String(line.issueQuantity),
+        })),
+        availability,
+        enforceStock: true,
+      });
 
       const updated = await tx
         .update(itemIssues)

@@ -120,6 +120,20 @@
       "when": 1788338822161,
       "tag": "0016_pale_bug",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788760000000,
+      "tag": "0017_item_request_store_meanings",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788765000000,
+      "tag": "0018_item_request_requested_by",
+      "breakpoints": true
     }
   ]
 }

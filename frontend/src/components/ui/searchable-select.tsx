@@ -33,6 +33,12 @@ type SearchableSelectProps = {
   size?: "default" | "sm";
   clearable?: boolean;
   maxVisibleOptions?: number;
+  /** When false, options are already filtered by the caller (server search). */
+  filterLocally?: boolean;
+  loading?: boolean;
+  onQueryChange?: (query: string) => void;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
   "aria-label"?: string;
   "aria-busy"?: boolean;
 };
@@ -63,11 +69,21 @@ export function SearchableSelect({
   size = "default",
   clearable = true,
   maxVisibleOptions = 100,
+  filterLocally = true,
+  loading = false,
+  onQueryChange,
+  hasMore = false,
+  onLoadMore,
   "aria-label": ariaLabel,
   "aria-busy": ariaBusy,
 }: SearchableSelectProps) {
   const listboxId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const onQueryChangeRef = useRef(onQueryChange);
+  onQueryChangeRef.current = onQueryChange;
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
+  const loadMoreLockRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -83,15 +99,22 @@ export function SearchableSelect({
   );
 
   const filtered = useMemo(() => {
+    if (!filterLocally) {
+      return options;
+    }
     const needle = normalize(query);
     if (!needle) {
       return options;
     }
     return options.filter((option) => normalize(option.label).includes(needle));
-  }, [options, query]);
+  }, [filterLocally, options, query]);
 
-  const visible = filtered.slice(0, maxVisibleOptions);
-  const hiddenCount = Math.max(0, filtered.length - visible.length);
+  const visible = filterLocally
+    ? filtered.slice(0, maxVisibleOptions)
+    : filtered;
+  const hiddenCount = filterLocally
+    ? Math.max(0, filtered.length - visible.length)
+    : 0;
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) {
@@ -144,9 +167,29 @@ export function SearchableSelect({
     }
     setQuery("");
     setHighlightIndex(0);
+    onQueryChangeRef.current?.("");
     const handle = window.setTimeout(() => searchRef.current?.focus(), 0);
     return () => window.clearTimeout(handle);
   }, [open]);
+
+  useEffect(() => {
+    if (!loading) {
+      loadMoreLockRef.current = false;
+    }
+  }, [loading]);
+
+  function maybeLoadMore(container: HTMLElement) {
+    if (!hasMore || loading || loadMoreLockRef.current) {
+      return;
+    }
+    const remaining =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (remaining > 48) {
+      return;
+    }
+    loadMoreLockRef.current = true;
+    onLoadMoreRef.current?.();
+  }
 
   useEffect(() => {
     if (!open) {
@@ -268,6 +311,7 @@ export function SearchableSelect({
                 onChange={(event) => {
                   setQuery(event.target.value);
                   setHighlightIndex(0);
+                  onQueryChange?.(event.target.value);
                 }}
                 onKeyDown={onSearchKeyDown}
                 placeholder={searchPlaceholder}
@@ -279,9 +323,12 @@ export function SearchableSelect({
               role="listbox"
               aria-label={ariaLabel ?? placeholder}
               className="min-h-0 flex-1 overflow-y-auto py-1"
+              onScroll={(event) => maybeLoadMore(event.currentTarget)}
             >
               {visible.length === 0 ? (
-                <li className="px-3 py-2 text-sm text-ink-muted">{emptyMessage}</li>
+                <li className="px-3 py-2 text-sm text-ink-muted">
+                  {loading ? "Searching…" : emptyMessage}
+                </li>
               ) : (
                 visible.map((option, index) => {
                   const isSelected = option.value === value;
@@ -312,6 +359,10 @@ export function SearchableSelect({
               <p className="shrink-0 border-t border-border px-3 py-1.5 text-xs text-ink-muted">
                 {hiddenCount} more — keep typing to narrow results
               </p>
+            ) : hasMore ? (
+              <p className="shrink-0 border-t border-border px-3 py-1.5 text-xs text-ink-muted">
+                {loading ? "Loading more…" : "Scroll for more"}
+              </p>
             ) : null}
           </div>,
           portalRoot,
@@ -330,7 +381,7 @@ export function SearchableSelect({
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
         aria-label={ariaLabel}
-        aria-busy={ariaBusy || undefined}
+        aria-busy={ariaBusy || loading || undefined}
         aria-required={required || undefined}
         onClick={() => {
           if (disabled) {

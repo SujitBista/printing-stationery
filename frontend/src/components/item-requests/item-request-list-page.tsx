@@ -32,10 +32,12 @@ import { ItemRequestQueueTabs } from "./item-request-queue-tabs";
 import { Badge } from "@/components/ui/badge";
 import {
   formatDateTime,
+  formatStoreTransferDirection,
   ITEM_REQUEST_ACTION_LABELS,
   ITEM_REQUEST_STATUS_LABELS,
   itemRequestStatusTone,
   personDisplayName,
+  requestedByDisplayName,
 } from "./item-request-labels";
 
 const PAGE_SIZE = 20;
@@ -257,7 +259,7 @@ export function ItemRequestListPage({
         <div className="mt-4 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm text-ink">
           <p className="font-semibold text-warning">Cannot create requests yet</p>
           <p className="mt-1 text-ink-muted">
-            You need an active Store User assignment as the maker of a branch store.
+            You need an active Store User assignment as the maker of a store.
             Ask an admin to set this up in Store User Setup, then refresh this page.
           </p>
         </div>
@@ -277,7 +279,7 @@ export function ItemRequestListPage({
         {isAdmin ? (
           <>
             <label className="flex w-full flex-col gap-1 text-sm">
-              <span className="font-medium text-ink">Requesting store</span>
+              <span className="font-medium text-ink">Receiving store</span>
               <SearchableSelect
                 value={requestingStoreId}
                 onChange={(nextValue) => {
@@ -359,16 +361,16 @@ export function ItemRequestListPage({
                       Request number
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Requesting store
+                      Stores
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Created by
+                      Requested by
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Created date
+                      Request date
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                      Items
+                      Quantities
                     </th>
                     <th className="whitespace-nowrap px-3 py-2 font-semibold">
                       Status
@@ -396,22 +398,33 @@ export function ItemRequestListPage({
                         <td className="whitespace-nowrap px-3 py-3 font-medium">
                           {request.requestNumber}
                         </td>
-                        <td className="min-w-[12rem] px-3 py-3">
-                          <div className="font-medium">
-                            {request.requestingStore.storeName}
-                          </div>
-                          <div className="text-xs text-ink-muted">
-                            {request.requestingStore.storeCode}
+                        <td className="min-w-[14rem] px-3 py-3">
+                          <Badge variant="info">
+                            {formatStoreTransferDirection(
+                              request.sourceStore,
+                              request.destinationStore,
+                            )}
+                          </Badge>
+                          <div className="mt-1 text-xs text-ink-muted">
+                            From {request.sourceStore?.storeCode ?? "—"} to{" "}
+                            {request.destinationStore.storeCode}
                           </div>
                         </td>
                         <td className="min-w-[10rem] px-3 py-3">
-                          {personDisplayName(request.createdBy)}
+                          {requestedByDisplayName(
+                            request.requestedBy,
+                            request.createdBy,
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3">
                           {formatDateTime(request.createdAt)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3">
-                          {request.itemCount}
+                        <td className="min-w-[10rem] px-3 py-3">
+                          <div>Requested {request.totalRequestedQuantity}</div>
+                          <div className="text-xs text-ink-muted">
+                            Issued {request.totalIssuedQuantity} · Remaining{" "}
+                            {request.totalRemainingQuantity}
+                          </div>
                         </td>
                         <td className="min-w-[10rem] px-3 py-3">
                           <Badge variant={itemRequestStatusTone(request.status)}>

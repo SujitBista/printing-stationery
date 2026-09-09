@@ -1,21 +1,25 @@
 import {
   createItemRequestInputSchema,
   eligibleItemRequestItemListQuerySchema,
+  eligibleItemRequestStoreListQuerySchema,
   itemRequestActionInputSchema,
   itemRequestContextSchema,
   itemRequestIdSchema,
   itemRequestListQuerySchema,
   itemRequestSchema,
   paginatedEligibleItemRequestItemResponseSchema,
+  paginatedEligibleItemRequestStoreResponseSchema,
   paginatedItemRequestResponseSchema,
   updateItemRequestInputSchema,
   type CreateItemRequestInput,
   type EligibleItemRequestItemListQuery,
+  type EligibleItemRequestStoreListQuery,
   type ItemRequest,
   type ItemRequestActionInput,
   type ItemRequestContext,
   type ItemRequestListQuery,
   type PaginatedEligibleItemRequestItemResponse,
+  type PaginatedEligibleItemRequestStoreResponse,
   type PaginatedItemRequestResponse,
   type UpdateItemRequestInput,
 } from "@printing-stationery/shared";
@@ -49,6 +53,24 @@ function buildEligibleQueryString(
   params.set("pageSize", String(query.pageSize));
   if (query.search) {
     params.set("search", query.search);
+  }
+  if (query.sourceStoreId) {
+    params.set("sourceStoreId", query.sourceStoreId);
+  }
+  return params.toString();
+}
+
+function buildEligibleStoreQueryString(
+  query: EligibleItemRequestStoreListQuery,
+): string {
+  const params = new URLSearchParams();
+  params.set("page", String(query.page));
+  params.set("pageSize", String(query.pageSize));
+  if (query.search) {
+    params.set("search", query.search);
+  }
+  if (query.excludeStoreId) {
+    params.set("excludeStoreId", query.excludeStoreId);
   }
   return params.toString();
 }
@@ -126,6 +148,37 @@ export async function fetchEligibleItemRequestItems(
       return { success: true, data: parsed.data };
     },
     "Failed to load eligible items",
+  );
+}
+
+export async function fetchEligibleItemRequestSourceStores(
+  rawQuery: Partial<EligibleItemRequestStoreListQuery> = {},
+): Promise<ApiResult<PaginatedEligibleItemRequestStoreResponse>> {
+  const parsedQuery = eligibleItemRequestStoreListQuerySchema.safeParse(rawQuery);
+  if (!parsedQuery.success) {
+    return {
+      ok: false,
+      error: "Invalid eligible store list query",
+      status: 400,
+    };
+  }
+
+  return requestJson(
+    `/api/item-requests/eligible-source-stores?${buildEligibleStoreQueryString(parsedQuery.data)}`,
+    { method: "GET" },
+    (json) => {
+      const parsed =
+        paginatedEligibleItemRequestStoreResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          success: false,
+          error:
+            "Eligible store list response did not match the expected schema",
+        };
+      }
+      return { success: true, data: parsed.data };
+    },
+    "Failed to load supplying stores",
   );
 }
 

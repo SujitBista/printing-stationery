@@ -10,6 +10,7 @@ import type {
   itemRequestListQuerySchema,
   itemRequestQueueSchema,
   eligibleItemRequestItemListQuerySchema,
+  eligibleItemRequestStoreListQuerySchema,
   itemRequestSchema,
   itemRequestListItemSchema,
   itemRequestLineSchema,
@@ -17,9 +18,11 @@ import type {
   paginatedItemRequestResponseSchema,
   eligibleItemRequestItemSchema,
   paginatedEligibleItemRequestItemResponseSchema,
+  paginatedEligibleItemRequestStoreResponseSchema,
   itemRequestContextSchema,
   itemRequestStoreSummarySchema,
   itemRequestPersonSummarySchema,
+  itemRequestRequestedByEmployeeSchema,
   itemRequestBranchSummarySchema,
   requestedQuantitySchema,
   itemRequestLineInputSchema,
@@ -47,6 +50,9 @@ export type ItemRequestListQuery = z.infer<typeof itemRequestListQuerySchema>;
 export type EligibleItemRequestItemListQuery = z.infer<
   typeof eligibleItemRequestItemListQuerySchema
 >;
+export type EligibleItemRequestStoreListQuery = z.infer<
+  typeof eligibleItemRequestStoreListQuerySchema
+>;
 export type ItemRequest = z.infer<typeof itemRequestSchema>;
 export type ItemRequestListItem = z.infer<typeof itemRequestListItemSchema>;
 export type ItemRequestLine = z.infer<typeof itemRequestLineSchema>;
@@ -60,12 +66,18 @@ export type EligibleItemRequestItem = z.infer<
 export type PaginatedEligibleItemRequestItemResponse = z.infer<
   typeof paginatedEligibleItemRequestItemResponseSchema
 >;
+export type PaginatedEligibleItemRequestStoreResponse = z.infer<
+  typeof paginatedEligibleItemRequestStoreResponseSchema
+>;
 export type ItemRequestContext = z.infer<typeof itemRequestContextSchema>;
 export type ItemRequestStoreSummary = z.infer<
   typeof itemRequestStoreSummarySchema
 >;
 export type ItemRequestPersonSummary = z.infer<
   typeof itemRequestPersonSummarySchema
+>;
+export type ItemRequestRequestedByEmployee = z.infer<
+  typeof itemRequestRequestedByEmployeeSchema
 >;
 export type ItemRequestBranchSummary = z.infer<
   typeof itemRequestBranchSummarySchema

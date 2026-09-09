@@ -62,10 +62,43 @@ export function personDisplayName(
   }
 
   if (person.employee) {
-    return `${person.employee.employeeName} (${person.employee.employeeCode})`;
+    return employeeDisplayName(person.employee);
   }
 
   return person.username;
+}
+
+export function employeeDisplayName(employee: {
+  employeeName: string;
+  employeeCode: string;
+} | null | undefined): string {
+  if (!employee) {
+    return "—";
+  }
+  return `${employee.employeeName} (${employee.employeeCode})`;
+}
+
+export function departmentDisplayName(department: {
+  departmentName: string;
+  departmentCode: string;
+} | null | undefined): string {
+  if (!department) {
+    return "No department assigned";
+  }
+  return `${department.departmentName} (${department.departmentCode})`;
+}
+
+export function requestedByDisplayName(
+  requestedBy: {
+    employeeName: string;
+    employeeCode: string;
+  } | null | undefined,
+  createdBy?: ItemRequestPersonSummary | null,
+): string {
+  if (requestedBy) {
+    return employeeDisplayName(requestedBy);
+  }
+  return personDisplayName(createdBy);
 }
 
 export function formatDateTime(value: string): string {
@@ -74,4 +107,31 @@ export function formatDateTime(value: string): string {
     return value;
   }
   return date.toLocaleString();
+}
+
+export function storeDisplayName(store: {
+  storeCode: string;
+  storeName: string;
+} | null | undefined): string {
+  if (!store) {
+    return "Not assigned";
+  }
+  return `${store.storeCode} — ${store.storeName}`;
+}
+
+export function storeOptionLabel(store: {
+  storeCode: string;
+  storeName: string;
+  branch: { branchName: string };
+}): string {
+  return `${store.storeCode} — ${store.storeName} (${store.branch.branchName})`;
+}
+
+export function formatStoreTransferDirection(
+  sourceStore: { storeName: string } | null | undefined,
+  destinationStore: { storeName: string } | null | undefined,
+): string {
+  const from = sourceStore?.storeName ?? "Supplying store not set";
+  const to = destinationStore?.storeName ?? "Receiving store not set";
+  return `${from} → ${to}`;
 }

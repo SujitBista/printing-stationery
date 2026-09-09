@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
 import { isItemIssueAccessDenied } from "@/lib/item-issues/permissions";
+import { requestedByDisplayName } from "@/components/item-requests/item-request-labels";
 import {
   formatAvailableStockQuantity,
   formatDateTime,
@@ -356,23 +357,36 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               <span className="font-medium text-ink">From Store</span>
               <input
                 readOnly
-                value={formatStoreLabel(request.corporateStore)}
+                value={formatStoreLabel(
+                  request.sourceStore ?? request.corporateStore,
+                )}
                 className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
               />
+              <span className="text-xs text-ink-muted">
+                Store that will supply the items
+              </span>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-ink">To Store</span>
               <input
                 readOnly
-                value={formatStoreLabel(request.requestingStore)}
+                value={formatStoreLabel(
+                  request.destinationStore ?? request.requestingStore,
+                )}
                 className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
               />
+              <span className="text-xs text-ink-muted">
+                Store that will receive the items
+              </span>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-ink">Requested by</span>
               <input
                 readOnly
-                value={personDisplayName(request.createdBy)}
+                value={requestedByDisplayName(
+                  request.requestedBy,
+                  request.createdBy,
+                )}
                 className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
               />
             </label>

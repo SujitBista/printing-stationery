@@ -3,6 +3,7 @@ import {
   itemRequestIdSchema,
   itemRequestLineSchema,
   itemRequestPersonSummarySchema,
+  itemRequestRequestedByEmployeeSchema,
   itemRequestStatusSchema,
   itemRequestStoreSummarySchema,
   itemRequestUnitSummarySchema,
@@ -156,7 +157,10 @@ export const itemIssueRequestSummarySchema = z.object({
   approvedAt: z.string().nullable(),
   requestingStore: itemRequestStoreSummarySchema,
   corporateStore: itemRequestStoreSummarySchema.nullable(),
+  sourceStore: itemRequestStoreSummarySchema.nullable(),
+  destinationStore: itemRequestStoreSummarySchema,
   createdBy: itemRequestPersonSummarySchema,
+  requestedBy: itemRequestRequestedByEmployeeSchema.nullable(),
   lines: z.array(itemRequestLineSchema),
 });
 

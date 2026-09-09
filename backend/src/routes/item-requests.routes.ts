@@ -4,6 +4,7 @@ import {
   getItemRequestContextHandler,
   getItemRequestHandler,
   listEligibleItemRequestItemsHandler,
+  listEligibleItemRequestSourceStoresHandler,
   listItemRequestsHandler,
   performItemRequestActionHandler,
   updateItemRequestHandler,
@@ -22,6 +23,10 @@ itemRequestsRouter.use(requireAuth, accessRoles);
 
 itemRequestsRouter.get("/", listItemRequestsHandler);
 itemRequestsRouter.get("/context", getItemRequestContextHandler);
+itemRequestsRouter.get(
+  "/eligible-source-stores",
+  listEligibleItemRequestSourceStoresHandler,
+);
 itemRequestsRouter.get("/eligible-items", listEligibleItemRequestItemsHandler);
 itemRequestsRouter.get("/:id", getItemRequestHandler);
 itemRequestsRouter.get("/:requestId/issue-eligibility", getItemIssueEligibilityHandler);

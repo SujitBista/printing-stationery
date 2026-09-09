@@ -18,14 +18,19 @@ import { Badge } from "@/components/ui/badge";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import {
   formatDateTime,
+  formatStoreTransferDirection,
   ITEM_REQUEST_ACTION_LABELS,
   ITEM_REQUEST_STATUS_LABELS,
   itemRequestStatusTone,
+  departmentDisplayName,
   personDisplayName,
+  requestedByDisplayName,
 } from "./item-request-labels";
+import { formatAvailableStockQuantity } from "@/components/item-issues/item-issue-labels";
 
 function storeBlock(
   title: string,
+  helper: string,
   store: ItemRequest["requestingStore"] | null,
 ) {
   return (
@@ -41,9 +46,13 @@ function storeBlock(
           <p className="text-sm text-ink-muted">
             {store.branch.branchCode} — {store.branch.branchName}
           </p>
+          <p className="mt-1 text-xs text-ink-muted">{helper}</p>
         </>
       ) : (
-        <p className="mt-1 text-sm text-ink-muted">Not assigned yet</p>
+        <>
+          <p className="mt-1 text-sm text-ink-muted">Not assigned yet</p>
+          <p className="mt-1 text-xs text-ink-muted">{helper}</p>
+        </>
       )}
     </div>
   );
@@ -173,6 +182,12 @@ export function ItemRequestDetailPage() {
                 <Badge variant={itemRequestStatusTone(request.status)}>
                   {ITEM_REQUEST_STATUS_LABELS[request.status]}
                 </Badge>
+                <Badge variant="info">
+                  {formatStoreTransferDirection(
+                    request.sourceStore,
+                    request.destinationStore,
+                  )}
+                </Badge>
                 {request.pendingWith
                   ? `Pending with ${personDisplayName(request.pendingWith)}`
                   : null}
@@ -222,8 +237,39 @@ export function ItemRequestDetailPage() {
           ) : null}
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            {storeBlock("Requesting store", request.requestingStore)}
-            {storeBlock("Corporate store", request.corporateStore)}
+            {storeBlock(
+              "Request From Store",
+              "Store that will supply the items",
+              request.sourceStore,
+            )}
+            {storeBlock(
+              "Request To Store",
+              "Store that will receive the items",
+              request.destinationStore,
+            )}
+            <div>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                Requested by
+              </h2>
+              <p className="mt-1 font-medium">
+                {requestedByDisplayName(
+                  request.requestedBy,
+                  request.createdBy,
+                )}
+              </p>
+              {request.requestedBy ? (
+                <>
+                  <p className="text-sm text-ink-muted">
+                    Branch: {request.requestedBy.branch.branchCode} —{" "}
+                    {request.requestedBy.branch.branchName}
+                  </p>
+                  <p className="text-sm text-ink-muted">
+                    Department:{" "}
+                    {departmentDisplayName(request.requestedBy.department)}
+                  </p>
+                </>
+              ) : null}
+            </div>
             <div>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
                 Created by
@@ -268,7 +314,16 @@ export function ItemRequestDetailPage() {
                     Unit
                   </th>
                   <th className="whitespace-nowrap px-3 py-2 font-semibold">
-                    Quantity
+                    Requested
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2 font-semibold">
+                    Issued
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2 font-semibold">
+                    Remaining
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2 font-semibold">
+                    Available stock
                   </th>
                 </tr>
               </thead>
@@ -293,6 +348,20 @@ export function ItemRequestDetailPage() {
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">
                       {line.requestedQuantity}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3">
+                      {line.issuedQuantity}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3">
+                      {line.remainingQuantity}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3">
+                      {line.availableStockQuantity == null
+                        ? "—"
+                        : formatAvailableStockQuantity(
+                            line.availableStockQuantity,
+                            line.item.unit.unitName,
+                          )}
                     </td>
                   </tr>
                 ))}

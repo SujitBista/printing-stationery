@@ -2,14 +2,31 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   canCreateItemRequests,
+  canSelectRequestedByEmployee,
+  defaultRequestedByEmployeeId,
   shouldShowItemRequestCreateAction,
   shouldShowItemRequestCreateAssignmentWarning,
 } from "./permissions.js";
 
 function userWithRoles(
   roles: Array<"ADMIN" | "HR" | "MAKER" | "CHECKER">,
+  employeeId?: string,
 ) {
-  return { roles } as never;
+  return {
+    roles,
+    employee: employeeId
+      ? {
+          id: employeeId,
+          employeeCode: "247",
+          employeeName: "Mukesh Soni",
+          branch: {
+            id: "11111111-1111-4111-8111-111111111111",
+            branchCode: "HO",
+            branchName: "Head Office",
+          },
+        }
+      : null,
+  } as never;
 }
 
 describe("item request create role visibility", () => {
@@ -67,9 +84,10 @@ describe("item request create role visibility", () => {
     );
   });
 
-  it("does not show the assignment warning to admins", () => {
+  it("does not show the assignment warning to admins and shows New Request when they can create", () => {
     const admin = userWithRoles(["ADMIN"]);
 
+    assert.equal(canCreateItemRequests(admin), true);
     assert.equal(
       shouldShowItemRequestCreateAssignmentWarning({
         queueShowsCreate: true,
@@ -86,6 +104,14 @@ describe("item request create role visibility", () => {
         user: admin,
       }),
       false,
+    );
+    assert.equal(
+      shouldShowItemRequestCreateAction({
+        queueShowsCreate: true,
+        canCreate: true,
+        user: admin,
+      }),
+      true,
     );
   });
 
@@ -123,6 +149,36 @@ describe("item request create role visibility", () => {
         user: maker,
       }),
       false,
+    );
+  });
+});
+
+describe("item request requested by defaults", () => {
+  it("defaults Requested By to the logged-in Admin's linked employee, not the Admin role", () => {
+    const adminEmployeeId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const admin = userWithRoles(["ADMIN"], adminEmployeeId);
+
+    assert.equal(canSelectRequestedByEmployee(admin), true);
+    assert.equal(
+      defaultRequestedByEmployeeId({
+        user: admin,
+        contextEmployeeId: adminEmployeeId,
+      }),
+      adminEmployeeId,
+    );
+  });
+
+  it("keeps Requested By read-only for a normal maker using their own employee", () => {
+    const makerEmployeeId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const maker = userWithRoles(["MAKER"], makerEmployeeId);
+
+    assert.equal(canSelectRequestedByEmployee(maker), false);
+    assert.equal(
+      defaultRequestedByEmployeeId({
+        user: maker,
+        contextEmployeeId: makerEmployeeId,
+      }),
+      makerEmployeeId,
     );
   });
 });

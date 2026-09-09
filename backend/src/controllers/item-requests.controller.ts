@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import {
   createItemRequestInputSchema,
   eligibleItemRequestItemListQuerySchema,
+  eligibleItemRequestStoreListQuerySchema,
   itemRequestActionInputSchema,
   itemRequestIdSchema,
   itemRequestListQuerySchema,
@@ -13,6 +14,7 @@ import {
   getItemRequestById,
   getItemRequestContext,
   listEligibleItemRequestItems,
+  listEligibleItemRequestSourceStores,
   listItemRequests,
   performItemRequestAction,
   updateItemRequest,
@@ -68,6 +70,23 @@ export async function getItemRequestContextHandler(
   try {
     const actor = requireActor(req);
     const result = await getItemRequestContext(actor);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listEligibleItemRequestSourceStoresHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const query = parseOrThrow(
+      eligibleItemRequestStoreListQuerySchema.safeParse(req.query),
+    );
+    const result = await listEligibleItemRequestSourceStores(actor, query);
     res.status(200).json(result);
   } catch (error) {
     next(error);

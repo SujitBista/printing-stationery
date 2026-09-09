@@ -6,6 +6,7 @@ import {
   ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
   actorMayOperateItemIssue,
   isCorporateSupplyingStore,
+  isEligibleSupplyingStore,
   requestAllowsItemIssueCreation,
 } from "./item-issue-authorization.js";
 import {
@@ -57,6 +58,27 @@ describe("item issue authorization", () => {
   it("rejects a branch store as the corporate supplying store", () => {
     assert.equal(
       isCorporateSupplyingStore({
+        underStoreId: CORPORATE_STORE_ID,
+        branchType: "BRANCH",
+      }),
+      false,
+    );
+  });
+
+  it("treats an active transfer-enabled store as eligible to supply", () => {
+    assert.equal(
+      isEligibleSupplyingStore({
+        isActive: true,
+        allowTransfer: true,
+        underStoreId: CORPORATE_STORE_ID,
+        branchType: "BRANCH",
+      }),
+      true,
+    );
+    assert.equal(
+      isEligibleSupplyingStore({
+        isActive: false,
+        allowTransfer: true,
         underStoreId: CORPORATE_STORE_ID,
         branchType: "BRANCH",
       }),
@@ -141,9 +163,11 @@ describe("item issue authorization", () => {
     );
   });
 
-  it("allows issue creation only from an approved request supplied by corporate store", () => {
+  it("allows issue creation from an approved request supplied by an eligible store", () => {
     const corporateStore = {
       id: CORPORATE_STORE_ID,
+      isActive: true,
+      allowTransfer: false,
       underStoreId: null,
       branchType: "HEAD_OFFICE",
     };
@@ -170,11 +194,27 @@ describe("item issue authorization", () => {
         supplyingStoreId: BRANCH_STORE_ID,
         supplyingStore: {
           id: BRANCH_STORE_ID,
+          isActive: true,
+          allowTransfer: false,
           underStoreId: CORPORATE_STORE_ID,
           branchType: "BRANCH",
         },
       }),
       false,
+    );
+    assert.equal(
+      requestAllowsItemIssueCreation({
+        requestStatus: "APPROVED",
+        supplyingStoreId: BRANCH_STORE_ID,
+        supplyingStore: {
+          id: BRANCH_STORE_ID,
+          isActive: true,
+          allowTransfer: true,
+          underStoreId: CORPORATE_STORE_ID,
+          branchType: "BRANCH",
+        },
+      }),
+      true,
     );
   });
 
@@ -211,6 +251,27 @@ describe("item issue remaining quantity rules", () => {
         error instanceof AppError &&
         error.statusCode === 409 &&
         /exceeds the remaining requested quantity/i.test(error.message),
+    );
+  });
+
+  it("rejects an issue quantity that exceeds supplying-store stock when posting", () => {
+    assert.throws(
+      () =>
+        validateIssueLinesAgainstAvailability({
+          lines: [{ requestLineId: REQUEST_LINE_ID, issueQuantity: "5" }],
+          availability: [
+            {
+              ...availabilityLine({ remainingQuantity: "10" }),
+              availableStockQuantity: "4",
+              stockBalanceKnown: true,
+            },
+          ],
+          enforceStock: true,
+        }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.statusCode === 409 &&
+        /exceeds the supplying store available stock/i.test(error.message),
     );
   });
 

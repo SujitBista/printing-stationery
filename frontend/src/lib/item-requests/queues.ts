@@ -69,7 +69,8 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     sidebarLabel: "Approved List",
     tabLabel: "Approved List",
     title: "Item Request Approved List",
-    description: "Approved requests ready for item issue from the corporate store.",
+    description:
+      "Approved requests ready for item issue from the supplying store.",
     href: "/requests/item-requests/approved",
   },
   {
