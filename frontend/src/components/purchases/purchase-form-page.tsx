@@ -9,13 +9,11 @@ import {
   purchaseLineAmount,
   sumDecimalStrings,
   type Item,
-  type ItemRequestListItem,
   type Party,
   type Purchase,
   type Store,
 } from "@printing-stationery/shared";
 import { fetchItems } from "@/lib/api/items";
-import { fetchItemRequests } from "@/lib/api/item-requests";
 import { fetchParties } from "@/lib/api/parties";
 import {
   createPurchase,
@@ -26,7 +24,12 @@ import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { formatPurchaseAmount, todayIsoDate } from "./purchase-labels";
+import {
+  findCorporatePurchaseStore,
+  formatPurchaseAmount,
+  purchaseStoreSearchOptions,
+  todayIsoDate,
+} from "./purchase-labels";
 
 type LineState = {
   key: string;
@@ -55,19 +58,14 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
   const [stores, setStores] = useState<Store[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [items, setItems] = useState<Item[]>([]);
-  const [requests, setRequests] = useState<ItemRequestListItem[]>([]);
   const [storeId, setStoreId] = useState("");
   const [partyId, setPartyId] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(todayIsoDate());
   const [purchaseBillDate, setPurchaseBillDate] = useState(todayIsoDate());
-  const [fiscalYear, setFiscalYear] = useState(
-    nepaliFiscalYearFromIsoDate(todayIsoDate()),
-  );
   const [poNumber, setPoNumber] = useState("");
   const [grnNumber, setGrnNumber] = useState("");
   const [deliveryNoteNumber, setDeliveryNoteNumber] = useState("");
   const [purchaseBillNumber, setPurchaseBillNumber] = useState("");
-  const [itemRequestId, setItemRequestId] = useState("");
   const [remarks, setRemarks] = useState("");
   const [lines, setLines] = useState<LineState[]>([
     { key: newLineKey(), itemId: "", quantity: "", rate: "" },
@@ -82,12 +80,11 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
       setLoading(true);
       setLoadError(null);
 
-      const [storesResult, partiesResult, itemsResult, requestsResult, existingResult] =
+      const [storesResult, partiesResult, itemsResult, existingResult] =
         await Promise.all([
           loadAllPaginatedOptions(fetchStores, "ACTIVE"),
           loadAllPaginatedOptions(fetchParties, "ACTIVE"),
           loadAllPaginatedOptions(fetchItems, "ACTIVE"),
-          fetchItemRequests({ page: 1, pageSize: 100, status: "ALL" }),
           mode === "edit" && purchaseId
             ? fetchPurchase(purchaseId)
             : Promise.resolve(null),
@@ -112,8 +109,12 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
       setStores(storesResult.data);
       setParties(partiesResult.data);
       setItems(itemsResult.data);
-      if (requestsResult.ok) {
-        setRequests(requestsResult.data.items);
+
+      if (!existingResult) {
+        const corporateStore = findCorporatePurchaseStore(storesResult.data);
+        if (corporateStore) {
+          setStoreId(corporateStore.id);
+        }
       }
 
       if (existingResult) {
@@ -134,12 +135,10 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
         setPartyId(purchase.partyId);
         setPurchaseDate(purchase.purchaseDate);
         setPurchaseBillDate(purchase.purchaseBillDate);
-        setFiscalYear(purchase.fiscalYear);
         setPoNumber(purchase.poNumber ?? "");
         setGrnNumber(purchase.grnNumber ?? "");
         setDeliveryNoteNumber(purchase.deliveryNoteNumber ?? "");
         setPurchaseBillNumber(purchase.purchaseBillNumber ?? "");
-        setItemRequestId(purchase.itemRequestId ?? "");
         setRemarks(purchase.remarks ?? "");
         setLines(
           purchase.lines.map((line) => ({
@@ -181,6 +180,32 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
     [lines],
   );
 
+  const storeOptions = useMemo(() => {
+    const available =
+      existing?.store && !stores.some((store) => store.id === existing.store.id)
+        ? [
+            ...stores,
+            {
+              id: existing.store.id,
+              storeCode: existing.store.storeCode,
+              storeName: existing.store.storeName,
+            },
+          ]
+        : stores;
+    return purchaseStoreSearchOptions(available, storeId).map((store) => ({
+      value: store.id,
+      label: `${store.storeCode} — ${store.storeName}`,
+    }));
+  }, [existing, storeId, stores]);
+
+  const fiscalYear = useMemo(() => {
+    try {
+      return nepaliFiscalYearFromIsoDate(purchaseDate);
+    } catch {
+      return null;
+    }
+  }, [purchaseDate]);
+
   const totalAmount = useMemo(() => {
     const amounts: string[] = [];
     for (const line of lines) {
@@ -202,17 +227,6 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
     );
   }
 
-  function handlePurchaseDateChange(value: string) {
-    setPurchaseDate(value);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      try {
-        setFiscalYear(nepaliFiscalYearFromIsoDate(value));
-      } catch {
-        // Keep the current fiscal year if the date is incomplete/invalid.
-      }
-    }
-  }
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) {
@@ -225,12 +239,10 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
       partyId,
       purchaseDate,
       purchaseBillDate,
-      fiscalYear,
       poNumber: poNumber || null,
       grnNumber: grnNumber || null,
       deliveryNoteNumber: deliveryNoteNumber || null,
       purchaseBillNumber: purchaseBillNumber || null,
-      itemRequestId: itemRequestId || null,
       remarks: remarks || null,
       lines: lines
         .filter((line) => line.itemId)
@@ -328,21 +340,9 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
               value={storeId}
               onChange={setStoreId}
               placeholder="Select store"
-              searchPlaceholder="Search stores…"
-              options={(existing?.store && !stores.some((store) => store.id === existing.store.id)
-                ? [
-                    ...stores,
-                    {
-                      id: existing.store.id,
-                      storeCode: existing.store.storeCode,
-                      storeName: existing.store.storeName,
-                    },
-                  ]
-                : stores
-              ).map((store) => ({
-                value: store.id,
-                label: `${store.storeCode} — ${store.storeName}`,
-              }))}
+              searchPlaceholder="Search other stores…"
+              emptyMessage="No other stores found"
+              options={storeOptions}
               disabled={saving}
             />
           </label>
@@ -376,7 +376,7 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
             <input
               type="date"
               value={purchaseDate}
-              onChange={(event) => handlePurchaseDateChange(event.target.value)}
+              onChange={(event) => setPurchaseDate(event.target.value)}
               disabled={saving}
               className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
             />
@@ -394,11 +394,10 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-ink">Fiscal Year</span>
             <input
-              value={fiscalYear}
-              onChange={(event) => setFiscalYear(event.target.value)}
-              disabled={saving}
-              placeholder="2083-2084"
-              className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
+              value={fiscalYear ?? ""}
+              readOnly
+              aria-readonly="true"
+              className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted outline-none"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
@@ -435,31 +434,6 @@ export function PurchaseFormPage({ mode, purchaseId }: PurchaseFormPageProps) {
               onChange={(event) => setDeliveryNoteNumber(event.target.value)}
               disabled={saving}
               className="rounded-md border border-border bg-paper-elevated px-3 py-2 outline-none focus:ring-2 focus:ring-accent/30"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-ink">Request ID</span>
-            <SearchableSelect
-              value={itemRequestId}
-              onChange={setItemRequestId}
-              placeholder="Optional linked request"
-              searchPlaceholder="Search request number…"
-              options={(itemRequestId &&
-              existing?.itemRequest &&
-              !requests.some((request) => request.id === itemRequestId)
-                ? [
-                    {
-                      id: existing.itemRequest.id,
-                      requestNumber: existing.itemRequest.requestNumber,
-                    },
-                    ...requests,
-                  ]
-                : requests
-              ).map((request) => ({
-                value: request.id,
-                label: request.requestNumber,
-              }))}
-              disabled={saving}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">

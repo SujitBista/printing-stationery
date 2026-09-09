@@ -51,16 +51,6 @@ const optionalReferenceSchema = optionalTrimmedStringSchema.refine(
   { message: "This reference must be at most 80 characters" },
 );
 
-const optionalUuidSchema = z.preprocess(
-  (value) => {
-    if (value === "" || value === null || value === undefined) {
-      return null;
-    }
-    return value;
-  },
-  z.string().uuid("Invalid item request id").nullable(),
-);
-
 const optionalUuidFilterSchema = z.preprocess(
   (value) => {
     if (value === "" || value === null || value === undefined) {
@@ -121,12 +111,10 @@ const purchaseHeaderInputShape = {
   partyId: z.string().uuid("Invalid party id"),
   purchaseDate: isoDateSchema,
   purchaseBillDate: isoDateSchema,
-  fiscalYear: nepaliFiscalYearSchema,
   poNumber: optionalReferenceSchema,
   grnNumber: optionalReferenceSchema,
   deliveryNoteNumber: optionalReferenceSchema,
   purchaseBillNumber: optionalReferenceSchema,
-  itemRequestId: optionalUuidSchema,
   remarks: remarksSchema,
   lines: z
     .array(purchaseLineInputSchema)
@@ -204,11 +192,6 @@ export const purchasePartySummarySchema = z.object({
   isActive: z.boolean(),
 });
 
-export const purchaseRequestSummarySchema = z.object({
-  id: z.string().uuid(),
-  requestNumber: z.string(),
-});
-
 export const purchaseLineItemSummarySchema = z.object({
   id: z.string().uuid(),
   itemCode: z.string(),
@@ -242,7 +225,6 @@ export const purchaseListItemSchema = z.object({
   grnNumber: z.string().nullable(),
   deliveryNoteNumber: z.string().nullable(),
   purchaseBillNumber: z.string().nullable(),
-  itemRequest: purchaseRequestSummarySchema.nullable(),
   remarks: z.string().nullable(),
   createdBy: itemRequestPersonSummarySchema,
   version: z.number().int().positive(),
@@ -255,7 +237,6 @@ export const purchaseListItemSchema = z.object({
 export const purchaseSchema = purchaseListItemSchema.extend({
   storeId: z.string().uuid(),
   partyId: z.string().uuid(),
-  itemRequestId: z.string().uuid().nullable(),
   createdByApplicationUserId: z.string().uuid(),
   lines: z.array(purchaseLineSchema),
 });

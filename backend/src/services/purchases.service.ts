@@ -20,11 +20,11 @@ import type {
   PurchaseListItem,
   PurchaseListQuery,
   PurchasePartySummary,
-  PurchaseRequestSummary,
   PurchaseStoreSummary,
   UpdatePurchaseInput,
 } from "@printing-stationery/shared";
 import {
+  nepaliFiscalYearFromIsoDate,
   purchaseLineAmount,
   sumDecimalStrings,
   userHasAnyRole,
@@ -35,7 +35,6 @@ import {
   type ApplicationUserRow,
 } from "../db/schema/auth.js";
 import { employees, type EmployeeRow } from "../db/schema/employees.js";
-import { itemRequests } from "../db/schema/item-requests.js";
 import { items } from "../db/schema/items.js";
 import { parties, type PartyRow } from "../db/schema/parties.js";
 import {
@@ -99,25 +98,12 @@ function toCreatedBy(
   };
 }
 
-function toRequestSummary(
-  request: { id: string | null; requestNumber: string | null } | null,
-): PurchaseRequestSummary | null {
-  if (!request?.id || !request.requestNumber) {
-    return null;
-  }
-  return {
-    id: request.id,
-    requestNumber: request.requestNumber,
-  };
-}
-
 type HeaderJoinedRow = {
   purchase: PurchaseRow;
   store: StoreRow;
   party: PartyRow;
   createdByUser: ApplicationUserRow;
   createdByEmployee: EmployeeRow | null;
-  itemRequest: { id: string | null; requestNumber: string | null } | null;
 };
 
 const headerSelect = {
@@ -126,10 +112,6 @@ const headerSelect = {
   party: parties,
   createdByUser: createdByUsers,
   createdByEmployee: createdByEmployees,
-  itemRequest: {
-    id: itemRequests.id,
-    requestNumber: itemRequests.requestNumber,
-  },
 };
 
 function purchaseHeaderJoins() {
@@ -145,8 +127,7 @@ function purchaseHeaderJoins() {
     .leftJoin(
       createdByEmployees,
       eq(createdByUsers.employeeId, createdByEmployees.id),
-    )
-    .leftJoin(itemRequests, eq(purchases.itemRequestId, itemRequests.id));
+    );
 }
 
 function toListItem(
@@ -167,7 +148,6 @@ function toListItem(
     grnNumber: row.purchase.grnNumber,
     deliveryNoteNumber: row.purchase.deliveryNoteNumber,
     purchaseBillNumber: row.purchase.purchaseBillNumber,
-    itemRequest: toRequestSummary(row.itemRequest),
     remarks: row.purchase.remarks,
     createdBy: toCreatedBy(row.createdByUser, row.createdByEmployee),
     version: row.purchase.version,
@@ -204,7 +184,6 @@ function buildListFilters(query: PurchaseListQuery): SQL | undefined {
       sql`${stores.storeCode} ILIKE ${pattern} ESCAPE '\\'`,
       sql`${parties.partyName} ILIKE ${pattern} ESCAPE '\\'`,
       sql`${parties.partyCode} ILIKE ${pattern} ESCAPE '\\'`,
-      sql`${itemRequests.requestNumber} ILIKE ${pattern} ESCAPE '\\'`,
     );
     if (searchCondition) {
       conditions.push(searchCondition);
@@ -283,20 +262,6 @@ async function assertParty(partyId: string, requireActive: boolean): Promise<voi
   }
 }
 
-async function assertItemRequest(itemRequestId: string | null): Promise<void> {
-  if (!itemRequestId) {
-    return;
-  }
-  const rows = await getDb()
-    .select({ id: itemRequests.id })
-    .from(itemRequests)
-    .where(eq(itemRequests.id, itemRequestId))
-    .limit(1);
-  if (!rows[0]) {
-    throw new AppError("Linked item request not found", 400);
-  }
-}
-
 async function assertPurchaseLines(
   lines: PurchaseLineInput[],
   allowedInactiveItemIds: Set<string>,
@@ -370,7 +335,6 @@ export async function listPurchases(
           .from(purchases)
           .innerJoin(stores, eq(purchases.storeId, stores.id))
           .innerJoin(parties, eq(purchases.partyId, parties.id))
-          .leftJoin(itemRequests, eq(purchases.itemRequestId, itemRequests.id))
           .where(where)
       : await getDb().select({ value: count() }).from(purchases);
     const totalItems = countRows[0]?.value ?? 0;
@@ -416,7 +380,6 @@ export async function getPurchaseById(
       ...listItem,
       storeId: row.purchase.storeId,
       partyId: row.purchase.partyId,
-      itemRequestId: row.purchase.itemRequestId,
       createdByApplicationUserId: row.purchase.createdByApplicationUserId,
       lines,
     };
@@ -438,18 +401,18 @@ export async function createPurchase(
 
   await assertStore(input.storeId, true);
   await assertParty(input.partyId, true);
-  await assertItemRequest(input.itemRequestId);
   const preparedLines = await assertPurchaseLines(input.lines, new Set());
   const totalAmount = sumDecimalStrings(
     preparedLines.map((line) => line.amount),
   );
+  const fiscalYear = nepaliFiscalYearFromIsoDate(input.purchaseDate);
 
   try {
     const createdId = await getDb().transaction(async (tx) => {
       const inserted = await tx
         .insert(purchases)
         .values({
-          fiscalYear: input.fiscalYear,
+          fiscalYear,
           purchaseDate: input.purchaseDate,
           purchaseBillDate: input.purchaseBillDate,
           storeId: input.storeId,
@@ -459,7 +422,6 @@ export async function createPurchase(
           grnNumber: input.grnNumber,
           deliveryNoteNumber: input.deliveryNoteNumber,
           purchaseBillNumber: input.purchaseBillNumber,
-          itemRequestId: input.itemRequestId,
           remarks: input.remarks,
           createdByApplicationUserId: actor.id,
           version: 1,
@@ -496,7 +458,6 @@ export async function updatePurchase(
   const existing = await getHeaderRow(id);
   await assertStore(input.storeId, input.storeId !== existing.purchase.storeId);
   await assertParty(input.partyId, input.partyId !== existing.purchase.partyId);
-  await assertItemRequest(input.itemRequestId);
 
   const existingLines = await loadLines(id);
   const allowedInactiveItemIds = new Set(existingLines.map((line) => line.itemId));
@@ -507,13 +468,14 @@ export async function updatePurchase(
   const totalAmount = sumDecimalStrings(
     preparedLines.map((line) => line.amount),
   );
+  const fiscalYear = nepaliFiscalYearFromIsoDate(input.purchaseDate);
 
   try {
     await getDb().transaction(async (tx) => {
       const updated = await tx
         .update(purchases)
         .set({
-          fiscalYear: input.fiscalYear,
+          fiscalYear,
           purchaseDate: input.purchaseDate,
           purchaseBillDate: input.purchaseBillDate,
           storeId: input.storeId,
@@ -523,7 +485,6 @@ export async function updatePurchase(
           grnNumber: input.grnNumber,
           deliveryNoteNumber: input.deliveryNoteNumber,
           purchaseBillNumber: input.purchaseBillNumber,
-          itemRequestId: input.itemRequestId,
           remarks: input.remarks,
           version: existing.purchase.version + 1,
           updatedAt: sql`now()`,

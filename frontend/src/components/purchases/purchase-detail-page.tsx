@@ -129,10 +129,6 @@ export function PurchaseDetailPage({ purchaseId }: PurchaseDetailPageProps) {
       label: "Purchase Bill No",
       value: displayOrDash(purchase.purchaseBillNumber),
     },
-    {
-      label: "Request ID",
-      value: displayOrDash(purchase.itemRequest?.requestNumber),
-    },
     { label: "Remarks", value: displayOrDash(purchase.remarks) },
     { label: "Created By", value: createdByDisplayName(purchase.createdBy) },
   ];

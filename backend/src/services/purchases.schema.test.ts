@@ -37,12 +37,10 @@ describe("create purchase schema", () => {
     partyId: PARTY,
     purchaseDate: "2026-09-08",
     purchaseBillDate: "2026-09-07",
-    fiscalYear: "2083-2084",
     poNumber: null,
     grnNumber: null,
     deliveryNoteNumber: null,
     purchaseBillNumber: "273",
-    itemRequestId: null,
     remarks: "Nepali Paper Purchased",
     lines: [{ itemId: ITEM, quantity: "10", rate: "3360" }],
   };
@@ -63,10 +61,10 @@ describe("create purchase schema", () => {
     assert.equal(parsed.success, false);
   });
 
-  it("rejects an invalid fiscal year", () => {
+  it("rejects a client-supplied fiscal year", () => {
     const parsed = createPurchaseInputSchema.safeParse({
       ...valid,
-      fiscalYear: "2083",
+      fiscalYear: "2083-2084",
     });
     assert.equal(parsed.success, false);
   });

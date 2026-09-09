@@ -11,7 +11,6 @@ import type {
   purchasePartySummarySchema,
   purchaseQuantitySchema,
   purchaseRateSchema,
-  purchaseRequestSummarySchema,
   purchaseSchema,
   purchaseStoreSummarySchema,
   updatePurchaseInputSchema,
@@ -27,9 +26,6 @@ export type PurchaseId = z.infer<typeof purchaseIdSchema>;
 export type PurchaseListQuery = z.infer<typeof purchaseListQuerySchema>;
 export type PurchaseStoreSummary = z.infer<typeof purchaseStoreSummarySchema>;
 export type PurchasePartySummary = z.infer<typeof purchasePartySummarySchema>;
-export type PurchaseRequestSummary = z.infer<
-  typeof purchaseRequestSummarySchema
->;
 export type PurchaseLine = z.infer<typeof purchaseLineSchema>;
 export type PurchaseListItem = z.infer<typeof purchaseListItemSchema>;
 export type Purchase = z.infer<typeof purchaseSchema>;

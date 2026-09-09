@@ -14,7 +14,6 @@ import {
 } from "drizzle-orm/pg-core";
 import { applicationUsers } from "./auth.js";
 import { items } from "./items.js";
-import { itemRequests } from "./item-requests.js";
 import { parties } from "./parties.js";
 import { stores } from "./stores.js";
 
@@ -35,7 +34,6 @@ export const purchases = pgTable(
     grnNumber: varchar("grn_number", { length: 80 }),
     deliveryNoteNumber: varchar("delivery_note_number", { length: 80 }),
     purchaseBillNumber: varchar("purchase_bill_number", { length: 80 }),
-    itemRequestId: uuid("item_request_id"),
     remarks: varchar("remarks", { length: 500 }),
     createdByApplicationUserId: uuid(
       "created_by_application_user_id",
@@ -54,7 +52,6 @@ export const purchases = pgTable(
     index("purchases_party_id_idx").on(table.partyId),
     index("purchases_fiscal_year_idx").on(table.fiscalYear),
     index("purchases_purchase_date_idx").on(table.purchaseDate),
-    index("purchases_item_request_id_idx").on(table.itemRequestId),
     index("purchases_created_by_application_user_id_idx").on(
       table.createdByApplicationUserId,
     ),
@@ -69,13 +66,6 @@ export const purchases = pgTable(
       columns: [table.partyId],
       foreignColumns: [parties.id],
       name: "purchases_party_id_fk",
-    })
-      .onDelete("restrict")
-      .onUpdate("restrict"),
-    foreignKey({
-      columns: [table.itemRequestId],
-      foreignColumns: [itemRequests.id],
-      name: "purchases_item_request_id_fk",
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
