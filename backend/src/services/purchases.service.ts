@@ -36,6 +36,7 @@ import {
 } from "../db/schema/auth.js";
 import { employees, type EmployeeRow } from "../db/schema/employees.js";
 import { items } from "../db/schema/items.js";
+import { stockLedger } from "../db/schema/opening-stocks.js";
 import { parties, type PartyRow } from "../db/schema/parties.js";
 import {
   purchaseLines,
@@ -52,6 +53,77 @@ const STALE_PURCHASE_MESSAGE =
 
 const createdByUsers = alias(applicationUsers, "purchase_created_by_users");
 const createdByEmployees = alias(employees, "purchase_created_by_employees");
+
+type PurchaseTx = Pick<ReturnType<typeof getDb>, "insert" | "delete">;
+
+type PreparedPurchaseLine = PurchaseLineInput & {
+  amount: string;
+  unitId: string;
+};
+
+type PostedPurchaseLine = {
+  id: string;
+  itemId: string;
+  unitId: string;
+  quantity: string;
+  rate: string;
+  amount: string;
+};
+
+function purchaseTransactionDate(purchaseDate: string): Date {
+  return new Date(`${purchaseDate}T00:00:00.000Z`);
+}
+
+async function deletePurchaseLedger(
+  tx: PurchaseTx,
+  purchaseId: string,
+): Promise<void> {
+  await tx
+    .delete(stockLedger)
+    .where(
+      and(
+        eq(stockLedger.referenceType, "PURCHASE"),
+        eq(stockLedger.referenceId, purchaseId),
+      ),
+    );
+}
+
+async function insertPurchaseLedger(
+  tx: PurchaseTx,
+  params: {
+    purchaseId: string;
+    storeId: string;
+    purchaseDate: string;
+    postedByApplicationUserId: string;
+    lines: PostedPurchaseLine[];
+  },
+): Promise<void> {
+  if (params.lines.length === 0) {
+    return;
+  }
+
+  const postedAt = new Date();
+  const transactionDate = purchaseTransactionDate(params.purchaseDate);
+  await tx.insert(stockLedger).values(
+    params.lines.map((line) => ({
+      storeId: params.storeId,
+      itemId: line.itemId,
+      unitId: line.unitId,
+      rate: line.rate,
+      movementType: "PURCHASE" as const,
+      quantityIn: line.quantity,
+      quantityOut: "0",
+      amountIn: line.amount,
+      amountOut: "0",
+      transactionDate,
+      referenceType: "PURCHASE" as const,
+      referenceId: params.purchaseId,
+      referenceLineId: line.id,
+      postedByApplicationUserId: params.postedByApplicationUserId,
+      postedAt,
+    })),
+  );
+}
 
 function canMutatePurchases(actor: AuthenticatedUser): boolean {
   return userHasAnyRole(actor.roles, ["ADMIN", "MAKER"]);
@@ -265,18 +337,19 @@ async function assertParty(partyId: string, requireActive: boolean): Promise<voi
 async function assertPurchaseLines(
   lines: PurchaseLineInput[],
   allowedInactiveItemIds: Set<string>,
-): Promise<Array<PurchaseLineInput & { amount: string }>> {
+): Promise<PreparedPurchaseLine[]> {
   const itemIds = lines.map((line) => line.itemId);
   const itemRows = await getDb()
     .select({
       id: items.id,
       isActive: items.isActive,
+      unitId: items.unitId,
     })
     .from(items)
     .where(inArray(items.id, itemIds));
 
   const byId = new Map(itemRows.map((row) => [row.id, row]));
-  const prepared: Array<PurchaseLineInput & { amount: string }> = [];
+  const prepared: PreparedPurchaseLine[] = [];
 
   for (const line of lines) {
     const item = byId.get(line.itemId);
@@ -289,6 +362,7 @@ async function assertPurchaseLines(
     prepared.push({
       ...line,
       amount: purchaseLineAmount(line.quantity, line.rate),
+      unitId: item.unitId,
     });
   }
 
@@ -296,19 +370,44 @@ async function assertPurchaseLines(
 }
 
 async function insertLines(
-  tx: Pick<ReturnType<typeof getDb>, "insert">,
+  tx: PurchaseTx,
   purchaseId: string,
-  lines: Array<PurchaseLineInput & { amount: string }>,
-): Promise<void> {
-  await tx.insert(purchaseLines).values(
-    lines.map((line) => ({
-      purchaseId,
-      itemId: line.itemId,
-      quantity: line.quantity,
-      rate: line.rate,
-      amount: line.amount,
-    })),
-  );
+  lines: PreparedPurchaseLine[],
+): Promise<PostedPurchaseLine[]> {
+  const inserted = await tx
+    .insert(purchaseLines)
+    .values(
+      lines.map((line) => ({
+        purchaseId,
+        itemId: line.itemId,
+        quantity: line.quantity,
+        rate: line.rate,
+        amount: line.amount,
+      })),
+    )
+    .returning({
+      id: purchaseLines.id,
+      itemId: purchaseLines.itemId,
+      quantity: purchaseLines.quantity,
+      rate: purchaseLines.rate,
+      amount: purchaseLines.amount,
+    });
+
+  const unitByItemId = new Map(lines.map((line) => [line.itemId, line.unitId]));
+  return inserted.map((row) => {
+    const unitId = unitByItemId.get(row.itemId);
+    if (!unitId) {
+      throw new AppError("Failed to resolve the purchase line unit", 500);
+    }
+    return {
+      id: row.id,
+      itemId: row.itemId,
+      unitId,
+      quantity: row.quantity,
+      rate: row.rate,
+      amount: row.amount,
+    };
+  });
 }
 
 async function getHeaderRow(id: string): Promise<HeaderJoinedRow> {
@@ -433,7 +532,14 @@ export async function createPurchase(
         throw new AppError("Failed to create purchase", 500);
       }
 
-      await insertLines(tx, created.id, preparedLines);
+      const postedLines = await insertLines(tx, created.id, preparedLines);
+      await insertPurchaseLedger(tx, {
+        purchaseId: created.id,
+        storeId: input.storeId,
+        purchaseDate: input.purchaseDate,
+        postedByApplicationUserId: actor.id,
+        lines: postedLines,
+      });
       return created.id;
     });
 
@@ -501,8 +607,16 @@ export async function updatePurchase(
         throw new AppError(STALE_PURCHASE_MESSAGE, 409);
       }
 
+      await deletePurchaseLedger(tx, id);
       await tx.delete(purchaseLines).where(eq(purchaseLines.purchaseId, id));
-      await insertLines(tx, id, preparedLines);
+      const postedLines = await insertLines(tx, id, preparedLines);
+      await insertPurchaseLedger(tx, {
+        purchaseId: id,
+        storeId: input.storeId,
+        purchaseDate: input.purchaseDate,
+        postedByApplicationUserId: actor.id,
+        lines: postedLines,
+      });
     });
 
     return getPurchaseById(id, actor);
@@ -524,24 +638,27 @@ export async function deletePurchase(
   }
 
   try {
-    const deleted = await getDb()
-      .delete(purchases)
-      .where(
-        and(eq(purchases.id, id), eq(purchases.version, expectedVersion)),
-      )
-      .returning({ id: purchases.id });
+    await getDb().transaction(async (tx) => {
+      await deletePurchaseLedger(tx, id);
+      const deleted = await tx
+        .delete(purchases)
+        .where(
+          and(eq(purchases.id, id), eq(purchases.version, expectedVersion)),
+        )
+        .returning({ id: purchases.id });
 
-    if (!deleted[0]) {
-      const existing = await getDb()
-        .select({ id: purchases.id, version: purchases.version })
-        .from(purchases)
-        .where(eq(purchases.id, id))
-        .limit(1);
-      if (!existing[0]) {
-        throw new AppError("Purchase not found", 404);
+      if (!deleted[0]) {
+        const existing = await tx
+          .select({ id: purchases.id, version: purchases.version })
+          .from(purchases)
+          .where(eq(purchases.id, id))
+          .limit(1);
+        if (!existing[0]) {
+          throw new AppError("Purchase not found", 404);
+        }
+        throw new AppError(STALE_PURCHASE_MESSAGE, 409);
       }
-      throw new AppError(STALE_PURCHASE_MESSAGE, 409);
-    }
+    });
   } catch (error) {
     if (error instanceof AppError) {
       throw error;

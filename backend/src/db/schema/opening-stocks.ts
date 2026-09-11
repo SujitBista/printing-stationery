@@ -53,10 +53,12 @@ export const openingStockMappingEntityTypeEnum = pgEnum(
 
 export const stockLedgerMovementTypeEnum = pgEnum("stock_ledger_movement_type", [
   "OPENING_STOCK",
+  "PURCHASE",
 ]);
 
 export const stockLedgerReferenceTypeEnum = pgEnum("stock_ledger_reference_type", [
   "OPENING_STOCK",
+  "PURCHASE",
 ]);
 
 export const openingStockBatches = pgTable(
@@ -313,6 +315,10 @@ export const stockLedger = pgTable(
       table.itemId,
       table.unitId,
     ),
+    index("stock_ledger_reference_idx").on(
+      table.referenceType,
+      table.referenceId,
+    ),
     foreignKey({
       columns: [table.storeId],
       foreignColumns: [stores.id],
@@ -327,16 +333,6 @@ export const stockLedger = pgTable(
       columns: [table.unitId],
       foreignColumns: [units.id],
       name: "stock_ledger_unit_fk",
-    }).onDelete("restrict").onUpdate("restrict"),
-    foreignKey({
-      columns: [table.referenceId],
-      foreignColumns: [openingStockBatches.id],
-      name: "stock_ledger_reference_batch_fk",
-    }).onDelete("restrict").onUpdate("restrict"),
-    foreignKey({
-      columns: [table.referenceLineId],
-      foreignColumns: [openingStockLines.id],
-      name: "stock_ledger_reference_line_fk",
     }).onDelete("restrict").onUpdate("restrict"),
     foreignKey({
       columns: [table.postedByApplicationUserId],

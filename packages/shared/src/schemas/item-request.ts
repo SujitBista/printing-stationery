@@ -385,6 +385,7 @@ export const itemRequestListItemSchema = z.object({
   totalRequestedQuantity: z.string(),
   totalIssuedQuantity: z.string(),
   totalRemainingQuantity: z.string(),
+  availableStockQuantity: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
   /**

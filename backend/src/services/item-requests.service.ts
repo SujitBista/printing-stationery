@@ -1082,6 +1082,82 @@ type HeaderJoinedRow = {
   totalIssuedQuantity: string;
 };
 
+async function attachAvailableStockToListItems(
+  listItems: ItemRequestListItem[],
+): Promise<ItemRequestListItem[]> {
+  if (listItems.length === 0) {
+    return listItems;
+  }
+
+  const requestIds = listItems.map((item) => item.id);
+  const lineRows = await getDb()
+    .select({
+      requestId: itemRequestLines.itemRequestId,
+      itemId: items.id,
+      unitId: units.id,
+    })
+    .from(itemRequestLines)
+    .innerJoin(items, eq(itemRequestLines.itemId, items.id))
+    .innerJoin(units, eq(items.unitId, units.id))
+    .where(inArray(itemRequestLines.itemRequestId, requestIds));
+
+  const linesByRequest = new Map<
+    string,
+    Array<{ itemId: string; unitId: string }>
+  >();
+  for (const row of lineRows) {
+    const lines = linesByRequest.get(row.requestId) ?? [];
+    lines.push({ itemId: row.itemId, unitId: row.unitId });
+    linesByRequest.set(row.requestId, lines);
+  }
+
+  const itemIdsByStore = new Map<string, string[]>();
+  for (const item of listItems) {
+    const storeId = item.sourceStore?.id;
+    const lines = linesByRequest.get(item.id);
+    if (!storeId || !lines || lines.length === 0) {
+      continue;
+    }
+    const existing = itemIdsByStore.get(storeId) ?? [];
+    itemIdsByStore.set(storeId, [
+      ...existing,
+      ...lines.map((line) => line.itemId),
+    ]);
+  }
+
+  const stockByKey = new Map<string, string>();
+  await Promise.all(
+    [...itemIdsByStore.entries()].map(async ([storeId, itemIds]) => {
+      const uniqueItemIds = [...new Set(itemIds)];
+      const stockRows = await getOperationalAvailableQuantities({
+        storeId,
+        itemIds: uniqueItemIds,
+      });
+      for (const stock of stockRows) {
+        stockByKey.set(
+          operationalStockKey(stock.storeId, stock.itemId, stock.unitId),
+          stock.availableQuantity,
+        );
+      }
+    }),
+  );
+
+  return listItems.map((item) => {
+    const storeId = item.sourceStore?.id;
+    const lines = linesByRequest.get(item.id);
+    if (!storeId || !lines || lines.length !== 1) {
+      return item;
+    }
+    const line = lines[0]!;
+    return {
+      ...item,
+      availableStockQuantity:
+        stockByKey.get(operationalStockKey(storeId, line.itemId, line.unitId)) ??
+        "0",
+    };
+  });
+}
+
 function toListItem(
   row: HeaderJoinedRow,
   actor: AuthenticatedUser,
@@ -1148,6 +1224,7 @@ function toListItem(
     totalRequestedQuantity: scaledToQuantity(totalRequested),
     totalIssuedQuantity: scaledToQuantity(totalIssued),
     totalRemainingQuantity: scaledToQuantity(remaining < 0n ? 0n : remaining),
+    availableStockQuantity: null,
     createdAt: row.request.createdAt.toISOString(),
     updatedAt: row.request.updatedAt.toISOString(),
     requestingStore: destinationStore,
@@ -1520,11 +1597,12 @@ export async function listItemRequests(
       .offset(offset);
 
     const rows = where ? await listBase.where(where) : await listBase;
+    const items = (rows as HeaderJoinedRow[]).map((row) =>
+      toListItem(row, actor, supervisedStoreIds),
+    );
 
     return {
-      items: (rows as HeaderJoinedRow[]).map((row) =>
-        toListItem(row, actor, supervisedStoreIds),
-      ),
+      items: await attachAvailableStockToListItems(items),
       page: query.page,
       pageSize: query.pageSize,
       totalItems,
@@ -1596,8 +1674,42 @@ export async function getItemRequestById(
       .where(eq(itemRequestActions.itemRequestId, id))
       .orderBy(asc(itemRequestActions.createdAt), asc(itemRequestActions.id));
 
+    const lines = lineRows.map((row) => {
+      const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
+      const issued = issuedTotals.get(row.line.id) ?? 0n;
+      const remaining = requested - issued;
+      const stockKey = sourceStoreId
+        ? operationalStockKey(sourceStoreId, row.item.id, row.unitId)
+        : null;
+      return {
+        id: row.line.id,
+        itemId: row.line.itemId,
+        requestedQuantity: row.line.requestedQuantity,
+        issuedQuantity: scaledToQuantity(issued),
+        remainingQuantity: scaledToQuantity(remaining < 0n ? 0n : remaining),
+        availableStockQuantity: stockKey
+          ? (stockByItemUnit.get(stockKey) ?? "0")
+          : null,
+        createdAt: row.line.createdAt.toISOString(),
+        updatedAt: row.line.updatedAt.toISOString(),
+        item: {
+          id: row.item.id,
+          itemCode: row.item.itemCode,
+          itemName: row.item.itemName,
+          isActive: row.item.isActive,
+          isRequestable: row.item.isRequestable,
+          unit: {
+            id: row.unitId,
+            unitName: row.unitName,
+          },
+        },
+      };
+    });
+
     return {
       ...listItem,
+      availableStockQuantity:
+        lines.length === 1 ? lines[0]!.availableStockQuantity : null,
       requestingStoreId: header.request.requestingStoreId,
       corporateStoreId: header.request.corporateStoreId ?? null,
       sourceStoreId: header.request.corporateStoreId ?? null,
@@ -1628,37 +1740,7 @@ export async function getItemRequestById(
         header.corporateCheckerUser,
         header.corporateCheckerEmployee,
       ),
-      lines: lineRows.map((row) => {
-        const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
-        const issued = issuedTotals.get(row.line.id) ?? 0n;
-        const remaining = requested - issued;
-        const stockKey = sourceStoreId
-          ? operationalStockKey(sourceStoreId, row.item.id, row.unitId)
-          : null;
-        return {
-          id: row.line.id,
-          itemId: row.line.itemId,
-          requestedQuantity: row.line.requestedQuantity,
-          issuedQuantity: scaledToQuantity(issued),
-          remainingQuantity: scaledToQuantity(remaining < 0n ? 0n : remaining),
-          availableStockQuantity: stockKey
-            ? (stockByItemUnit.get(stockKey) ?? "0")
-            : null,
-          createdAt: row.line.createdAt.toISOString(),
-          updatedAt: row.line.updatedAt.toISOString(),
-          item: {
-            id: row.item.id,
-            itemCode: row.item.itemCode,
-            itemName: row.item.itemName,
-            isActive: row.item.isActive,
-            isRequestable: row.item.isRequestable,
-            unit: {
-              id: row.unitId,
-              unitName: row.unitName,
-            },
-          },
-        };
-      }),
+      lines,
       actions: actionRows.map((row) => ({
         id: row.action.id,
         action: row.action.action,

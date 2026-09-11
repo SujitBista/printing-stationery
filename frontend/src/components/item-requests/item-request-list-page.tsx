@@ -425,6 +425,11 @@ export function ItemRequestListPage({
                             Issued {request.totalIssuedQuantity} · Remaining{" "}
                             {request.totalRemainingQuantity}
                           </div>
+                          {request.availableStockQuantity != null ? (
+                            <div className="text-xs text-ink-muted">
+                              Available {request.availableStockQuantity}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="min-w-[10rem] px-3 py-3">
                           <Badge variant={itemRequestStatusTone(request.status)}>
