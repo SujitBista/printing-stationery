@@ -9,6 +9,7 @@ import {
 } from "@printing-stationery/shared";
 import {
   createParty,
+  deleteParty,
   getPartyById,
   listParties,
   updateParty,
@@ -104,6 +105,20 @@ export async function updatePartyStatusHandler(
     );
     const party = await updatePartyStatus(id, input);
     res.status(200).json(party);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deletePartyHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const id = parseOrThrow(partyIdSchema.safeParse(req.params.id));
+    await deleteParty(id);
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

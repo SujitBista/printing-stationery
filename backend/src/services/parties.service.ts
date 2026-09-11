@@ -9,6 +9,7 @@ import type {
 } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
 import { parties, type PartyRow } from "../db/schema/parties.js";
+import { purchases } from "../db/schema/purchases.js";
 import { AppError } from "../utils/errors.js";
 import { mapPartyDatabaseError } from "../utils/db-errors.js";
 
@@ -232,6 +233,37 @@ export async function updatePartyStatus(
     }
 
     return toParty(row);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    mapPartyDatabaseError(error);
+  }
+}
+
+export async function deleteParty(id: string): Promise<void> {
+  await getPartyById(id);
+
+  try {
+    const usageRows = await getDb()
+      .select({ value: count() })
+      .from(purchases)
+      .where(eq(purchases.partyId, id));
+    if ((usageRows[0]?.value ?? 0) > 0) {
+      throw new AppError(
+        "This party cannot be deleted because it is used on purchase records.",
+        409,
+      );
+    }
+
+    const rows = await getDb()
+      .delete(parties)
+      .where(eq(parties.id, id))
+      .returning({ id: parties.id });
+
+    if (!rows[0]) {
+      throw new AppError("Party not found", 404);
+    }
   } catch (error) {
     if (error instanceof AppError) {
       throw error;

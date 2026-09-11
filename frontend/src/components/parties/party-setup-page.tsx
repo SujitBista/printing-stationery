@@ -10,6 +10,7 @@ import type {
 } from "@printing-stationery/shared";
 import {
   createParty,
+  deleteParty,
   fetchParties,
   updateParty,
   updatePartyStatus,
@@ -41,6 +42,7 @@ export function PartySetupPage() {
   );
   const [saving, setSaving] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const loadParties = useCallback(async () => {
@@ -162,6 +164,30 @@ export function PartySetupPage() {
       message: result.data.isActive
         ? "Party activated successfully."
         : "Party deactivated successfully.",
+    });
+    await loadParties();
+  }
+
+  async function handleDelete(party: Party) {
+    const confirmed = window.confirm(
+      `Delete party "${party.partyName}" (${party.partyCode})? This cannot be undone.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(party.id);
+    const result = await deleteParty(party.id);
+    setDeletingId(null);
+
+    if (!result.ok) {
+      setFeedback({ type: "error", message: result.error });
+      return;
+    }
+
+    setFeedback({
+      type: "success",
+      message: `Party ${party.partyName} deleted.`,
     });
     await loadParties();
   }
@@ -303,6 +329,14 @@ export function PartySetupPage() {
                               : party.isActive
                                 ? "Deactivate"
                                 : "Activate"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(party)}
+                            disabled={deletingId === party.id}
+                            className="font-medium text-danger hover:underline disabled:opacity-60"
+                          >
+                            {deletingId === party.id ? "Deleting…" : "Delete"}
                           </button>
                         </div>
                         ) : (

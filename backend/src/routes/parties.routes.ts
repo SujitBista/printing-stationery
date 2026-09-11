@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createPartyHandler,
+  deletePartyHandler,
   getPartyHandler,
   listPartiesHandler,
   updatePartyHandler,
@@ -23,3 +24,4 @@ partiesRouter.patch(
   updatePartyStatusHandler,
 );
 partiesRouter.patch("/:id", requireAuth, adminOnly, updatePartyHandler);
+partiesRouter.delete("/:id", requireAuth, adminOnly, deletePartyHandler);

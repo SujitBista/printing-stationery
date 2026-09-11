@@ -187,3 +187,17 @@ export async function updatePartyStatus(
     "Failed to update party status",
   );
 }
+
+export async function deleteParty(id: string): Promise<ApiResult<null>> {
+  const parsedId = partyIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid party id", status: 400 };
+  }
+
+  return requestJson(
+    `/api/parties/${parsedId.data}`,
+    { method: "DELETE" },
+    () => ({ success: true, data: null }),
+    "Failed to delete party",
+  );
+}

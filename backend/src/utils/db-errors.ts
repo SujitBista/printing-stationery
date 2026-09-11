@@ -38,6 +38,7 @@ const ITEM_ISSUE_LINE_REQUEST_LINE_UNIQUE_INDEX =
 const ITEM_ISSUE_LINE_QUANTITY_CHECK =
   "item_issue_lines_issue_quantity_positive";
 const PARTY_CODE_UNIQUE_INDEX = "parties_party_code_lower_uidx";
+const PURCHASES_PARTY_ID_FK = "purchases_party_id_fk";
 const PURCHASE_NUMBER_UNIQUE_INDEX = "purchases_purchase_number_uidx";
 const PURCHASE_LINE_ITEM_UNIQUE_INDEX = "purchase_lines_purchase_item_uidx";
 const PURCHASE_LINE_QUANTITY_CHECK = "purchase_lines_quantity_positive";
@@ -581,11 +582,29 @@ export function isPartyCodeUniqueViolation(error: unknown): boolean {
   return constraint === PARTY_CODE_UNIQUE_INDEX;
 }
 
+export function isPartyInUseForeignKeyViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23503") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === PURCHASES_PARTY_ID_FK;
+}
+
 export function mapPartyDatabaseError(error: unknown): never {
   if (isPartyCodeUniqueViolation(error)) {
     throw new AppError("A party with this party code already exists", 409, {
       cause: error,
     });
+  }
+
+  if (isPartyInUseForeignKeyViolation(error)) {
+    throw new AppError(
+      "This party cannot be deleted because it is used on purchase records.",
+      409,
+      { cause: error },
+    );
   }
 
   if (isDatabaseUnavailableError(error)) {
