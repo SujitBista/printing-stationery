@@ -696,3 +696,11 @@ export function mapPurchaseDatabaseError(error: unknown): never {
 
   throw error;
 }
+
+export function mapNotificationDatabaseError(error: unknown): never {
+  if (isDatabaseUnavailableError(error)) {
+    throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
+  }
+
+  throw error;
+}

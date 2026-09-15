@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { BrandLogo } from "./brand-logo";
+import { NotificationBell } from "./notification-bell";
 
 type HeaderProps = {
   onMenuClick: () => void;
@@ -57,6 +58,7 @@ export function Header({ onMenuClick, sidebarOpen }: HeaderProps) {
         </Link>
 
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <NotificationBell />
           <div className="hidden text-right sm:block">
             <p className="text-xs font-medium text-white">
               {user.employee?.employeeName ?? user.username}

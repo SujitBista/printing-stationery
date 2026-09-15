@@ -14,6 +14,7 @@ import { branches } from "../db/schema/branches.js";
 import { employees } from "../db/schema/employees.js";
 import { itemIssueLines, itemIssues } from "../db/schema/item-issues.js";
 import { itemRequestActions, itemRequestLines, itemRequests } from "../db/schema/item-requests.js";
+import { notifications } from "../db/schema/notifications.js";
 import { items } from "../db/schema/items.js";
 import { stockLedger } from "../db/schema/opening-stocks.js";
 import { stores } from "../db/schema/stores.js";
@@ -36,6 +37,7 @@ import { listEmployees } from "./employees.service.js";
 import { getOperationalAvailableQuantities } from "./opening-stocks.service.js";
 import { AppError } from "../utils/errors.js";
 import { hashPassword } from "../utils/password.js";
+import { listNotifications } from "./notifications.service.js";
 
 const PREFIX = "S2S-";
 
@@ -239,6 +241,14 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     }
     if (requestIds.length > 0) {
       await db
+        .delete(notifications)
+        .where(
+          and(
+            eq(notifications.relatedEntityType, "ITEM_REQUEST"),
+            inArray(notifications.relatedEntityId, requestIds),
+          ),
+        );
+      await db
         .delete(itemRequestActions)
         .where(inArray(itemRequestActions.itemRequestId, requestIds));
       await db
@@ -277,6 +287,14 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     }
 
     for (const userId of userIds) {
+      await db
+        .delete(notifications)
+        .where(
+          or(
+            eq(notifications.recipientUserId, userId),
+            eq(notifications.actorUserId, userId),
+          ),
+        );
       await db.delete(authSessions).where(eq(authSessions.userId, userId));
       await db.delete(userRoles).where(eq(userRoles.userId, userId));
       await db.delete(applicationUsers).where(eq(applicationUsers.id, userId));
@@ -1288,6 +1306,20 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     });
     assert.equal(submitted.status, "PENDING_BRANCH_CHECKER");
     assert.equal(submitted.branchChecker?.id, birtamodChecker.id);
+    const submittedNotifications = await listNotifications(birtamodChecker.id, {
+      page: 1,
+      pageSize: 20,
+    });
+    const submittedNote = submittedNotifications.items.find(
+      (item) => item.relatedEntityId === created.id,
+    );
+    assert.equal(submittedNote?.type, "ITEM_REQUEST_SUBMITTED");
+    assert.equal(submittedNote?.isRead, false);
+    assert.equal(submittedNote?.requestNumber, submitted.requestNumber);
+    assert.equal(
+      submittedNote?.message.includes(submitted.requestNumber),
+      true,
+    );
 
     const recommended = await performItemRequestAction(
       submitted.id,

@@ -176,6 +176,13 @@
       "when": 1788795000000,
       "tag": "0024_item_request_action_actor_role",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788800000000,
+      "tag": "0025_notifications",
+      "breakpoints": true
     }
   ]
 }

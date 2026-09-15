@@ -83,6 +83,14 @@ export {
 } from "./item-requests.js";
 
 export {
+  notificationTypeEnum,
+  notificationEntityTypeEnum,
+  notifications,
+  type NotificationRow,
+  type NewNotificationRow,
+} from "./notifications.js";
+
+export {
   itemIssueStatusEnum,
   itemIssues,
   itemIssueLines,

@@ -44,6 +44,7 @@ import {
   ITEM_REQUEST_QUEUE_STATUSES,
   inferItemRequestActorWorkflowRole,
   isCorporateControlStore,
+  itemRequestPendingAssignee,
   preferCorporateControlStore,
   userHasRole,
 } from "@printing-stationery/shared";
@@ -76,6 +77,7 @@ import {
   isEligibleSupplyingStore,
   requestAllowsItemIssueCreation,
 } from "./item-issue-authorization.js";
+import { insertItemRequestWorkflowNotifications } from "./item-request-notifications.js";
 import {
   INACTIVE_REQUESTED_BY_MESSAGE,
   REQUESTED_BY_REQUIRED_MESSAGE,
@@ -321,16 +323,19 @@ function pendingPersonForStatus(params: {
   corporateMaker: ItemRequestPersonSummary | null;
   corporateChecker: ItemRequestPersonSummary | null;
 }): ItemRequestPersonSummary | null {
-  switch (params.status) {
-    case "DRAFT":
-    case "RETURNED_TO_BRANCH_MAKER":
+  const assignee = itemRequestPendingAssignee(params.status);
+  if (!assignee) {
+    return null;
+  }
+
+  switch (assignee) {
+    case "createdBy":
       return params.createdBy;
-    case "PENDING_BRANCH_CHECKER":
+    case "branchChecker":
       return params.branchChecker;
-    case "PENDING_CORPORATE_MAKER":
-    case "RETURNED_TO_CORPORATE_MAKER":
+    case "corporateMaker":
       return params.corporateMaker;
-    case "PENDING_CORPORATE_CHECKER":
+    case "corporateChecker":
       return params.corporateChecker;
     default:
       return null;
@@ -2384,6 +2389,26 @@ export async function performItemRequestAction(
         actorApplicationUserId: actor.id,
         actorWorkflowRole: actorWorkflowRoleForTransition(actor, match.actor),
         remarks: input.remarks,
+      });
+
+      await insertItemRequestWorkflowNotifications(tx, {
+        action: input.action,
+        toStatus: match.to,
+        requestId: request.id,
+        requestNumber: request.requestNumber,
+        actorUserId: actor.id,
+        actorName: actor.employee?.employeeName ?? actor.username,
+        remarks: input.remarks ?? null,
+        createdByApplicationUserId: request.createdByApplicationUserId,
+        branchCheckerApplicationUserId:
+          nextValues.branchCheckerApplicationUserId ??
+          request.branchCheckerApplicationUserId,
+        corporateMakerApplicationUserId:
+          nextValues.corporateMakerApplicationUserId ??
+          request.corporateMakerApplicationUserId,
+        corporateCheckerApplicationUserId:
+          nextValues.corporateCheckerApplicationUserId ??
+          request.corporateCheckerApplicationUserId,
       });
     });
 

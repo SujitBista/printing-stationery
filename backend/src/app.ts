@@ -18,6 +18,7 @@ import { openingStocksRouter } from "./routes/opening-stocks.routes.js";
 import { itemRequestsRouter } from "./routes/item-requests.routes.js";
 import { itemIssuesRouter } from "./routes/item-issues.routes.js";
 import { itemsRouter } from "./routes/items.routes.js";
+import { notificationsRouter } from "./routes/notifications.routes.js";
 import { partiesRouter } from "./routes/parties.routes.js";
 import { purchasesRouter } from "./routes/purchases.routes.js";
 import { stockBalancesRouter } from "./routes/stock-balances.routes.js";
@@ -56,6 +57,7 @@ export function createApp(env: Env) {
   app.use("/api/opening-stock", openingStocksRouter);
   app.use("/api/item-requests", itemRequestsRouter);
   app.use("/api/item-issues", itemIssuesRouter);
+  app.use("/api/notifications", notificationsRouter);
   app.use("/api/stock-balances", stockBalancesRouter);
   app.use("/api/stores", storesRouter);
   app.use("/api/store-users", storeUsersRouter);

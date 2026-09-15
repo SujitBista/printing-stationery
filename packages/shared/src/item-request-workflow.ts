@@ -106,6 +106,32 @@ export function itemRequestQueueIsFulfilment(queue: ItemRequestQueue): boolean {
   return (ITEM_REQUEST_FULFILMENT_QUEUES as readonly string[]).includes(queue);
 }
 
+/** Who the request is pending with, matching the stored assignee columns. */
+export type ItemRequestPendingAssignee =
+  | "createdBy"
+  | "branchChecker"
+  | "corporateMaker"
+  | "corporateChecker";
+
+export function itemRequestPendingAssignee(
+  status: ItemRequestStatus,
+): ItemRequestPendingAssignee | null {
+  switch (status) {
+    case "DRAFT":
+    case "RETURNED_TO_BRANCH_MAKER":
+      return "createdBy";
+    case "PENDING_BRANCH_CHECKER":
+      return "branchChecker";
+    case "PENDING_CORPORATE_MAKER":
+    case "RETURNED_TO_CORPORATE_MAKER":
+      return "corporateMaker";
+    case "PENDING_CORPORATE_CHECKER":
+      return "corporateChecker";
+    default:
+      return null;
+  }
+}
+
 /**
  * Workflow persona implied by an action and the status it left. Used to store
  * and display approval-history roles, including for rows written before the

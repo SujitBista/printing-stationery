@@ -17,6 +17,7 @@ import { branches } from "../db/schema/branches.js";
 import { employees } from "../db/schema/employees.js";
 import { itemIssueLines, itemIssues } from "../db/schema/item-issues.js";
 import { itemRequestLines, itemRequests } from "../db/schema/item-requests.js";
+import { notifications } from "../db/schema/notifications.js";
 import { items } from "../db/schema/items.js";
 import { stores } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
@@ -151,6 +152,14 @@ function isAppError(
       );
     const leftoverUserIds = leftoverUsers.map((user) => user.id);
     if (leftoverUserIds.length > 0) {
+      await db
+        .delete(notifications)
+        .where(
+          or(
+            inArray(notifications.recipientUserId, leftoverUserIds),
+            inArray(notifications.actorUserId, leftoverUserIds),
+          ),
+        );
       await db
         .delete(storeUsers)
         .where(

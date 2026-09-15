@@ -445,9 +445,41 @@ export {
   ITEM_REQUEST_FULFILMENT_QUEUES,
   getItemRequestNavQueues,
   itemRequestQueueIsFulfilment,
+  itemRequestPendingAssignee,
   inferItemRequestActorWorkflowRole,
 } from "./item-request-workflow.js";
-export type { ItemRequestNavQueues } from "./item-request-workflow.js";
+export type {
+  ItemRequestNavQueues,
+  ItemRequestPendingAssignee,
+} from "./item-request-workflow.js";
+
+export {
+  notificationTypeForItemRequestAction,
+  itemRequestNotificationRecipientIds,
+} from "./item-request-notifications.js";
+
+export {
+  NOTIFICATION_TYPES,
+  NOTIFICATION_ENTITY_TYPES,
+  notificationTypeSchema,
+  notificationEntityTypeSchema,
+  notificationSchema,
+  notificationListQuerySchema,
+  paginatedNotificationResponseSchema,
+  notificationUnreadCountSchema,
+  markNotificationsReadResponseSchema,
+  notificationIdSchema,
+} from "./schemas/notification.js";
+export type {
+  NotificationType,
+  NotificationEntityType,
+  Notification,
+  NotificationListQuery,
+  PaginatedNotificationResponse,
+  NotificationUnreadCount,
+  MarkNotificationsReadResponse,
+  NotificationId,
+} from "./types/notification.js";
 
 export {
   ITEM_ISSUE_STATUSES,
