@@ -12,7 +12,6 @@ import type {
 import { fetchBranches } from "@/lib/api/branches";
 import {
   deleteItemRequest,
-  fetchItemRequestContext,
   fetchItemRequests,
   performItemRequestAction,
 } from "@/lib/api/item-requests";
@@ -51,8 +50,13 @@ type ItemRequestListPageProps = {
 export function ItemRequestListPage({
   queue = "request-list",
 }: ItemRequestListPageProps) {
-  const { workflowRoles, canViewFulfilment, readyToIssueCount } =
-    useItemRequestNavContext();
+  const {
+    workflowRoles,
+    canViewFulfilment,
+    readyToIssueCount,
+    canCreate,
+    setReadyToIssueCount,
+  } = useItemRequestNavContext();
   const queueMeta = getItemRequestQueue(queue, workflowRoles);
   const { canAccessItemRequests, isAdmin, user } = useAuth();
   const [requests, setRequests] = useState<ItemRequestListItem[]>([]);
@@ -63,7 +67,6 @@ export function ItemRequestListPage({
   const [search, setSearch] = useState("");
   const [requestingStoreId, setRequestingStoreId] = useState("");
   const [branchId, setBranchId] = useState("");
-  const [canCreate, setCanCreate] = useState(false);
   const [stores, setStores] = useState<
     Pick<Store, "id" | "storeCode" | "storeName">[]
   >([]);
@@ -94,18 +97,13 @@ export function ItemRequestListPage({
   }, [queue]);
 
   useEffect(() => {
-    async function loadContextAndFilters() {
-      const [contextResult, storesResult, branchesResult] = await Promise.all([
-        fetchItemRequestContext(),
+    async function loadFilters() {
+      const [storesResult, branchesResult] = await Promise.all([
         isAdmin ? loadAllPaginatedOptions(fetchStores, "ALL") : Promise.resolve(null),
         isAdmin
           ? loadAllPaginatedOptions(fetchBranches, "ALL")
           : Promise.resolve(null),
       ]);
-
-      if (contextResult.ok) {
-        setCanCreate(contextResult.data.canCreate);
-      }
 
       if (storesResult?.ok) {
         setStores(
@@ -128,8 +126,8 @@ export function ItemRequestListPage({
       }
     }
 
-    if (canAccessItemRequests) {
-      void loadContextAndFilters();
+    if (canAccessItemRequests && isAdmin) {
+      void loadFilters();
     }
   }, [canAccessItemRequests, isAdmin]);
 
@@ -160,8 +158,24 @@ export function ItemRequestListPage({
     setRequests(result.data.items);
     setTotalItems(result.data.totalItems);
     setTotalPages(result.data.totalPages);
+    if (
+      queue === "ready-to-issue" &&
+      !search &&
+      !requestingStoreId &&
+      !branchId
+    ) {
+      setReadyToIssueCount(result.data.totalItems);
+    }
     setLoading(false);
-  }, [page, search, queue, requestingStoreId, branchId, isAdmin]);
+  }, [
+    page,
+    search,
+    queue,
+    requestingStoreId,
+    branchId,
+    isAdmin,
+    setReadyToIssueCount,
+  ]);
 
   useEffect(() => {
     if (!canAccessItemRequests) {

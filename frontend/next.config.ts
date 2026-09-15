@@ -10,6 +10,12 @@ const monorepoRoot = path.join(
 const nextConfig: NextConfig = {
   transpilePackages: ["@printing-stationery/shared"],
   outputFileTracingRoot: monorepoRoot,
+  experimental: {
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
+  },
 };
 
 export default nextConfig;

@@ -20,6 +20,7 @@ export async function fetchHealth(): Promise<HealthFetchResult> {
   try {
     const response = await fetch(`${baseUrl}/api/health`, {
       cache: "no-store",
+      credentials: "include",
     });
 
     if (!response.ok) {

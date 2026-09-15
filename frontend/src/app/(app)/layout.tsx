@@ -1,29 +1,15 @@
-import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { AppShell } from "@/components/layout/app-shell";
-import { AuthProvider } from "@/lib/auth/auth-context";
-import { fetchCurrentUserServer } from "@/lib/auth/server";
+import { AuthSessionGate } from "@/components/layout/auth-session-gate";
 
-export const dynamic = "force-dynamic";
-
-export default async function AuthenticatedAppLayout({
+export default function AuthenticatedAppLayout({
   children,
 }: Readonly<{
   children: ReactNode;
 }>) {
-  const user = await fetchCurrentUserServer();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  if (user.mustChangePassword) {
-    redirect("/change-initial-password");
-  }
-
   return (
-    <AuthProvider initialUser={user}>
+    <AuthSessionGate>
       <AppShell>{children}</AppShell>
-    </AuthProvider>
+    </AuthSessionGate>
   );
 }

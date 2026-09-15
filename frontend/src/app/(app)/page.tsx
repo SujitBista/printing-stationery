@@ -1,10 +1,5 @@
-import { HealthDashboard } from "@/components/dashboard/health-dashboard";
-import { fetchHealth } from "@/lib/api/health";
+import { HealthDashboardPage } from "@/components/dashboard/health-dashboard-page";
 
-export const dynamic = "force-dynamic";
-
-export default async function HomePage() {
-  const health = await fetchHealth();
-
-  return <HealthDashboard health={health} />;
+export default function HomePage() {
+  return <HealthDashboardPage />;
 }

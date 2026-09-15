@@ -3,9 +3,10 @@ import {
   type AuthenticatedUser,
 } from "@printing-stationery/shared";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { getApiBaseUrl, SESSION_COOKIE_NAME } from "@/lib/api/client";
 
-export async function fetchCurrentUserServer(): Promise<AuthenticatedUser | null> {
+export const fetchCurrentUserServer = cache(async function fetchCurrentUserServer(): Promise<AuthenticatedUser | null> {
   const baseUrl = getApiBaseUrl();
   if (!baseUrl) {
     return null;
@@ -40,4 +41,4 @@ export async function fetchCurrentUserServer(): Promise<AuthenticatedUser | null
   } catch {
     return null;
   }
-}
+});

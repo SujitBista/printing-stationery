@@ -1,15 +1,16 @@
-import type { ReactNode } from "react";
-import { canAccessOrganizationSetup } from "@/lib/auth/permissions";
-import { fetchCurrentUserServer } from "@/lib/auth/server";
+"use client";
 
-export default async function OrganizationLayout({
+import type { ReactNode } from "react";
+import { useAuth } from "@/lib/auth/auth-context";
+
+export default function OrganizationLayout({
   children,
 }: Readonly<{
   children: ReactNode;
 }>) {
-  const user = await fetchCurrentUserServer();
+  const { canAccessOrganizationSetup } = useAuth();
 
-  if (!canAccessOrganizationSetup(user)) {
+  if (!canAccessOrganizationSetup) {
     return (
       <section className="w-full max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight text-accent sm:text-3xl">

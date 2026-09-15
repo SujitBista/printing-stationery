@@ -6,6 +6,7 @@ import type { ItemIssueListItem, ItemIssueQueue } from "@printing-stationery/sha
 import { fetchItemIssues } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
 import { getItemIssueQueue } from "@/lib/item-issues/queues";
+import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
 import { Badge } from "@/components/ui/badge";
 import {
   formatDateTime,
@@ -23,6 +24,8 @@ type ItemIssueListPageProps = {
 export function ItemIssueListPage({ queue }: ItemIssueListPageProps) {
   const queueMeta = getItemIssueQueue(queue);
   const { canAccessItemRequests } = useAuth();
+  const { setPendingIssueVerificationCount, setReturnedIssueCount } =
+    useItemRequestNavContext();
   const [issues, setIssues] = useState<ItemIssueListItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -59,8 +62,22 @@ export function ItemIssueListPage({ queue }: ItemIssueListPageProps) {
     setIssues(result.data.items);
     setTotalItems(result.data.totalItems);
     setTotalPages(result.data.totalPages);
+    if (!search) {
+      if (queue === "pending-verification") {
+        setPendingIssueVerificationCount(result.data.totalItems);
+      }
+      if (queue === "returned") {
+        setReturnedIssueCount(result.data.totalItems);
+      }
+    }
     setLoading(false);
-  }, [page, queue, search]);
+  }, [
+    page,
+    queue,
+    search,
+    setPendingIssueVerificationCount,
+    setReturnedIssueCount,
+  ]);
 
   useEffect(() => {
     if (!canAccessItemRequests) {
