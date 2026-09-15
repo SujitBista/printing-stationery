@@ -13,13 +13,29 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { applicationUsers } from "./auth.js";
-import { itemRequestLines, itemRequests } from "./item-requests.js";
+import {
+  itemRequestLines,
+  itemRequests,
+  itemRequestWorkflowRoleEnum,
+} from "./item-requests.js";
 import { items } from "./items.js";
 import { stores } from "./stores.js";
 
 export const itemIssueStatusEnum = pgEnum("item_issue_status", [
   "DRAFT",
-  "SUBMITTED",
+  "PENDING_VERIFICATION",
+  "RETURNED",
+  "REJECTED",
+  "POSTED",
+]);
+
+export const itemIssueActionEnum = pgEnum("item_issue_action", [
+  "CREATE",
+  "UPDATE",
+  "SUBMIT",
+  "RETURN",
+  "REJECT",
+  "VERIFY_POST",
 ]);
 
 export const itemIssues = pgTable(
@@ -36,6 +52,7 @@ export const itemIssues = pgTable(
       "created_by_application_user_id",
     ).notNull(),
     submittedByApplicationUserId: uuid("submitted_by_application_user_id"),
+    verifiedByApplicationUserId: uuid("verified_by_application_user_id"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -43,10 +60,21 @@ export const itemIssues = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    issueDate: timestamp("issue_date", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    returnedAt: timestamp("returned_at", { withTimezone: true }),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
   },
   (table) => [
     uniqueIndex("item_issues_issue_number_uidx").on(table.issueNumber),
+    uniqueIndex("item_issues_one_open_per_request_uidx")
+      .on(table.requestId)
+      .where(
+        sql`${table.status} in ('DRAFT', 'PENDING_VERIFICATION', 'RETURNED')`,
+      ),
     index("item_issues_request_id_idx").on(table.requestId),
     index("item_issues_status_idx").on(table.status),
     index("item_issues_from_store_id_idx").on(table.fromStoreId),
@@ -56,6 +84,9 @@ export const itemIssues = pgTable(
     ),
     index("item_issues_submitted_by_application_user_id_idx").on(
       table.submittedByApplicationUserId,
+    ),
+    index("item_issues_verified_by_application_user_id_idx").on(
+      table.verifiedByApplicationUserId,
     ),
     index("item_issues_created_at_idx").on(table.createdAt),
     foreignKey({
@@ -90,6 +121,13 @@ export const itemIssues = pgTable(
       columns: [table.submittedByApplicationUserId],
       foreignColumns: [applicationUsers.id],
       name: "item_issues_submitted_by_application_user_id_fk",
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      columns: [table.verifiedByApplicationUserId],
+      foreignColumns: [applicationUsers.id],
+      name: "item_issues_verified_by_application_user_id_fk",
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
@@ -151,7 +189,49 @@ export const itemIssueLines = pgTable(
   ],
 );
 
+export const itemIssueActions = pgTable(
+  "item_issue_actions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    itemIssueId: uuid("item_issue_id").notNull(),
+    action: itemIssueActionEnum("action").notNull(),
+    fromStatus: itemIssueStatusEnum("from_status"),
+    toStatus: itemIssueStatusEnum("to_status").notNull(),
+    actorApplicationUserId: uuid("actor_application_user_id").notNull(),
+    actorWorkflowRole: itemRequestWorkflowRoleEnum(
+      "actor_workflow_role",
+    ).notNull(),
+    remarks: varchar("remarks", { length: 500 }),
+    stockLedgerReferenceId: uuid("stock_ledger_reference_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("item_issue_actions_item_issue_id_created_at_idx").on(
+      table.itemIssueId,
+      table.createdAt,
+    ),
+    foreignKey({
+      columns: [table.itemIssueId],
+      foreignColumns: [itemIssues.id],
+      name: "item_issue_actions_item_issue_id_fk",
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      columns: [table.actorApplicationUserId],
+      foreignColumns: [applicationUsers.id],
+      name: "item_issue_actions_actor_application_user_id_fk",
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+  ],
+);
+
 export type ItemIssueRow = typeof itemIssues.$inferSelect;
 export type NewItemIssueRow = typeof itemIssues.$inferInsert;
 export type ItemIssueLineRow = typeof itemIssueLines.$inferSelect;
 export type NewItemIssueLineRow = typeof itemIssueLines.$inferInsert;
+export type ItemIssueActionRow = typeof itemIssueActions.$inferSelect;
+export type NewItemIssueActionRow = typeof itemIssueActions.$inferInsert;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  itemRequestActionSchema,
   itemRequestIdSchema,
   itemRequestLineSchema,
   itemRequestPersonSummarySchema,
@@ -7,12 +8,47 @@ import {
   itemRequestStatusSchema,
   itemRequestStoreSummarySchema,
   itemRequestUnitSummarySchema,
+  itemRequestWorkflowRoleSchema,
   requestedQuantitySchema,
 } from "./item-request.js";
 
-export const ITEM_ISSUE_STATUSES = ["DRAFT", "SUBMITTED"] as const;
+export const ITEM_ISSUE_STATUSES = [
+  "DRAFT",
+  "PENDING_VERIFICATION",
+  "RETURNED",
+  "REJECTED",
+  "POSTED",
+] as const;
 
 export const itemIssueStatusSchema = z.enum(ITEM_ISSUE_STATUSES);
+
+export const ITEM_ISSUE_QUEUES = [
+  "pending-verification",
+  "returned",
+  "posted",
+] as const;
+
+export const itemIssueQueueSchema = z.enum(ITEM_ISSUE_QUEUES);
+
+export const ITEM_ISSUE_QUEUE_STATUSES = {
+  "pending-verification": ["PENDING_VERIFICATION"],
+  returned: ["RETURNED"],
+  posted: ["POSTED"],
+} as const satisfies Record<
+  (typeof ITEM_ISSUE_QUEUES)[number],
+  readonly (typeof ITEM_ISSUE_STATUSES)[number][]
+>;
+
+export const ITEM_ISSUE_ACTIONS = [
+  "CREATE",
+  "UPDATE",
+  "SUBMIT",
+  "RETURN",
+  "REJECT",
+  "VERIFY_POST",
+] as const;
+
+export const itemIssueActionTypeSchema = z.enum(ITEM_ISSUE_ACTIONS);
 
 const remarksInputSchema = z
   .union([z.string(), z.null(), z.undefined()])
@@ -111,6 +147,77 @@ export const submitItemIssueInputSchema = z
   })
   .strict();
 
+const checkerRemarksInputSchema = z
+  .union([z.string(), z.null(), z.undefined()])
+  .transform((value) => {
+    if (value == null) {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  })
+  .refine((value) => value === null || value.length <= 500, {
+    message: "Remarks must be at most 500 characters",
+  });
+
+export const verifyItemIssueInputSchema = z
+  .object({
+    remarks: checkerRemarksInputSchema,
+    expectedVersion: z
+      .number({
+        required_error: "expectedVersion is required",
+        invalid_type_error: "expectedVersion must be a positive integer",
+      })
+      .int()
+      .positive(),
+  })
+  .strict();
+
+export const returnItemIssueInputSchema = z
+  .object({
+    remarks: checkerRemarksInputSchema,
+    expectedVersion: z
+      .number({
+        required_error: "expectedVersion is required",
+        invalid_type_error: "expectedVersion must be a positive integer",
+      })
+      .int()
+      .positive(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.remarks === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["remarks"],
+        message: "Remarks are required when returning an item issue",
+      });
+    }
+  });
+
+export const rejectItemIssueInputSchema = z
+  .object({
+    remarks: checkerRemarksInputSchema,
+    expectedVersion: z
+      .number({
+        required_error: "expectedVersion is required",
+        invalid_type_error: "expectedVersion must be a positive integer",
+      })
+      .int()
+      .positive(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.remarks === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["remarks"],
+        message: "Remarks are required when rejecting an item issue",
+      });
+    }
+  });
+
 export const itemIssueIdSchema = z.string().uuid("Invalid item issue id");
 
 export const itemIssueListQuerySchema = z.object({
@@ -122,6 +229,7 @@ export const itemIssueListQuerySchema = z.object({
     .optional()
     .transform((value) => (value && value.length > 0 ? value : undefined)),
   status: z.union([z.literal("ALL"), itemIssueStatusSchema]).default("ALL"),
+  queue: itemIssueQueueSchema.optional(),
 });
 
 export const itemIssueRequestLineSummarySchema = z.object({
@@ -148,6 +256,18 @@ export const itemIssueLineSchema = z.object({
   requestLine: itemIssueRequestLineSummarySchema,
 });
 
+export const itemIssueActionSchema = z.object({
+  id: z.string().uuid(),
+  action: itemIssueActionTypeSchema,
+  fromStatus: itemIssueStatusSchema.nullable(),
+  toStatus: itemIssueStatusSchema,
+  actorWorkflowRole: itemRequestWorkflowRoleSchema,
+  remarks: z.string().nullable(),
+  stockLedgerReferenceId: z.string().uuid().nullable(),
+  createdAt: z.string(),
+  actor: itemRequestPersonSummarySchema,
+});
+
 export const itemIssueRequestSummarySchema = z.object({
   id: z.string().uuid(),
   requestNumber: z.string(),
@@ -162,6 +282,7 @@ export const itemIssueRequestSummarySchema = z.object({
   createdBy: itemRequestPersonSummarySchema,
   requestedBy: itemRequestRequestedByEmployeeSchema.nullable(),
   lines: z.array(itemRequestLineSchema),
+  actions: z.array(itemRequestActionSchema),
 });
 
 export const itemIssueLineAvailabilitySchema = z.object({
@@ -195,19 +316,28 @@ export const itemIssueListItemSchema = z.object({
   remarks: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  issueDate: z.string(),
   submittedAt: z.string().nullable(),
+  verifiedAt: z.string().nullable(),
+  returnedAt: z.string().nullable(),
+  rejectedAt: z.string().nullable(),
   fromStore: itemRequestStoreSummarySchema,
   toStore: itemRequestStoreSummarySchema,
   createdBy: itemRequestPersonSummarySchema,
   submittedBy: itemRequestPersonSummarySchema.nullable(),
+  verifiedBy: itemRequestPersonSummarySchema.nullable(),
   canEdit: z.boolean(),
   canSubmit: z.boolean(),
+  canVerify: z.boolean(),
+  canReturn: z.boolean(),
+  canReject: z.boolean(),
 });
 
 export const itemIssueSchema = itemIssueListItemSchema.extend({
   request: itemIssueRequestSummarySchema,
   lines: z.array(itemIssueLineSchema),
   availability: z.array(itemIssueLineAvailabilitySchema),
+  actions: z.array(itemIssueActionSchema),
 });
 
 export const paginatedItemIssueResponseSchema = z.object({

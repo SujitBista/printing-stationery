@@ -12,4 +12,14 @@ describe("itemRequestNotificationHref", () => {
       "/requests/item-requests/55555555-5555-4555-8555-555555555555",
     );
   });
+
+  it("links item-issue notifications to the issue detail page", () => {
+    assert.equal(
+      itemRequestNotificationHref({
+        relatedEntityType: "ITEM_ISSUE",
+        relatedEntityId: "55555555-5555-4555-8555-555555555555",
+      }),
+      "/requests/item-issues/55555555-5555-4555-8555-555555555555",
+    );
+  });
 });

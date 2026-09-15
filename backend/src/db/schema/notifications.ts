@@ -19,10 +19,15 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "ITEM_REQUEST_APPROVED",
   "ITEM_REQUEST_RETURNED",
   "ITEM_REQUEST_REJECTED",
+  "ITEM_ISSUE_SUBMITTED",
+  "ITEM_ISSUE_RETURNED",
+  "ITEM_ISSUE_REJECTED",
+  "ITEM_ISSUE_POSTED",
 ]);
 
 export const notificationEntityTypeEnum = pgEnum("notification_entity_type", [
   "ITEM_REQUEST",
+  "ITEM_ISSUE",
 ]);
 
 export const notifications = pgTable(
@@ -38,6 +43,7 @@ export const notifications = pgTable(
     ).notNull(),
     relatedEntityId: uuid("related_entity_id").notNull(),
     requestNumber: varchar("request_number", { length: 40 }),
+    issueNumber: varchar("issue_number", { length: 40 }),
     actorUserId: uuid("actor_user_id"),
     isRead: boolean("is_read").notNull().default(false),
     readAt: timestamp("read_at", { withTimezone: true }),

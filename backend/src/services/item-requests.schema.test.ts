@@ -256,5 +256,13 @@ describe("item request workflow remarks and history", () => {
     assert.deepEqual(nav.fulfilmentQueues, ["issued", "partial-pending"]);
     assert.equal(nav.workflowQueues.includes("recommend"), false);
     assert.equal(nav.workflowQueues.includes("review"), false);
+    assert.equal(nav.workflowQueues.includes("ready-to-issue"), false);
+  });
+
+  it("adds Ready to Issue to Corporate Maker navigation", () => {
+    const nav = getItemRequestNavQueues(["CORPORATE_MAKER"], true);
+    assert.ok(nav.workflowQueues.includes("review"));
+    assert.ok(nav.workflowQueues.includes("ready-to-issue"));
+    assert.equal(nav.workflowQueues.includes("approve"), false);
   });
 });

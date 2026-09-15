@@ -7,11 +7,15 @@ export const NOTIFICATION_TYPES = [
   "ITEM_REQUEST_APPROVED",
   "ITEM_REQUEST_RETURNED",
   "ITEM_REQUEST_REJECTED",
+  "ITEM_ISSUE_SUBMITTED",
+  "ITEM_ISSUE_RETURNED",
+  "ITEM_ISSUE_REJECTED",
+  "ITEM_ISSUE_POSTED",
 ] as const;
 
 export const notificationTypeSchema = z.enum(NOTIFICATION_TYPES);
 
-export const NOTIFICATION_ENTITY_TYPES = ["ITEM_REQUEST"] as const;
+export const NOTIFICATION_ENTITY_TYPES = ["ITEM_REQUEST", "ITEM_ISSUE"] as const;
 
 export const notificationEntityTypeSchema = z.enum(NOTIFICATION_ENTITY_TYPES);
 
@@ -24,6 +28,7 @@ export const notificationSchema = z.object({
   relatedEntityType: notificationEntityTypeSchema,
   relatedEntityId: z.string().uuid(),
   requestNumber: z.string().nullable(),
+  issueNumber: z.string().nullable(),
   actorUserId: z.string().uuid().nullable(),
   isRead: z.boolean(),
   readAt: z.string().nullable(),

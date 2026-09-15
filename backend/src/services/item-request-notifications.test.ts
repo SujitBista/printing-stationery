@@ -133,7 +133,7 @@ describe("item request notification mapping", () => {
     );
   });
 
-  it("notifies recorded participants on approve except the actor", () => {
+  it("notifies the Corporate Maker when a request is finally approved", () => {
     const recipients = itemRequestNotificationRecipientIds({
       toStatus: "APPROVED",
       actorUserId: CORP_CHECKER,
@@ -142,8 +142,7 @@ describe("item request notification mapping", () => {
       corporateMakerApplicationUserId: CORP_MAKER,
       corporateCheckerApplicationUserId: CORP_CHECKER,
     });
-    assert.deepEqual(new Set(recipients), new Set([CREATOR, CHECKER, CORP_MAKER]));
-    assert.equal(recipients.includes(CORP_CHECKER), false);
+    assert.deepEqual(recipients, [CORP_MAKER]);
   });
 
   it("builds one row per recipient with stored copy", () => {

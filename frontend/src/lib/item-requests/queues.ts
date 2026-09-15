@@ -99,6 +99,16 @@ const ITEM_REQUEST_QUEUE_DEFINITIONS: ItemRequestQueueDefinition[] = [
     navGroup: "workflow",
   },
   {
+    key: "ready-to-issue",
+    sidebarLabel: "Ready to Issue",
+    tabLabel: "Ready to Issue",
+    title: "Ready to Issue",
+    description:
+      "Approved requests waiting for the Corporate Maker to create an Item Issue.",
+    href: "/requests/item-requests/ready-to-issue",
+    navGroup: "workflow",
+  },
+  {
     key: "rejected",
     sidebarLabel: "Rejected",
     tabLabel: "Rejected",
@@ -123,7 +133,7 @@ const ITEM_REQUEST_QUEUE_DEFINITIONS: ItemRequestQueueDefinition[] = [
     tabLabel: "Approved List",
     title: "Item Request Approved List",
     description:
-      "Approved requests ready for item issue from the processing/supplying store.",
+      "Approved requests. Create Issue is available on Ready to Issue.",
     href: "/requests/item-requests/approved",
     navGroup: "workflow",
   },
@@ -142,7 +152,7 @@ const ITEM_REQUEST_QUEUE_DEFINITIONS: ItemRequestQueueDefinition[] = [
     tabLabel: "Issued Requests",
     title: "Item Request Issued List",
     description:
-      "Approved requests. Full issued-vs-pending quantity filtering will refine this list further.",
+      "Requests whose approved quantities have been fully issued and posted.",
     href: "/requests/item-requests/issued",
     navGroup: "fulfilment",
   },
@@ -152,7 +162,7 @@ const ITEM_REQUEST_QUEUE_DEFINITIONS: ItemRequestQueueDefinition[] = [
     tabLabel: "Partial Pending Request",
     title: "Item Request Partial Pending",
     description:
-      "Approved requests that may still have remaining quantity to issue.",
+      "Approved requests with remaining quantity still to be issued.",
     href: "/requests/item-requests/partial-pending",
     navGroup: "fulfilment",
   },
@@ -312,6 +322,7 @@ export const ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS: Record<
   forwarded: [],
   approve: ["APPROVE", "REJECT", "RETURN"],
   approved: [],
+  "ready-to-issue": [],
   returned: ["FORWARD", "RETURN", "RESUBMIT", "CANCEL"],
   "partial-pending": [],
   issued: [],
@@ -319,9 +330,7 @@ export const ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS: Record<
 };
 
 const QUEUES_WITH_CREATE_ISSUE: ReadonlySet<ItemRequestQueue> = new Set([
-  "approved",
-  "issued",
-  "partial-pending",
+  "ready-to-issue",
 ]);
 
 export type ItemRequestListRowActions = {

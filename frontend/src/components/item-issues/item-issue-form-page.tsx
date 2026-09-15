@@ -12,8 +12,11 @@ import {
   createItemIssueFromRequest,
   fetchItemIssue,
   fetchItemIssueEligibility,
+  rejectItemIssue,
+  returnItemIssue,
   submitItemIssue,
   updateItemIssue,
+  verifyItemIssue,
 } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
 import { isItemIssueAccessDenied } from "@/lib/item-issues/permissions";
@@ -24,6 +27,7 @@ import {
   ITEM_ISSUE_STATUS_LABELS,
   personDisplayName,
 } from "./item-issue-labels";
+import { departmentDisplayName } from "@/components/item-requests/item-request-labels";
 
 type ItemIssueFormPageProps =
   | {
@@ -104,6 +108,10 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+  const [checkerAction, setCheckerAction] = useState<
+    "verify" | "return" | "reject" | null
+  >(null);
+  const [checkerRemarks, setCheckerRemarks] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -161,7 +169,9 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
   );
   const request = issue?.request ?? eligibility?.request ?? null;
   const canEdit = issue ? issue.canEdit : Boolean(eligibility?.canCreate);
-  const isSubmitted = issue?.status === "SUBMITTED";
+  const canSubmit = Boolean(issue?.canSubmit);
+  const canVerify = Boolean(issue?.canVerify);
+  const isPosted = issue?.status === "POSTED";
 
   async function handleSaveDraft(event: FormEvent) {
     event.preventDefault();
@@ -242,10 +252,64 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
         ),
       );
       setSubmitDialogOpen(false);
-      setFeedback("Item issue submitted for approval.");
+      setFeedback("Item issue submitted for verification.");
     } catch (error) {
       setFormError(
         error instanceof Error ? error.message : "Failed to submit item issue",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCheckerAction() {
+    if (!issue || !checkerAction) {
+      return;
+    }
+    if (
+      (checkerAction === "return" || checkerAction === "reject") &&
+      checkerRemarks.trim().length === 0
+    ) {
+      setFormError("Remarks are required when returning or rejecting an issue.");
+      return;
+    }
+
+    setFormError(null);
+    setFeedback(null);
+    setSaving(true);
+    try {
+      const payload = {
+        expectedVersion: issue.version,
+        remarks: checkerRemarks.trim().length === 0 ? null : checkerRemarks.trim(),
+      };
+      const result =
+        checkerAction === "verify"
+          ? await verifyItemIssue(issue.id, payload)
+          : checkerAction === "return"
+            ? await returnItemIssue(issue.id, {
+                expectedVersion: issue.version,
+                remarks: checkerRemarks.trim(),
+              })
+            : await rejectItemIssue(issue.id, {
+                expectedVersion: issue.version,
+                remarks: checkerRemarks.trim(),
+              });
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      setIssue(result.data);
+      setCheckerAction(null);
+      setCheckerRemarks("");
+      setFeedback(
+        checkerAction === "verify"
+          ? "Item issue verified and posted. Stock has been deducted from the Corporate Store."
+          : checkerAction === "return"
+            ? "Item issue returned to the Corporate Maker."
+            : "Item issue rejected.",
+      );
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : "Failed to update item issue",
       );
     } finally {
       setSaving(false);
@@ -309,12 +373,22 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                   : "Draft not yet created"}
               </p>
               <p className="mt-1 text-sm text-ink-muted">
-                Corporate Store Checker creates the issue
+                Corporate Maker creates the issue. Corporate Checker verifies and
+                posts it before handover.
               </p>
             </div>
             {issue?.issueNumber ? (
-              <div className="text-sm text-ink-muted">
-                Request: {request.requestNumber}
+              <div className="flex flex-col items-end gap-2 text-sm text-ink-muted">
+                <div>Request: {request.requestNumber}</div>
+                {isPosted ? (
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft print:hidden"
+                  >
+                    Print Handover Note
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -387,6 +461,22 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                   request.requestedBy,
                   request.createdBy,
                 )}
+                className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-ink">Department</span>
+              <input
+                readOnly
+                value={departmentDisplayName(request.requestedBy?.department)}
+                className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-ink">Issue date</span>
+              <input
+                readOnly
+                value={formatDateTime(issue?.issueDate ?? new Date().toISOString())}
                 className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
               />
             </label>
@@ -474,7 +564,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
             </table>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 print:hidden">
             {canEdit ? (
               <>
                 <button
@@ -484,23 +574,60 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 >
                   {saving ? "Saving…" : "Save Draft"}
                 </button>
-                {props.mode === "detail" && !isSubmitted ? (
+                {canSubmit ? (
                   <button
                     type="button"
                     disabled={saving}
                     onClick={() => setSubmitDialogOpen(true)}
                     className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
                   >
-                    Submit for Approval
+                    Submit for Verification
                   </button>
                 ) : null}
+              </>
+            ) : null}
+            {canVerify ? (
+              <>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    setCheckerRemarks("");
+                    setCheckerAction("verify");
+                  }}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
+                >
+                  Verify and Post
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    setCheckerRemarks("");
+                    setCheckerAction("return");
+                  }}
+                  className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft disabled:opacity-60"
+                >
+                  Return to Corporate Maker
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    setCheckerRemarks("");
+                    setCheckerAction("reject");
+                  }}
+                  className="rounded-lg border border-danger px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/10 disabled:opacity-60"
+                >
+                  Reject
+                </button>
               </>
             ) : null}
             <Link
               href={`/requests/item-requests/${request.id}`}
               className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
             >
-              {isSubmitted ? "Back to Request" : "Cancel"}
+              View Source Request
             </Link>
           </div>
 
@@ -509,6 +636,36 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               Submitted by {personDisplayName(issue.submittedBy)} on{" "}
               {formatDateTime(issue.submittedAt)}.
             </p>
+          ) : null}
+          {issue?.verifiedAt ? (
+            <p className="text-sm text-ink-muted">
+              Verified and posted by {personDisplayName(issue.verifiedBy)} on{" "}
+              {formatDateTime(issue.verifiedAt)}.
+            </p>
+          ) : null}
+          {issue && issue.actions.length > 0 ? (
+            <div className="print:break-inside-avoid">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
+                Workflow history
+              </h2>
+              <ul className="mt-2 space-y-2 text-sm">
+                {issue.actions.map((action) => (
+                  <li key={action.id} className="border-l-2 border-border pl-3">
+                    <div className="font-medium">
+                      {action.action.replaceAll("_", " ")} →{" "}
+                      {ITEM_ISSUE_STATUS_LABELS[action.toStatus]}
+                    </div>
+                    <div className="text-ink-muted">
+                      {personDisplayName(action.actor)} · {action.actorWorkflowRole} ·{" "}
+                      {formatDateTime(action.createdAt)}
+                    </div>
+                    {action.remarks ? (
+                      <div className="text-ink-muted">{action.remarks}</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </form>
       ) : null}
@@ -525,8 +682,8 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               Submit Item Issue
             </h2>
             <p className="mt-2 text-sm text-ink-muted">
-              Submit this Item Issue? You will not be able to edit it after
-              submission.
+              Submit this Item Issue for Corporate Checker verification? Stock
+              will not change until it is verified and posted.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -543,7 +700,66 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 onClick={() => void handleSubmitIssue()}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
               >
-                {saving ? "Working…" : "Submit for Approval"}
+                {saving ? "Working…" : "Submit for Verification"}
+              </button>
+            </div>
+          </div>
+        </dialog>
+      ) : null}
+
+      {checkerAction ? (
+        <dialog
+          open
+          className="fixed inset-0 z-50 m-0 flex h-auto max-h-none w-auto max-w-none items-center justify-center overflow-y-auto border-0 bg-transparent p-4 text-ink backdrop:bg-ink/40"
+        >
+          <div className="w-full max-w-xl rounded-lg border border-border bg-paper-elevated p-5 shadow-lg">
+            <h2 className="text-xl font-semibold tracking-tight">
+              {checkerAction === "verify"
+                ? "Verify and Post Item Issue"
+                : checkerAction === "return"
+                  ? "Return Item Issue"
+                  : "Reject Item Issue"}
+            </h2>
+            <p className="mt-2 text-sm text-ink-muted">
+              {checkerAction === "verify"
+                ? "This will deduct Corporate Store stock once and mark the issue as posted."
+                : "Stock will not change. Remarks are required."}
+            </p>
+            <label className="mt-4 flex flex-col gap-1 text-sm">
+              <span className="font-medium text-ink">
+                Remarks
+                {checkerAction === "verify" ? " (optional)" : ""}
+              </span>
+              <textarea
+                value={checkerRemarks}
+                onChange={(event) => setCheckerRemarks(event.target.value)}
+                rows={3}
+                maxLength={500}
+                className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setCheckerAction(null)}
+                className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft disabled:opacity-60"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void handleCheckerAction()}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
+              >
+                {saving
+                  ? "Working…"
+                  : checkerAction === "verify"
+                    ? "Verify and Post"
+                    : checkerAction === "return"
+                      ? "Return"
+                      : "Reject"}
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { eq, inArray, like, or } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import type { AuthenticatedUser } from "@printing-stationery/shared";
@@ -15,21 +16,35 @@ import {
 } from "../db/schema/auth.js";
 import { branches } from "../db/schema/branches.js";
 import { employees } from "../db/schema/employees.js";
-import { itemIssueLines, itemIssues } from "../db/schema/item-issues.js";
+import {
+  itemIssueActions,
+  itemIssueLines,
+  itemIssues,
+} from "../db/schema/item-issues.js";
 import { itemRequestLines, itemRequests } from "../db/schema/item-requests.js";
 import { notifications } from "../db/schema/notifications.js";
 import { items } from "../db/schema/items.js";
+import { stockLedger } from "../db/schema/opening-stocks.js";
 import { stores } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
-import { ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE } from "./item-issue-authorization.js";
+import {
+  ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE,
+} from "./item-issue-authorization.js";
 import {
   createItemIssueFromRequest,
   getItemIssueById,
   getItemIssueEligibility,
+  rejectItemIssue,
+  returnItemIssue,
+  submitItemIssue,
   updateItemIssue,
+  verifyAndPostItemIssue,
 } from "./item-issues.service.js";
 import { getOperationalAvailableQuantities } from "./opening-stocks.service.js";
 import { getItemRequestById } from "./item-requests.service.js";
+import { listNotifications } from "./notifications.service.js";
 import { AppError } from "../utils/errors.js";
 import { generateSessionToken, hashPassword, hashSessionToken } from "../utils/password.js";
 
@@ -51,6 +66,7 @@ let originalCorporateAssignment: {
   supervisorApplicationUserId: string;
   isActive: boolean;
 } | null = null;
+let seededLedgerIds: string[] = [];
 
 type StoreAssignment = {
   storeId: string;
@@ -85,6 +101,20 @@ function isAppError(
     const issueIds = issueRows.map((row) => row.id);
     if (issueIds.length > 0) {
       await db
+        .delete(notifications)
+        .where(
+          and(
+            eq(notifications.relatedEntityType, "ITEM_ISSUE"),
+            inArray(notifications.relatedEntityId, issueIds),
+          ),
+        );
+      await db
+        .delete(itemIssueActions)
+        .where(inArray(itemIssueActions.itemIssueId, issueIds));
+      await db
+        .delete(stockLedger)
+        .where(inArray(stockLedger.referenceId, issueIds));
+      await db
         .delete(itemIssueLines)
         .where(inArray(itemIssueLines.itemIssueId, issueIds));
       await db.delete(itemIssues).where(inArray(itemIssues.id, issueIds));
@@ -110,6 +140,11 @@ function isAppError(
       .from(itemRequests)
       .where(like(itemRequests.requestNumber, `${REQUEST_NUMBER_PREFIX}%`));
     await deleteRequests(leftoverRequests.map((row) => row.id));
+
+    if (seededLedgerIds.length > 0) {
+      await db.delete(stockLedger).where(inArray(stockLedger.id, seededLedgerIds));
+      seededLedgerIds = [];
+    }
 
     if (originalCorporateAssignment) {
       await db
@@ -201,9 +236,13 @@ describe("item issue authorization integration", { concurrency: false }, () => {
   let corporateChecker: AuthenticatedUser;
   let corporateMaker: AuthenticatedUser;
   let requestingChecker: AuthenticatedUser;
+  let requestingMaker: AuthenticatedUser;
   let unrelatedChecker: AuthenticatedUser;
+  let unrelatedMaker: AuthenticatedUser;
   let corporateMakerSession: string;
+  let corporateCheckerSession: string;
   let itemId: string;
+  let itemUnitId: string;
 
   async function loadActor(userId: string): Promise<AuthenticatedUser> {
     const rows = await getDb()
@@ -487,19 +526,21 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     requesting = await loadAssignment(branchRow.store.id);
 
     const itemRows = await getDb()
-      .select({ id: items.id })
+      .select({ id: items.id, unitId: items.unitId })
       .from(items)
       .where(eq(items.isRequestable, true))
       .limit(1);
-    const foundItemId = itemRows[0]?.id;
-    if (!foundItemId) {
+    const foundItem = itemRows[0];
+    if (!foundItem) {
       throw new Error("No requestable item exists for item issue tests");
     }
-    itemId = foundItemId;
+    itemId = foundItem.id;
+    itemUnitId = foundItem.unitId;
 
     corporateChecker = await loadActor(corporate.checkerUserId);
     corporateMaker = await loadActor(corporate.makerUserId);
     requestingChecker = await loadActor(requesting.checkerUserId);
+    requestingMaker = await loadActor(requesting.makerUserId);
 
     const passwordHash = await hashPassword("TestIssueAuth!1a");
     const makerEmployee = await getDb()
@@ -590,10 +631,36 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       isActive: true,
     });
     unrelatedChecker = await loadActor(checkerUserId);
+    unrelatedMaker = await loadActor(makerUserId);
+
+    const seeded = await getDb()
+      .insert(stockLedger)
+      .values({
+        storeId: corporate.storeId,
+        itemId,
+        unitId: itemUnitId,
+        rate: "1",
+        movementType: "PURCHASE",
+        quantityIn: "100",
+        quantityOut: "0",
+        amountIn: "100",
+        amountOut: "0",
+        transactionDate: new Date(),
+        referenceType: "PURCHASE",
+        referenceId: randomUUID(),
+        referenceLineId: randomUUID(),
+        postedByApplicationUserId: corporateMaker.id,
+        postedAt: new Date(),
+      })
+      .returning({ id: stockLedger.id });
+    if (seeded[0]) {
+      seededLedgerIds.push(seeded[0].id);
+    }
 
     approvedRequestId = await insertRequest("APPROVED");
     draftRequestId = await insertRequest("DRAFT");
     corporateMakerSession = await createSession(corporate.makerUserId);
+    corporateCheckerSession = await createSession(corporate.checkerUserId);
 
     const app = createApp(env);
     server = app.listen(0);
@@ -627,10 +694,10 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     }
   });
 
-  it("lets the supplying-store checker see issue eligibility for an approved request", async () => {
+  it("lets the supplying-store maker see issue eligibility for an approved request", async () => {
     const eligibility = await getItemIssueEligibility(
       approvedRequestId,
-      corporateChecker,
+      corporateMaker,
     );
     assert.equal(eligibility.canCreate, true);
     assert.equal(eligibility.request?.corporateStore?.id, corporate.storeId);
@@ -656,42 +723,30 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     }
   });
 
-  it("lets the supplying-store checker create an item issue draft", async () => {
-    const issue = await createItemIssueFromRequest(
-      approvedRequestId,
-      corporateChecker,
-      {
-        remarks: null,
-        lines: [{ requestLineId, issueQuantity: "4" }],
-      },
-    );
-    createdIssueId = issue.id;
-    assert.equal(issue.status, "DRAFT");
-    assert.equal(issue.fromStore.id, corporate.storeId);
-    assert.equal(issue.toStore.id, requesting.storeId);
-    assert.equal(issue.createdBy.id, corporateChecker.id);
-    assert.equal(issue.canEdit, true);
-  });
-
-  it("records the authenticated supplying-store checker as the creator", async () => {
-    assert.ok(createdIssueId);
-    const issue = await getItemIssueById(createdIssueId, corporateChecker);
-    assert.equal(issue.createdBy.id, corporateChecker.id);
-    assert.notEqual(issue.createdBy.id, corporateMaker.id);
-  });
-
-  it("hides issue eligibility from the supplying-store maker", async () => {
+  it("returns 403 when the Corporate Checker loads issue eligibility", async () => {
     await assert.rejects(
-      () => getItemIssueEligibility(approvedRequestId, corporateMaker),
+      () => getItemIssueEligibility(approvedRequestId, corporateChecker),
       (error: unknown) =>
-        isAppError(error, 403, ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE),
+        isAppError(error, 403, ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE),
     );
   });
 
-  it("returns 403 when the supplying-store maker calls create directly", async () => {
+  it("returns 403 when the Corporate Checker creates an item issue", async () => {
     await assert.rejects(
       () =>
-        createItemIssueFromRequest(approvedRequestId, corporateMaker, {
+        createItemIssueFromRequest(approvedRequestId, corporateChecker, {
+          remarks: null,
+          lines: [{ requestLineId, issueQuantity: "1" }],
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE),
+    );
+  });
+
+  it("returns 403 when the Branch Maker creates a Corporate Store issue", async () => {
+    await assert.rejects(
+      () =>
+        createItemIssueFromRequest(approvedRequestId, requestingMaker, {
           remarks: null,
           lines: [{ requestLineId, issueQuantity: "1" }],
         }),
@@ -708,11 +763,20 @@ describe("item issue authorization integration", { concurrency: false }, () => {
           lines: [{ requestLineId, issueQuantity: "1" }],
         }),
       (error: unknown) =>
-        isAppError(error, 403, ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE),
+        isAppError(error, 403, ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE),
     );
   });
 
-  it("returns 403 when an unrelated-store checker creates the issue", async () => {
+  it("returns 403 when an unrelated-store maker creates the issue", async () => {
+    await assert.rejects(
+      () =>
+        createItemIssueFromRequest(approvedRequestId, unrelatedMaker, {
+          remarks: null,
+          lines: [{ requestLineId, issueQuantity: "1" }],
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE),
+    );
     await assert.rejects(
       () =>
         createItemIssueFromRequest(approvedRequestId, unrelatedChecker, {
@@ -720,7 +784,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
           lines: [{ requestLineId, issueQuantity: "1" }],
         }),
       (error: unknown) =>
-        isAppError(error, 403, ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE),
+        isAppError(error, 403, ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE),
     );
   });
 
@@ -743,10 +807,10 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.equal(result.status, 401);
   });
 
-  it("returns 403 when the maker posts to the create API with a session cookie", async () => {
+  it("returns 403 when the Corporate Checker posts to the create API", async () => {
     const result = await api(`/api/item-requests/${approvedRequestId}/item-issues`, {
       method: "POST",
-      token: corporateMakerSession,
+      token: corporateCheckerSession,
       origin: env.FRONTEND_ORIGIN,
       body: {
         remarks: null,
@@ -755,11 +819,11 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     });
     assert.equal(result.status, 403);
     assert.deepEqual(result.json, {
-      error: { message: ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE },
+      error: { message: ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE },
     });
   });
 
-  it("ignores a browser-provided store id and still authorizes from the database request", async () => {
+  it("ignores a browser-provided store id instead of trusting it", async () => {
     const result = await api(`/api/item-requests/${approvedRequestId}/item-issues`, {
       method: "POST",
       token: corporateMakerSession,
@@ -771,22 +835,12 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       },
     });
     assert.equal(result.status, 400);
-    const created = await createItemIssueFromRequest(
-      approvedRequestId,
-      corporateChecker,
-      {
-        remarks: null,
-        lines: [{ requestLineId, issueQuantity: "1" }],
-      },
-    );
-    assert.equal(created.fromStore.id, corporate.storeId);
-    assert.notEqual(created.fromStore.id, requesting.storeId);
   });
 
-  it("rejects a checker creating an issue from a non-approved request", async () => {
+  it("rejects a maker creating an issue from a non-approved request", async () => {
     await assert.rejects(
       () =>
-        createItemIssueFromRequest(draftRequestId, corporateChecker, {
+        createItemIssueFromRequest(draftRequestId, corporateMaker, {
           remarks: null,
           lines: [{ requestLineId, issueQuantity: "1" }],
         }),
@@ -799,11 +853,50 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     );
   });
 
+  it("lets the supplying-store maker create an item issue draft", async () => {
+    const issue = await createItemIssueFromRequest(
+      approvedRequestId,
+      corporateMaker,
+      {
+        remarks: null,
+        lines: [{ requestLineId, issueQuantity: "4" }],
+      },
+    );
+    createdIssueId = issue.id;
+    assert.equal(issue.status, "DRAFT");
+    assert.equal(issue.fromStore.id, corporate.storeId);
+    assert.equal(issue.toStore.id, requesting.storeId);
+    assert.equal(issue.createdBy.id, corporateMaker.id);
+    assert.equal(issue.canEdit, true);
+    assert.equal(issue.canVerify, false);
+  });
+
+  it("records the authenticated supplying-store maker as the creator", async () => {
+    assert.ok(createdIssueId);
+    const issue = await getItemIssueById(createdIssueId, corporateMaker);
+    assert.equal(issue.createdBy.id, corporateMaker.id);
+    assert.notEqual(issue.createdBy.id, corporateChecker.id);
+  });
+
+  it("rejects a second open issue for the same remaining quantities", async () => {
+    await assert.rejects(
+      () =>
+        createItemIssueFromRequest(approvedRequestId, corporateMaker, {
+          remarks: null,
+          lines: [{ requestLineId, issueQuantity: "1" }],
+        }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.statusCode === 409 &&
+        /already exists|pending verification|eligible/i.test(error.message),
+    );
+  });
+
   it("still rejects over-issue against remaining quantity", async () => {
     assert.ok(createdIssueId);
     await assert.rejects(
       () =>
-        updateItemIssue(createdIssueId, corporateChecker, {
+        updateItemIssue(createdIssueId, corporateMaker, {
           expectedVersion: 1,
           lines: [{ requestLineId, issueQuantity: "11" }],
         }),
@@ -814,26 +907,287 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     );
   });
 
-  it("does not let the supplying-store maker continue editing a created draft", async () => {
+  it("does not let the Corporate Checker edit a created draft", async () => {
     assert.ok(createdIssueId);
-    await assert.rejects(
-      () => getItemIssueById(createdIssueId, corporateMaker),
-      (error: unknown) => isAppError(error, 404, "Item issue not found"),
-    );
+    const issue = await getItemIssueById(createdIssueId, corporateChecker);
+    assert.equal(issue.canEdit, false);
     await assert.rejects(
       () =>
-        updateItemIssue(createdIssueId, corporateMaker, {
+        updateItemIssue(createdIssueId, corporateChecker, {
           expectedVersion: 1,
-          remarks: "maker edit",
+          remarks: "checker edit",
         }),
-      (error: unknown) => isAppError(error, 404, "Item issue not found"),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE),
     );
   });
 
-  it("shows create-issue eligibility on the request for the checker and not the maker", async () => {
+  it("shows create-issue eligibility on the request for the maker and not the checker", async () => {
     const checkerView = await getItemRequestById(approvedRequestId, corporateChecker);
     const makerView = await getItemRequestById(approvedRequestId, corporateMaker);
-    assert.equal(checkerView.canCreateIssue, true);
-    assert.equal(makerView.canCreateIssue, false);
+    assert.equal(makerView.canCreateIssue, true);
+    assert.equal(checkerView.canCreateIssue, false);
+  });
+
+  it("does not reduce stock when the maker submits for verification", async () => {
+    assert.ok(createdIssueId);
+    const before = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const submitted = await submitItemIssue(createdIssueId, corporateMaker, {
+      expectedVersion: 1,
+    });
+    assert.equal(submitted.status, "PENDING_VERIFICATION");
+    const after = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(after, before);
+
+    const notes = await listNotifications(corporateChecker.id, {
+      page: 1,
+      pageSize: 20,
+    });
+    const submittedNote = notes.items.find(
+      (item) =>
+        item.type === "ITEM_ISSUE_SUBMITTED" &&
+        item.relatedEntityId === createdIssueId,
+    );
+    assert.ok(submittedNote);
+    assert.equal(submittedNote.isRead, false);
+  });
+
+  it("does not let the Corporate Maker verify their own issue", async () => {
+    assert.ok(createdIssueId);
+    const issue = await getItemIssueById(createdIssueId, corporateMaker);
+    await assert.rejects(
+      () =>
+        verifyAndPostItemIssue(createdIssueId, corporateMaker, {
+          expectedVersion: issue.version,
+          remarks: null,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE) ||
+        isAppError(
+          error,
+          403,
+          "Only a checker assigned to the supplying store can verify this item issue.",
+        ),
+    );
+  });
+
+  it("lets the Corporate Checker verify and post, reducing Corporate Store stock once", async () => {
+    assert.ok(createdIssueId);
+    const beforeCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const beforeBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const issue = await getItemIssueById(createdIssueId, corporateChecker);
+    const posted = await verifyAndPostItemIssue(createdIssueId, corporateChecker, {
+      expectedVersion: issue.version,
+      remarks: "Verified for handover",
+    });
+    assert.equal(posted.status, "POSTED");
+    assert.equal(posted.verifiedBy?.id, corporateChecker.id);
+
+    const afterCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const afterBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const beforeQty = Number(beforeCorporate[0]?.availableQuantity ?? "0");
+    const afterQty = Number(afterCorporate[0]?.availableQuantity ?? "0");
+    assert.equal(afterQty, beforeQty - 4);
+    assert.deepEqual(afterBranch, beforeBranch);
+
+    const ledgerRows = await getDb()
+      .select({ id: stockLedger.id })
+      .from(stockLedger)
+      .where(eq(stockLedger.referenceId, createdIssueId));
+    assert.equal(ledgerRows.length, 1);
+
+    const request = await getItemRequestById(approvedRequestId, corporateMaker);
+    assert.equal(request.status, "PARTIALLY_ISSUED");
+    assert.equal(request.lines[0]?.issuedQuantity, "4");
+    assert.equal(request.lines[0]?.remainingQuantity, "6");
+
+    const branchNotes = await listNotifications(requestingMaker.id, {
+      page: 1,
+      pageSize: 20,
+    });
+    const postedNote = branchNotes.items.find(
+      (item) =>
+        item.type === "ITEM_ISSUE_POSTED" && item.relatedEntityId === createdIssueId,
+    );
+    assert.ok(postedNote);
+    assert.equal(postedNote.isRead, false);
+  });
+
+  it("prevents duplicate verification of a posted issue", async () => {
+    assert.ok(createdIssueId);
+    const issue = await getItemIssueById(createdIssueId, corporateChecker);
+    await assert.rejects(
+      () =>
+        verifyAndPostItemIssue(createdIssueId, corporateChecker, {
+          expectedVersion: issue.version,
+          remarks: null,
+        }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.statusCode === 409 &&
+        /already been posted/i.test(error.message),
+    );
+  });
+
+  it("keeps remaining quantity eligible after partial posting and then marks the request issued", async () => {
+    const second = await createItemIssueFromRequest(
+      approvedRequestId,
+      corporateMaker,
+      {
+        remarks: null,
+        lines: [{ requestLineId, issueQuantity: "6" }],
+      },
+    );
+    const submitted = await submitItemIssue(second.id, corporateMaker, {
+      expectedVersion: second.version,
+    });
+    const posted = await verifyAndPostItemIssue(second.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+    assert.equal(posted.status, "POSTED");
+    const request = await getItemRequestById(approvedRequestId, corporateMaker);
+    assert.equal(request.status, "ISSUED");
+    assert.equal(request.lines[0]?.remainingQuantity, "0");
+    assert.equal(request.canCreateIssue, false);
+  });
+
+  it("does not change stock when an issue is returned or rejected", async () => {
+    const returnRequestId = await insertRequest("APPROVED");
+    const returnLine = await getDb()
+      .select({ id: itemRequestLines.id })
+      .from(itemRequestLines)
+      .where(eq(itemRequestLines.itemRequestId, returnRequestId))
+      .limit(1);
+    const returnLineId = returnLine[0]?.id;
+    assert.ok(returnLineId);
+
+    const draft = await createItemIssueFromRequest(returnRequestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId: returnLineId, issueQuantity: "2" }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    const before = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const returned = await returnItemIssue(draft.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: "Correct the issue quantity",
+    });
+    assert.equal(returned.status, "RETURNED");
+    const afterReturn = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterReturn, before);
+    const stillApproved = await getItemRequestById(returnRequestId, corporateMaker);
+    assert.equal(stillApproved.status, "APPROVED");
+
+    const makerNotes = await listNotifications(corporateMaker.id, {
+      page: 1,
+      pageSize: 20,
+    });
+    assert.ok(
+      makerNotes.items.some(
+        (item) =>
+          item.type === "ITEM_ISSUE_RETURNED" && item.relatedEntityId === draft.id,
+      ),
+    );
+
+    const resubmitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: returned.version,
+    });
+    const rejected = await rejectItemIssue(draft.id, corporateChecker, {
+      expectedVersion: resubmitted.version,
+      remarks: "Do not issue this request",
+    });
+    assert.equal(rejected.status, "REJECTED");
+    const afterReject = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterReject, before);
+    const stillEligible = await getItemIssueEligibility(
+      returnRequestId,
+      corporateMaker,
+    );
+    assert.equal(stillEligible.canCreate, true);
+  });
+
+  it("prevents concurrent posting of the same issue", async () => {
+    const concurrentRequestId = await insertRequest("APPROVED");
+    const concurrentLine = await getDb()
+      .select({ id: itemRequestLines.id })
+      .from(itemRequestLines)
+      .where(eq(itemRequestLines.itemRequestId, concurrentRequestId))
+      .limit(1);
+    const concurrentLineId = concurrentLine[0]?.id;
+    assert.ok(concurrentLineId);
+
+    const draft = await createItemIssueFromRequest(
+      concurrentRequestId,
+      corporateMaker,
+      {
+        remarks: null,
+        lines: [{ requestLineId: concurrentLineId, issueQuantity: "3" }],
+      },
+    );
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    const before = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+
+    const results = await Promise.allSettled([
+      verifyAndPostItemIssue(draft.id, corporateChecker, {
+        expectedVersion: submitted.version,
+        remarks: null,
+      }),
+      verifyAndPostItemIssue(draft.id, corporateChecker, {
+        expectedVersion: submitted.version,
+        remarks: null,
+      }),
+    ]);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+
+    const after = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const beforeQty = Number(before[0]?.availableQuantity ?? "0");
+    const afterQty = Number(after[0]?.availableQuantity ?? "0");
+    assert.equal(afterQty, beforeQty - 3);
+
+    const ledgerRows = await getDb()
+      .select({ id: stockLedger.id })
+      .from(stockLedger)
+      .where(eq(stockLedger.referenceId, draft.id));
+    assert.equal(ledgerRows.length, 1);
   });
 });

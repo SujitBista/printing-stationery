@@ -12,7 +12,11 @@ import {
 } from "../db/schema/auth.js";
 import { branches } from "../db/schema/branches.js";
 import { employees } from "../db/schema/employees.js";
-import { itemIssueLines, itemIssues } from "../db/schema/item-issues.js";
+import {
+  itemIssueActions,
+  itemIssueLines,
+  itemIssues,
+} from "../db/schema/item-issues.js";
 import { itemRequestActions, itemRequestLines, itemRequests } from "../db/schema/item-requests.js";
 import { notifications } from "../db/schema/notifications.js";
 import { items } from "../db/schema/items.js";
@@ -32,6 +36,7 @@ import {
   createItemIssueFromRequest,
   getItemIssueEligibility,
   submitItemIssue,
+  verifyAndPostItemIssue,
 } from "./item-issues.service.js";
 import { listEmployees } from "./employees.service.js";
 import { getOperationalAvailableQuantities } from "./opening-stocks.service.js";
@@ -59,6 +64,7 @@ function isAppError(
 describe("store-to-store item requests", { concurrency: false }, () => {
   let admin: AuthenticatedUser;
   let destinationMaker: AuthenticatedUser;
+  let sourceMaker: AuthenticatedUser;
   let sourceChecker: AuthenticatedUser;
   let unassignedMaker: AuthenticatedUser;
   let sourceStoreId = "";
@@ -234,6 +240,20 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     }
 
     if (issueIds.length > 0) {
+      await db
+        .delete(notifications)
+        .where(
+          and(
+            eq(notifications.relatedEntityType, "ITEM_ISSUE"),
+            inArray(notifications.relatedEntityId, issueIds),
+          ),
+        );
+      await db
+        .delete(itemIssueActions)
+        .where(inArray(itemIssueActions.itemIssueId, issueIds));
+      await db
+        .delete(stockLedger)
+        .where(inArray(stockLedger.referenceId, issueIds));
       await db
         .delete(itemIssueLines)
         .where(inArray(itemIssueLines.itemIssueId, issueIds));
@@ -466,6 +486,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       allowTransfer: true,
     });
     sourceStoreId = source.storeId;
+    sourceMaker = source.maker;
     sourceChecker = source.checker;
 
     const destination = await createAssignedStore({
@@ -1085,6 +1106,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   });
 
   it("creates an issue from the supplying store and blocks over-issue and re-issue", async () => {
+    await seedStoreStock(sourceStoreId, "20");
     const requested = await trackRequest(
       await createItemRequest(admin, {
         sourceStoreId: destinationStoreId,
@@ -1099,7 +1121,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       .set({
         status: "APPROVED",
         approvedAt: new Date(),
-        corporateMakerApplicationUserId: sourceChecker.id,
+        corporateMakerApplicationUserId: sourceMaker.id,
         corporateCheckerApplicationUserId: sourceChecker.id,
         branchCheckerApplicationUserId: destinationMaker.id,
       })
@@ -1109,9 +1131,18 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     const requestLineId = detail.lines[0]?.id;
     assert.ok(requestLineId);
 
+    await assert.rejects(
+      () =>
+        createItemIssueFromRequest(requested.id, sourceChecker, {
+          remarks: null,
+          lines: [{ requestLineId, issueQuantity: "4" }],
+        }),
+      (error: unknown) => isAppError(error, 403),
+    );
+
     const firstIssue = await createItemIssueFromRequest(
       requested.id,
-      sourceChecker,
+      sourceMaker,
       {
         remarks: null,
         lines: [{ requestLineId, issueQuantity: "4" }],
@@ -1120,22 +1151,22 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     assert.equal(firstIssue.fromStore.id, sourceStoreId);
     assert.equal(firstIssue.toStore.id, destinationStoreId);
 
-    await getDb()
-      .update(itemIssues)
-      .set({
-        status: "SUBMITTED",
-        submittedByApplicationUserId: sourceChecker.id,
-        submittedAt: new Date(),
-      })
-      .where(eq(itemIssues.id, firstIssue.id));
+    const submitted = await submitItemIssue(firstIssue.id, sourceMaker, {
+      expectedVersion: firstIssue.version,
+    });
+    await verifyAndPostItemIssue(firstIssue.id, sourceChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
 
     const afterPartial = await getItemRequestById(requested.id, admin);
+    assert.equal(afterPartial.status, "PARTIALLY_ISSUED");
     assert.equal(afterPartial.lines[0]?.issuedQuantity, "4");
     assert.equal(afterPartial.lines[0]?.remainingQuantity, "6");
 
     await assert.rejects(
       () =>
-        createItemIssueFromRequest(requested.id, sourceChecker, {
+        createItemIssueFromRequest(requested.id, sourceMaker, {
           remarks: null,
           lines: [{ requestLineId, issueQuantity: "7" }],
         }),
@@ -1145,27 +1176,26 @@ describe("store-to-store item requests", { concurrency: false }, () => {
 
     const secondIssue = await createItemIssueFromRequest(
       requested.id,
-      sourceChecker,
+      sourceMaker,
       {
         remarks: null,
         lines: [{ requestLineId, issueQuantity: "6" }],
       },
     );
-    await getDb()
-      .update(itemIssues)
-      .set({
-        status: "SUBMITTED",
-        submittedByApplicationUserId: sourceChecker.id,
-        submittedAt: new Date(),
-      })
-      .where(eq(itemIssues.id, secondIssue.id));
+    const secondSubmitted = await submitItemIssue(secondIssue.id, sourceMaker, {
+      expectedVersion: secondIssue.version,
+    });
+    await verifyAndPostItemIssue(secondIssue.id, sourceChecker, {
+      expectedVersion: secondSubmitted.version,
+      remarks: null,
+    });
 
-    const eligibility = await getItemIssueEligibility(requested.id, sourceChecker);
+    const eligibility = await getItemIssueEligibility(requested.id, sourceMaker);
     assert.equal(eligibility.canCreate, false);
 
     await assert.rejects(
       () =>
-        createItemIssueFromRequest(requested.id, sourceChecker, {
+        createItemIssueFromRequest(requested.id, sourceMaker, {
           remarks: null,
           lines: [{ requestLineId, issueQuantity: "1" }],
         }),
@@ -1231,7 +1261,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       .set({
         status: "APPROVED",
         approvedAt: new Date(),
-        corporateMakerApplicationUserId: sourceChecker.id,
+        corporateMakerApplicationUserId: sourceMaker.id,
         corporateCheckerApplicationUserId: sourceChecker.id,
         branchCheckerApplicationUserId: destinationMaker.id,
       })
@@ -1241,7 +1271,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     const requestLineId = detail.lines[0]?.id;
     assert.ok(requestLineId);
 
-    await createItemIssueFromRequest(requested.id, sourceChecker, {
+    await createItemIssueFromRequest(requested.id, sourceMaker, {
       remarks: null,
       lines: [{ requestLineId, issueQuantity: "1" }],
     });
@@ -1402,6 +1432,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   });
 
   it("posting an issue deducts Corporate stock, not Birtamod stock", async () => {
+    assert.ok(corporateMaker, "Corporate Store maker assignment is required");
     assert.ok(corporateChecker, "Corporate Store checker assignment is required");
 
     await seedStoreStock(corporateStoreId, "20");
@@ -1432,7 +1463,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         status: "APPROVED",
         approvedAt: new Date(),
         branchCheckerApplicationUserId: birtamodChecker.id,
-        corporateMakerApplicationUserId: corporateChecker.id,
+        corporateMakerApplicationUserId: corporateMaker.id,
         corporateCheckerApplicationUserId: corporateChecker.id,
       })
       .where(eq(itemRequests.id, created.id));
@@ -1451,7 +1482,24 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       afterApproveCorporate[0]?.availableQuantity ?? "0",
     );
 
-    const issue = await createItemIssueFromRequest(created.id, corporateChecker, {
+    await assert.rejects(
+      () =>
+        createItemIssueFromRequest(created.id, birtamodMaker, {
+          remarks: null,
+          lines: [{ requestLineId, issueQuantity: "3" }],
+        }),
+      (error: unknown) => isAppError(error, 403),
+    );
+    await assert.rejects(
+      () =>
+        createItemIssueFromRequest(created.id, corporateChecker, {
+          remarks: null,
+          lines: [{ requestLineId, issueQuantity: "3" }],
+        }),
+      (error: unknown) => isAppError(error, 403),
+    );
+
+    const issue = await createItemIssueFromRequest(created.id, corporateMaker, {
       remarks: null,
       lines: [{ requestLineId, issueQuantity: "3" }],
     });
@@ -1459,8 +1507,18 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     assert.equal(issue.toStore.id, birtamodStoreId);
     assert.notEqual(issue.fromStore.id, birtamodStoreId);
 
-    await submitItemIssue(issue.id, corporateChecker, {
+    const submitted = await submitItemIssue(issue.id, corporateMaker, {
       expectedVersion: issue.version,
+    });
+    const afterSubmitCorporate = await getOperationalAvailableQuantities({
+      storeId: corporateStoreId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterSubmitCorporate, afterApproveCorporate);
+
+    await verifyAndPostItemIssue(issue.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
     });
 
     const afterIssueCorporate = await getOperationalAvailableQuantities({

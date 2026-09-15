@@ -73,10 +73,11 @@ import {
   mapItemRequestDatabaseError,
 } from "../utils/db-errors.js";
 import {
-  actorMayOperateItemIssue,
+  actorMayCreateItemIssue,
   isEligibleSupplyingStore,
   requestAllowsItemIssueCreation,
 } from "./item-issue-authorization.js";
+import { countItemIssuesForQueue } from "./item-issues.service.js";
 import { insertItemRequestWorkflowNotifications } from "./item-request-notifications.js";
 import {
   INACTIVE_REQUESTED_BY_MESSAGE,
@@ -450,7 +451,7 @@ async function loadSubmittedIssueTotalsByRequestLine(
     .where(
       and(
         eq(itemIssues.requestId, requestId),
-        eq(itemIssues.status, "SUBMITTED"),
+        eq(itemIssues.status, "POSTED"),
       ),
     )
     .groupBy(itemIssueLines.requestLineId);
@@ -582,6 +583,25 @@ async function listSupervisedStoreIds(applicationUserId: string): Promise<string
   return rows.map((row) => row.store.id);
 }
 
+async function listMakerStoreIds(applicationUserId: string): Promise<string[]> {
+  const assignment = await getActiveMakerAssignment(applicationUserId);
+  return assignment ? [assignment.store.id] : [];
+}
+
+async function actorStoreIds(actor: AuthenticatedUser): Promise<{
+  supervisedStoreIds: string[];
+  makerStoreIds: string[];
+}> {
+  if (isAdminUser(actor)) {
+    return { supervisedStoreIds: [], makerStoreIds: [] };
+  }
+  const [supervisedStoreIds, makerStoreIds] = await Promise.all([
+    listSupervisedStoreIds(actor.id),
+    listMakerStoreIds(actor.id),
+  ]);
+  return { supervisedStoreIds, makerStoreIds };
+}
+
 async function resolveItemRequestWorkflowRoles(
   actor: AuthenticatedUser,
 ): Promise<ItemRequestWorkflowRole[]> {
@@ -617,6 +637,14 @@ async function resolveItemRequestWorkflowRoles(
 
 async function actorCanViewFulfilment(actor: AuthenticatedUser): Promise<boolean> {
   if (isAdminUser(actor)) {
+    return true;
+  }
+
+  const makerAssignment = await getActiveMakerAssignment(actor.id);
+  if (
+    makerAssignment &&
+    storeIsEligibleSupplying(makerAssignment.store, makerAssignment.branch)
+  ) {
     return true;
   }
 
@@ -1072,6 +1100,7 @@ function buildQueueActorCondition(
       return eq(itemRequests.branchCheckerApplicationUserId, actor.id);
     case "review":
     case "forwarded":
+    case "ready-to-issue":
       return eq(itemRequests.corporateMakerApplicationUserId, actor.id);
     case "approve":
       return and(
@@ -1126,6 +1155,19 @@ function buildListFilters(
     const actorCondition = buildQueueActorCondition(query.queue, actor);
     if (actorCondition) {
       conditions.push(actorCondition);
+    }
+    if (query.queue === "ready-to-issue") {
+      conditions.push(sql`(
+        select coalesce(sum(${itemRequestLines.requestedQuantity}), 0)
+        from ${itemRequestLines}
+        where ${itemRequestLines.itemRequestId} = ${itemRequests.id}
+      ) > (
+        select coalesce(sum(${itemIssueLines.issueQuantity}), 0)
+        from ${itemIssueLines}
+        inner join ${itemIssues} on ${itemIssues.id} = ${itemIssueLines.itemIssueId}
+        where ${itemIssues.requestId} = ${itemRequests.id}
+          and ${itemIssues.status} = 'POSTED'
+      )`);
     }
   } else if (query.status !== "ALL") {
     conditions.push(eq(itemRequests.status, query.status));
@@ -1222,7 +1264,7 @@ const headerSelect = {
     from ${itemIssueLines}
     inner join ${itemIssues} on ${itemIssues.id} = ${itemIssueLines.itemIssueId}
     where ${itemIssues.requestId} = ${itemRequests.id}
-      and ${itemIssues.status} = 'SUBMITTED'
+      and ${itemIssues.status} = 'POSTED'
   )`,
 };
 
@@ -1392,6 +1434,7 @@ function toListItem(
   row: HeaderJoinedRow,
   actor: AuthenticatedUser,
   supervisedStoreIds: string[],
+  makerStoreIds: string[],
 ): ItemRequestListItem {
   const createdBy = toPersonSummary(row.createdByUser, row.createdByEmployee)!;
   const branchChecker = toPersonSummary(
@@ -1438,10 +1481,10 @@ function toListItem(
           : null,
     }) &&
     supplyingStoreId !== null &&
-    actorMayOperateItemIssue({
+    actorMayCreateItemIssue({
       actor,
       supplyingStoreId,
-      supervisedStoreIds,
+      makerStoreIds,
     });
 
   return {
@@ -1560,10 +1603,24 @@ export async function getItemRequestContext(
       actorCanViewFulfilment(actor),
     ]);
 
+  const [readyToIssue, pendingIssues, returnedIssues] = await Promise.all([
+    listItemRequests(actor, {
+      page: 1,
+      pageSize: 1,
+      status: "ALL",
+      queue: "ready-to-issue",
+    }).then((result) => result.totalItems).catch(() => 0),
+    countItemIssuesForQueue(actor, "pending-verification").catch(() => 0),
+    countItemIssuesForQueue(actor, "returned").catch(() => 0),
+  ]);
+
   return {
     canCreate,
     workflowRoles,
     canViewFulfilment,
+    readyToIssueCount: readyToIssue,
+    pendingIssueVerificationCount: pendingIssues,
+    returnedIssueCount: returnedIssues,
     canSelectRequestFromStore: isAdminUser(actor),
     canSelectRequestToStore: isAdminUser(actor),
     canSelectDestinationStore: isAdminUser(actor),
@@ -1780,9 +1837,7 @@ export async function listItemRequests(
   actor: AuthenticatedUser,
   query: ItemRequestListQuery,
 ): Promise<PaginatedItemRequestResponse> {
-  const supervisedStoreIds = isAdminUser(actor)
-    ? []
-    : await listSupervisedStoreIds(actor.id);
+  const { supervisedStoreIds, makerStoreIds } = await actorStoreIds(actor);
   const visibility = buildVisibilityCondition(actor, supervisedStoreIds);
   const where = buildListFilters(query, actor, visibility);
 
@@ -1867,7 +1922,7 @@ export async function listItemRequests(
 
     const rows = where ? await listBase.where(where) : await listBase;
     const items = (rows as HeaderJoinedRow[]).map((row) =>
-      toListItem(row, actor, supervisedStoreIds),
+      toListItem(row, actor, supervisedStoreIds, makerStoreIds),
     );
 
     return {
@@ -1888,10 +1943,8 @@ export async function getItemRequestById(
 ): Promise<ItemRequest> {
   try {
     const header = await getVisibleHeaderRow(id, actor);
-    const supervisedStoreIds = isAdminUser(actor)
-      ? []
-      : await listSupervisedStoreIds(actor.id);
-    const listItem = toListItem(header, actor, supervisedStoreIds);
+    const { supervisedStoreIds, makerStoreIds } = await actorStoreIds(actor);
+    const listItem = toListItem(header, actor, supervisedStoreIds, makerStoreIds);
 
     const lineRows = await getDb()
       .select({

@@ -25,6 +25,7 @@ export function toNotification(row: NotificationRow): Notification {
     relatedEntityType: row.relatedEntityType,
     relatedEntityId: row.relatedEntityId,
     requestNumber: row.requestNumber,
+    issueNumber: row.issueNumber ?? null,
     actorUserId: row.actorUserId,
     isRead: row.isRead,
     readAt: row.readAt?.toISOString() ?? null,

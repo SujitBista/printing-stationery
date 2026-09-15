@@ -1,10 +1,27 @@
-import { userHasRole, type AuthenticatedUser } from "@printing-stationery/shared";
+import {
+  requestStatusAllowsItemIssue,
+  userHasRole,
+  type AuthenticatedUser,
+  type ItemRequestStatus,
+} from "@printing-stationery/shared";
 
 export const ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE =
-  "Only a checker assigned to the supplying store can create this item issue.";
+  "Only a maker assigned to the supplying store can create this item issue.";
 
 export const ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE =
   "Administrators cannot create or submit item issues.";
+
+export const ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE =
+  "Checkers cannot create or edit item issues.";
+
+export const ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE =
+  "Only a checker assigned to the supplying store can verify this item issue.";
+
+export const ADMIN_ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE =
+  "Administrators cannot verify, return, or reject item issues.";
+
+export const ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE =
+  "You cannot verify an item issue that you created.";
 
 export const INELIGIBLE_SUPPLYING_STORE_MESSAGE =
   "The supplying store is not allowed to transfer or issue stock.";
@@ -36,10 +53,29 @@ export function isEligibleSupplyingStore(params: {
   return params.allowTransfer || isCorporateSupplyingStore(params);
 }
 
-export function actorMayOperateItemIssue(params: {
+export function actorMayCreateItemIssue(params: {
+  actor: Pick<AuthenticatedUser, "roles">;
+  supplyingStoreId: string;
+  makerStoreIds: readonly string[];
+}): boolean {
+  if (userHasRole(params.actor.roles, "ADMIN")) {
+    return false;
+  }
+  if (userHasRole(params.actor.roles, "CHECKER") && !userHasRole(params.actor.roles, "MAKER")) {
+    return false;
+  }
+  if (!userHasRole(params.actor.roles, "MAKER")) {
+    return false;
+  }
+  return params.makerStoreIds.includes(params.supplyingStoreId);
+}
+
+export function actorMayVerifyItemIssue(params: {
   actor: Pick<AuthenticatedUser, "roles">;
   supplyingStoreId: string;
   supervisedStoreIds: readonly string[];
+  createdByApplicationUserId?: string;
+  actorUserId?: string;
 }): boolean {
   if (userHasRole(params.actor.roles, "ADMIN")) {
     return false;
@@ -47,7 +83,27 @@ export function actorMayOperateItemIssue(params: {
   if (!userHasRole(params.actor.roles, "CHECKER")) {
     return false;
   }
+  if (
+    params.createdByApplicationUserId &&
+    params.actorUserId &&
+    params.createdByApplicationUserId === params.actorUserId
+  ) {
+    return false;
+  }
   return params.supervisedStoreIds.includes(params.supplyingStoreId);
+}
+
+/** @deprecated Use actorMayCreateItemIssue. */
+export function actorMayOperateItemIssue(params: {
+  actor: Pick<AuthenticatedUser, "roles">;
+  supplyingStoreId: string;
+  supervisedStoreIds: readonly string[];
+}): boolean {
+  return actorMayCreateItemIssue({
+    actor: params.actor,
+    supplyingStoreId: params.supplyingStoreId,
+    makerStoreIds: params.supervisedStoreIds,
+  });
 }
 
 export function requestAllowsItemIssueCreation(params: {
@@ -61,7 +117,9 @@ export function requestAllowsItemIssueCreation(params: {
     branchType: string;
   } | null;
 }): boolean {
-  if (params.requestStatus !== "APPROVED") {
+  if (
+    !requestStatusAllowsItemIssue(params.requestStatus as ItemRequestStatus)
+  ) {
     return false;
   }
   if (!params.supplyingStoreId || !params.supplyingStore) {

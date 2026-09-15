@@ -231,7 +231,7 @@ export function ItemRequestDetailPage() {
                   href={`/requests/item-requests/${request.id}/issue`}
                   className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
                 >
-                  Create Item Issue
+                  Create Issue
                 </Link>
               ) : null}
               {request.canEdit ? (

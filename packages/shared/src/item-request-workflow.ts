@@ -27,6 +27,7 @@ export const ITEM_REQUEST_ROLE_WORKFLOW_QUEUES = {
   CORPORATE_MAKER: [
     "review",
     "forwarded",
+    "ready-to-issue",
     "returned",
     "rejected",
     "request-list",
@@ -53,6 +54,7 @@ const WORKFLOW_QUEUE_ORDER: readonly ItemRequestQueue[] = [
   "recommended",
   "drafts",
   "submitted",
+  "ready-to-issue",
   "approved",
   "returned",
   "rejected",

@@ -7,7 +7,7 @@ import {
 } from "./permissions.js";
 
 describe("item issue frontend visibility", () => {
-  it("shows Create Item Issue for the supplying-store checker", () => {
+  it("shows Create Issue when the backend allows the maker to create", () => {
     assert.equal(
       shouldShowCreateItemIssueButton({
         requestCanCreateIssue: true,
@@ -18,7 +18,7 @@ describe("item issue frontend visibility", () => {
     );
   });
 
-  it("hides Create Item Issue from makers", () => {
+  it("hides Create Issue from users the backend does not authorize", () => {
     assert.equal(
       shouldShowCreateItemIssueButton({
         requestCanCreateIssue: false,

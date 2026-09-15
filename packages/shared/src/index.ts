@@ -371,6 +371,7 @@ export type {
 export {
   ITEM_REQUEST_STATUSES,
   ITEM_REQUEST_TERMINAL_STATUSES,
+  ITEM_REQUEST_ISSUE_ELIGIBLE_STATUSES,
   ITEM_REQUEST_ACTIONS,
   ITEM_REQUEST_WORKFLOW_ROLES,
   ITEM_REQUEST_QUEUES,
@@ -483,16 +484,25 @@ export type {
 
 export {
   ITEM_ISSUE_STATUSES,
+  ITEM_ISSUE_QUEUES,
+  ITEM_ISSUE_QUEUE_STATUSES,
+  ITEM_ISSUE_ACTIONS,
   itemIssueStatusSchema,
+  itemIssueQueueSchema,
+  itemIssueActionTypeSchema,
   issueQuantitySchema,
   itemIssueLineInputSchema,
   createItemIssueInputSchema,
   updateItemIssueInputSchema,
   submitItemIssueInputSchema,
+  verifyItemIssueInputSchema,
+  returnItemIssueInputSchema,
+  rejectItemIssueInputSchema,
   itemIssueIdSchema,
   itemIssueListQuerySchema,
   itemIssueRequestLineSummarySchema,
   itemIssueLineSchema,
+  itemIssueActionSchema,
   itemIssueRequestSummarySchema,
   itemIssueLineAvailabilitySchema,
   itemIssueEligibilitySchema,
@@ -502,6 +512,8 @@ export {
 } from "./schemas/item-issue.js";
 export type {
   ItemIssueStatus,
+  ItemIssueQueue,
+  ItemIssueActionType,
   ItemIssueId,
   ItemIssueListQuery,
   ItemIssueRequestSummary,
@@ -511,11 +523,27 @@ export type {
   CreateItemIssueInput,
   UpdateItemIssueInput,
   SubmitItemIssueInput,
+  VerifyItemIssueInput,
+  ReturnItemIssueInput,
+  RejectItemIssueInput,
   ItemIssueLine,
+  ItemIssueAction,
   ItemIssueListItem,
   ItemIssue,
   PaginatedItemIssueResponse,
 } from "./types/item-issue.js";
+
+export {
+  ITEM_ISSUE_POSTED_STATUS,
+  ITEM_ISSUE_OPEN_STATUSES,
+  ITEM_ISSUE_EDITABLE_STATUSES,
+  ITEM_ISSUE_ROLE_QUEUES,
+  getItemIssueNavQueues,
+  itemIssueStatusIsPosted,
+  itemIssueStatusIsOpen,
+  itemIssueStatusIsEditable,
+  requestStatusAllowsItemIssue,
+} from "./item-issue-workflow.js";
 
 export {
   OPENING_STOCK_SOURCE_TYPES,

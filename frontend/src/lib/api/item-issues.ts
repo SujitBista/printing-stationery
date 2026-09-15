@@ -6,8 +6,11 @@ import {
   itemIssueSchema,
   itemRequestIdSchema,
   paginatedItemIssueResponseSchema,
+  rejectItemIssueInputSchema,
+  returnItemIssueInputSchema,
   submitItemIssueInputSchema,
   updateItemIssueInputSchema,
+  verifyItemIssueInputSchema,
   type CreateItemIssueInput,
   type ItemIssue,
   type ItemIssueEligibility,
@@ -24,6 +27,9 @@ function buildListQueryString(query: ItemIssueListQuery): string {
   params.set("status", query.status);
   if (query.search) {
     params.set("search", query.search);
+  }
+  if (query.queue) {
+    params.set("queue", query.queue);
   }
   return params.toString();
 }
@@ -215,5 +221,104 @@ export async function submitItemIssue(
       return { success: true, data: parsed.data };
     },
     "Failed to submit item issue",
+  );
+}
+
+function postIssueAction(
+  id: string,
+  path: "verify" | "return" | "reject",
+  body: unknown,
+  invalidMessage: string,
+  failedMessage: string,
+): Promise<ApiResult<ItemIssue>> {
+  return requestJson(
+    `/api/item-issues/${id}/${path}`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    (json) => {
+      const parsed = itemIssueSchema.safeParse(json);
+      if (!parsed.success) {
+        return { success: false, error: invalidMessage };
+      }
+      return { success: true, data: parsed.data };
+    },
+    failedMessage,
+  );
+}
+
+export async function verifyItemIssue(
+  id: string,
+  input: { expectedVersion: number; remarks?: string | null },
+): Promise<ApiResult<ItemIssue>> {
+  const parsedId = itemIssueIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid item issue id", status: 400 };
+  }
+  const parsedInput = verifyItemIssueInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    return {
+      ok: false,
+      error: parsedInput.error.issues[0]?.message ?? "Invalid verify request",
+      status: 400,
+    };
+  }
+  return postIssueAction(
+    parsedId.data,
+    "verify",
+    parsedInput.data,
+    "Verify item issue response did not match the expected schema",
+    "Failed to verify item issue",
+  );
+}
+
+export async function returnItemIssue(
+  id: string,
+  input: { expectedVersion: number; remarks: string },
+): Promise<ApiResult<ItemIssue>> {
+  const parsedId = itemIssueIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid item issue id", status: 400 };
+  }
+  const parsedInput = returnItemIssueInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    return {
+      ok: false,
+      error: parsedInput.error.issues[0]?.message ?? "Invalid return request",
+      status: 400,
+    };
+  }
+  return postIssueAction(
+    parsedId.data,
+    "return",
+    parsedInput.data,
+    "Return item issue response did not match the expected schema",
+    "Failed to return item issue",
+  );
+}
+
+export async function rejectItemIssue(
+  id: string,
+  input: { expectedVersion: number; remarks: string },
+): Promise<ApiResult<ItemIssue>> {
+  const parsedId = itemIssueIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid item issue id", status: 400 };
+  }
+  const parsedInput = rejectItemIssueInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    return {
+      ok: false,
+      error: parsedInput.error.issues[0]?.message ?? "Invalid reject request",
+      status: 400,
+    };
+  }
+  return postIssueAction(
+    parsedId.data,
+    "reject",
+    parsedInput.data,
+    "Reject item issue response did not match the expected schema",
+    "Failed to reject item issue",
   );
 }

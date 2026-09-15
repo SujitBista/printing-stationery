@@ -8,6 +8,7 @@ import {
   getItemRequestSidebarQueues,
   ITEM_REQUEST_SIDEBAR_QUEUES,
 } from "@/lib/item-requests/queues";
+import { getItemIssueSidebarQueues } from "@/lib/item-issues/queues";
 import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
 
 type NavItem = {
@@ -18,6 +19,7 @@ type NavItem = {
   adminSetup?: boolean;
   children?: NavItem[];
   group?: "workflow" | "fulfilment";
+  badge?: number;
 };
 
 type NavSection = {
@@ -39,6 +41,10 @@ const ALL_ITEM_REQUEST_QUEUE_HREFS: readonly string[] = [
   "/requests/item-requests/rejected",
   "/requests/item-requests/issued",
   "/requests/item-requests/partial-pending",
+  "/requests/item-requests/ready-to-issue",
+  "/requests/item-issues/pending",
+  "/requests/item-issues/returned",
+  "/requests/item-issues/posted",
 ];
 
 const NAV_SECTIONS: NavSection[] = [
@@ -165,13 +171,18 @@ function NavLink({
       href={item.href}
       onClick={onClose}
       aria-current={isActive ? "page" : undefined}
-      className={`rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+      className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
         isActive
           ? "bg-accent-soft text-accent"
           : "text-ink-muted hover:bg-paper hover:text-accent"
       }`}
     >
-      {item.label}
+      <span>{item.label}</span>
+      {item.badge && item.badge > 0 ? (
+        <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-accent px-1.5 py-0.5 text-[0.65rem] font-semibold text-white">
+          {item.badge > 99 ? "99+" : item.badge}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -266,15 +277,35 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     canAccessOpeningStock,
     canAccessPurchases,
   } = useAuth();
-  const { workflowRoles, canViewFulfilment } = useItemRequestNavContext();
-  const requestChildren: NavItem[] = getItemRequestSidebarQueues({
+  const {
     workflowRoles,
     canViewFulfilment,
-  }).map((queue) => ({
-    label: queue.sidebarLabel,
-    href: queue.href,
-    group: queue.navGroup,
-  }));
+    readyToIssueCount,
+    pendingIssueVerificationCount,
+    returnedIssueCount,
+  } = useItemRequestNavContext();
+  const requestChildren: NavItem[] = [
+    ...getItemRequestSidebarQueues({
+      workflowRoles,
+      canViewFulfilment,
+    }).map((queue) => ({
+      label: queue.sidebarLabel,
+      href: queue.href,
+      group: queue.navGroup,
+      badge: queue.key === "ready-to-issue" ? readyToIssueCount : undefined,
+    })),
+    ...getItemIssueSidebarQueues(workflowRoles).map((queue) => ({
+      label: queue.sidebarLabel,
+      href: queue.href,
+      group: queue.navGroup as "fulfilment",
+      badge:
+        queue.key === "pending-verification"
+          ? pendingIssueVerificationCount
+          : queue.key === "returned"
+            ? returnedIssueCount
+            : undefined,
+    })),
+  ];
 
   return (
     <>

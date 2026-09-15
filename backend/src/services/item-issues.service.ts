@@ -15,15 +15,26 @@ import type {
   AuthenticatedUser,
   CreateItemIssueInput,
   ItemIssue,
+  ItemIssueAction,
   ItemIssueEligibility,
   ItemIssueLineAvailability,
   ItemIssueListItem,
   ItemIssueListQuery,
   ItemIssueRequestSummary,
+  ItemRequestWorkflowRole,
   PaginatedItemIssueResponse,
+  RejectItemIssueInput,
+  ReturnItemIssueInput,
   UpdateItemIssueInput,
+  VerifyItemIssueInput,
 } from "@printing-stationery/shared";
-import { multiplyDecimalStrings, userHasRole } from "@printing-stationery/shared";
+import {
+  ITEM_ISSUE_QUEUE_STATUSES,
+  itemIssueStatusIsEditable,
+  multiplyDecimalStrings,
+  requestStatusAllowsItemIssue,
+  userHasRole,
+} from "@printing-stationery/shared";
 import { AppError } from "../utils/errors.js";
 import {
   isItemIssueNumberUniqueViolation,
@@ -31,15 +42,22 @@ import {
 } from "../utils/db-errors.js";
 import {
   ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+  ADMIN_ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE,
   INELIGIBLE_SUPPLYING_STORE_MESSAGE,
+  ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE,
   ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE,
   NON_CORPORATE_SUPPLYING_STORE_MESSAGE,
-  actorMayOperateItemIssue,
+  actorMayCreateItemIssue,
+  actorMayVerifyItemIssue,
   isEligibleSupplyingStore,
 } from "./item-issue-authorization.js";
+import { insertItemIssueWorkflowNotifications } from "./item-issue-notifications.js";
 import { toRequestedByEmployeeSummary } from "./item-request-requested-by.js";
 import {
   getOperationalAvailableQuantities,
+  lockStoreStockForUpdate,
   operationalStockKey,
 } from "./opening-stocks.service.js";
 import { getDb } from "../db/client.js";
@@ -51,11 +69,13 @@ import {
 import { branches, type BranchRow } from "../db/schema/branches.js";
 import { employees, type EmployeeRow } from "../db/schema/employees.js";
 import {
+  itemIssueActions,
   itemIssueLines,
   itemIssues,
   type ItemIssueRow,
 } from "../db/schema/item-issues.js";
 import {
+  itemRequestActions,
   itemRequestLines,
   itemRequests,
   type ItemRequestRow,
@@ -80,6 +100,8 @@ const submittedByEmployees = alias(
   employees,
   "issue_submitted_by_employees",
 );
+const verifiedByUsers = alias(applicationUsers, "issue_verified_by_users");
+const verifiedByEmployees = alias(employees, "issue_verified_by_employees");
 const requestStores = alias(stores, "request_stores");
 const requestBranches = alias(branches, "request_branches");
 const corporateStores = alias(stores, "request_corporate_stores");
@@ -122,6 +144,10 @@ type RequestLineRow = {
 
 function isAdminUser(actor: AuthenticatedUser): boolean {
   return userHasRole(actor.roles, "ADMIN");
+}
+
+function isMakerUser(actor: AuthenticatedUser): boolean {
+  return userHasRole(actor.roles, "MAKER");
 }
 
 function isCheckerUser(actor: AuthenticatedUser): boolean {
@@ -206,6 +232,33 @@ function toPersonSummary(
   };
 }
 
+async function getActiveMakerAssignment(
+  applicationUserId: string,
+  storeId: string,
+): Promise<StoreAssignmentContext | undefined> {
+  const rows = await getDb()
+    .select({
+      assignment: storeUsers,
+      store: stores,
+      branch: branches,
+    })
+    .from(storeUsers)
+    .innerJoin(stores, eq(storeUsers.storeId, stores.id))
+    .innerJoin(branches, eq(stores.branchId, branches.id))
+    .where(
+      and(
+        eq(storeUsers.makerApplicationUserId, applicationUserId),
+        eq(storeUsers.storeId, storeId),
+        eq(storeUsers.isActive, true),
+        eq(stores.isActive, true),
+        eq(branches.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  return rows[0];
+}
+
 async function getActiveCheckerAssignment(
   applicationUserId: string,
   storeId: string,
@@ -231,6 +284,24 @@ async function getActiveCheckerAssignment(
     .limit(1);
 
   return rows[0];
+}
+
+async function listMakerStoreIds(applicationUserId: string): Promise<string[]> {
+  const rows = await getDb()
+    .select({ storeId: storeUsers.storeId })
+    .from(storeUsers)
+    .innerJoin(stores, eq(storeUsers.storeId, stores.id))
+    .innerJoin(branches, eq(stores.branchId, branches.id))
+    .where(
+      and(
+        eq(storeUsers.makerApplicationUserId, applicationUserId),
+        eq(storeUsers.isActive, true),
+        eq(stores.isActive, true),
+        eq(branches.isActive, true),
+      ),
+    );
+
+  return rows.map((row) => row.storeId);
 }
 
 async function listSupervisedStoreIds(applicationUserId: string): Promise<string[]> {
@@ -292,24 +363,66 @@ async function assertActiveParticipant(
   };
 }
 
-async function requireSupplyingStoreChecker(
+async function requireSupplyingStoreMaker(
   actor: AuthenticatedUser,
   supplyingStoreId: string,
 ): Promise<StoreAssignmentContext> {
   if (isAdminUser(actor)) {
     throw new AppError(ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
-  if (!isCheckerUser(actor)) {
+  if (isCheckerUser(actor) && !isMakerUser(actor)) {
+    throw new AppError(ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE, 403);
+  }
+  if (!isMakerUser(actor)) {
     throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
 
-  await assertActiveParticipant(actor.id, "Checker");
-  const assignment = await getActiveCheckerAssignment(actor.id, supplyingStoreId);
+  await assertActiveParticipant(actor.id, "Maker");
+  const assignment = await getActiveMakerAssignment(actor.id, supplyingStoreId);
   if (!assignment) {
     throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
 
   return assignment;
+}
+
+async function requireSupplyingStoreVerifier(
+  actor: AuthenticatedUser,
+  supplyingStoreId: string,
+  createdByApplicationUserId: string,
+): Promise<StoreAssignmentContext> {
+  if (isAdminUser(actor)) {
+    throw new AppError(ADMIN_ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE, 403);
+  }
+  if (!isCheckerUser(actor)) {
+    throw new AppError(ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE, 403);
+  }
+  if (actor.id === createdByApplicationUserId) {
+    throw new AppError(ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE, 403);
+  }
+
+  await assertActiveParticipant(actor.id, "Checker");
+  const assignment = await getActiveCheckerAssignment(actor.id, supplyingStoreId);
+  if (!assignment) {
+    throw new AppError(ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE, 403);
+  }
+
+  return assignment;
+}
+
+function issueActorWorkflowRole(
+  actor: AuthenticatedUser,
+  kind: "MAKER" | "CHECKER",
+  branchType: string,
+): ItemRequestWorkflowRole {
+  if (isAdminUser(actor)) {
+    return "ADMIN";
+  }
+  const corporate = branchType === "HEAD_OFFICE";
+  if (kind === "MAKER") {
+    return corporate ? "CORPORATE_MAKER" : "BRANCH_MAKER";
+  }
+  return corporate ? "CORPORATE_CHECKER" : "BRANCH_CHECKER";
 }
 
 async function loadRequestLineRows(requestId: string): Promise<RequestLineRow[]> {
@@ -327,7 +440,7 @@ async function loadRequestLineRows(requestId: string): Promise<RequestLineRow[]>
     .orderBy(asc(items.itemName), asc(items.itemCode), asc(itemRequestLines.id));
 }
 
-async function loadApprovedRequestOrThrow(requestId: string): Promise<{
+async function loadIssueSourceRequest(requestId: string): Promise<{
   request: ItemRequestRow;
   requestingStore: StoreRow;
   requestingBranch: BranchRow;
@@ -378,12 +491,6 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
   if (!row) {
     throw new AppError("Item request not found", 404);
   }
-  if (row.request.status !== "APPROVED") {
-    throw new AppError(
-      "An item issue can be created only from an approved request.",
-      409,
-    );
-  }
   if (!row.requestingStore.isActive) {
     throw new AppError("The requesting store is inactive.", 409);
   }
@@ -404,13 +511,22 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
   return row;
 }
 
-async function loadSubmittedIssueTotalsByRequestLine(
+function assertRequestCanCreateIssue(status: string): void {
+  if (!requestStatusAllowsItemIssue(status as "APPROVED" | "PARTIALLY_ISSUED")) {
+    throw new AppError(
+      "An item issue can be created only from an approved request.",
+      409,
+    );
+  }
+}
+
+async function loadPostedIssueTotalsByRequestLine(
   requestId: string,
   excludeIssueId?: string,
 ): Promise<Map<string, bigint>> {
   const conditions: SQL[] = [
     eq(itemIssues.requestId, requestId),
-    eq(itemIssues.status, "SUBMITTED"),
+    eq(itemIssues.status, "POSTED"),
   ];
   if (excludeIssueId) {
     conditions.push(sql`${itemIssues.id} <> ${excludeIssueId}`);
@@ -438,7 +554,7 @@ async function buildAvailability(
 ): Promise<ItemIssueLineAvailability[]> {
   const [requestLineRows, submittedTotals] = await Promise.all([
     loadRequestLineRows(requestId),
-    loadSubmittedIssueTotalsByRequestLine(requestId, excludeIssueId),
+    loadPostedIssueTotalsByRequestLine(requestId, excludeIssueId),
   ]);
 
   const itemIds = [...new Set(requestLineRows.map((row) => row.item.id))];
@@ -542,6 +658,10 @@ export function validateIssueLinesAgainstAvailability(params: {
 async function createDraftWithRetry(
   values: Omit<typeof itemIssues.$inferInsert, "issueNumber">,
   lines: Array<{ requestLineId: string; itemId: string; issueQuantity: string }>,
+  action: {
+    actorUserId: string;
+    actorWorkflowRole: ItemRequestWorkflowRole;
+  },
 ): Promise<string> {
   let lastError: unknown;
 
@@ -571,6 +691,16 @@ async function createDraftWithRetry(
           })),
         );
 
+        await tx.insert(itemIssueActions).values({
+          itemIssueId: created.id,
+          action: "CREATE",
+          fromStatus: null,
+          toStatus: "DRAFT",
+          actorApplicationUserId: action.actorUserId,
+          actorWorkflowRole: action.actorWorkflowRole,
+          remarks: values.remarks ?? null,
+        });
+
         return created.id;
       });
 
@@ -592,12 +722,50 @@ async function createDraftWithRetry(
   });
 }
 
-async function loadIssueVisibilityIds(actor: AuthenticatedUser): Promise<string[]> {
-  if (isAdminUser(actor) || !isCheckerUser(actor)) {
-    return [];
+type IssueAccessContext = {
+  makerStoreIds: string[];
+  supervisedStoreIds: string[];
+  visibleStoreIds: string[];
+};
+
+async function loadIssueAccessContext(
+  actor: AuthenticatedUser,
+): Promise<IssueAccessContext> {
+  if (isAdminUser(actor)) {
+    return { makerStoreIds: [], supervisedStoreIds: [], visibleStoreIds: [] };
   }
 
-  return listSupervisedStoreIds(actor.id);
+  const [makerStoreIds, supervisedStoreIds] = await Promise.all([
+    listMakerStoreIds(actor.id),
+    listSupervisedStoreIds(actor.id),
+  ]);
+  const visibleStoreIds = [...new Set([...makerStoreIds, ...supervisedStoreIds])];
+  return { makerStoreIds, supervisedStoreIds, visibleStoreIds };
+}
+
+function issueVisibilityCondition(
+  actor: AuthenticatedUser,
+  visibleStoreIds: string[],
+): SQL | undefined {
+  if (isAdminUser(actor)) {
+    return undefined;
+  }
+
+  const conditions: SQL[] = [];
+  if (visibleStoreIds.length > 0) {
+    conditions.push(inArray(itemIssues.fromStoreId, visibleStoreIds));
+    conditions.push(
+      and(
+        eq(itemIssues.status, "POSTED"),
+        inArray(itemIssues.toStoreId, visibleStoreIds),
+      )!,
+    );
+  }
+  conditions.push(eq(itemRequests.createdByApplicationUserId, actor.id));
+  conditions.push(eq(itemRequests.branchCheckerApplicationUserId, actor.id));
+  conditions.push(eq(itemRequests.corporateMakerApplicationUserId, actor.id));
+  conditions.push(eq(itemRequests.corporateCheckerApplicationUserId, actor.id));
+  return or(...conditions);
 }
 
 function issueListWhere(
@@ -606,18 +774,16 @@ function issueListWhere(
   query: ItemIssueListQuery,
 ): SQL | undefined {
   const conditions: SQL[] = [];
-
-  if (!isAdminUser(actor)) {
-    if (visibleStoreIds.length === 0) {
-      conditions.push(sql`1 = 0`);
-    } else {
-      conditions.push(
-        inArray(itemIssues.fromStoreId, visibleStoreIds),
-      );
-    }
+  const visibility = issueVisibilityCondition(actor, visibleStoreIds);
+  if (visibility) {
+    conditions.push(visibility);
   }
 
-  if (query.status !== "ALL") {
+  if (query.queue) {
+    conditions.push(
+      inArray(itemIssues.status, [...ITEM_ISSUE_QUEUE_STATUSES[query.queue]]),
+    );
+  } else if (query.status !== "ALL") {
     conditions.push(eq(itemIssues.status, query.status));
   }
 
@@ -652,6 +818,8 @@ const issueHeaderSelect = {
   createdByEmployee: createdByEmployees,
   submittedByUser: submittedByUsers,
   submittedByEmployee: submittedByEmployees,
+  verifiedByUser: verifiedByUsers,
+  verifiedByEmployee: verifiedByEmployees,
 };
 
 function issueHeaderBase() {
@@ -678,6 +846,14 @@ function issueHeaderBase() {
     .leftJoin(
       submittedByEmployees,
       eq(submittedByUsers.employeeId, submittedByEmployees.id),
+    )
+    .leftJoin(
+      verifiedByUsers,
+      eq(itemIssues.verifiedByApplicationUserId, verifiedByUsers.id),
+    )
+    .leftJoin(
+      verifiedByEmployees,
+      eq(verifiedByUsers.employeeId, verifiedByEmployees.id),
     );
 }
 
@@ -692,22 +868,32 @@ type IssueHeaderRow = {
   createdByEmployee: EmployeeRow | null;
   submittedByUser: ApplicationUserRow | null;
   submittedByEmployee: EmployeeRow | null;
+  verifiedByUser: ApplicationUserRow | null;
+  verifiedByEmployee: EmployeeRow | null;
 };
 
 function toIssueListItem(
   row: IssueHeaderRow,
   actor: AuthenticatedUser,
-  supervisedStoreIds: string[],
+  access: IssueAccessContext,
 ): ItemIssueListItem {
   const createdBy = toPersonSummary(row.createdByUser, row.createdByEmployee)!;
   const submittedBy = toPersonSummary(row.submittedByUser, row.submittedByEmployee);
-  const canEdit =
-    row.issue.status === "DRAFT" &&
-    actorMayOperateItemIssue({
-      actor,
-      supplyingStoreId: row.issue.fromStoreId,
-      supervisedStoreIds,
-    });
+  const verifiedBy = toPersonSummary(row.verifiedByUser, row.verifiedByEmployee);
+  const canCreate = actorMayCreateItemIssue({
+    actor,
+    supplyingStoreId: row.issue.fromStoreId,
+    makerStoreIds: access.makerStoreIds,
+  });
+  const canVerifyRole = actorMayVerifyItemIssue({
+    actor,
+    supplyingStoreId: row.issue.fromStoreId,
+    supervisedStoreIds: access.supervisedStoreIds,
+    createdByApplicationUserId: row.issue.createdByApplicationUserId,
+    actorUserId: actor.id,
+  });
+  const canEdit = itemIssueStatusIsEditable(row.issue.status) && canCreate;
+  const pendingVerification = row.issue.status === "PENDING_VERIFICATION";
 
   return {
     id: row.issue.id,
@@ -719,13 +905,21 @@ function toIssueListItem(
     remarks: row.issue.remarks ?? null,
     createdAt: row.issue.createdAt.toISOString(),
     updatedAt: row.issue.updatedAt.toISOString(),
+    issueDate: row.issue.issueDate.toISOString(),
     submittedAt: row.issue.submittedAt?.toISOString() ?? null,
+    verifiedAt: row.issue.verifiedAt?.toISOString() ?? null,
+    returnedAt: row.issue.returnedAt?.toISOString() ?? null,
+    rejectedAt: row.issue.rejectedAt?.toISOString() ?? null,
     fromStore: toStoreSummary(row.fromStore, row.fromBranch),
     toStore: toStoreSummary(row.toStore, row.toBranch),
     createdBy,
     submittedBy,
+    verifiedBy,
     canEdit,
     canSubmit: canEdit,
+    canVerify: pendingVerification && canVerifyRole,
+    canReturn: pendingVerification && canVerifyRole,
+    canReject: pendingVerification && canVerifyRole,
   };
 }
 
@@ -763,41 +957,120 @@ function toIssueRequestLines(
   });
 }
 
+async function loadRequestActionRows(requestId: string) {
+  const actionActorUsers = alias(applicationUsers, "issue_request_action_users");
+  const actionActorEmployees = alias(employees, "issue_request_action_employees");
+  const rows = await getDb()
+    .select({
+      action: itemRequestActions,
+      actorUser: actionActorUsers,
+      actorEmployee: actionActorEmployees,
+    })
+    .from(itemRequestActions)
+    .innerJoin(
+      actionActorUsers,
+      eq(itemRequestActions.actorApplicationUserId, actionActorUsers.id),
+    )
+    .leftJoin(
+      actionActorEmployees,
+      eq(actionActorUsers.employeeId, actionActorEmployees.id),
+    )
+    .where(eq(itemRequestActions.itemRequestId, requestId))
+    .orderBy(asc(itemRequestActions.createdAt), asc(itemRequestActions.id));
+
+  return rows.map((row) => ({
+    id: row.action.id,
+    action: row.action.action,
+    fromStatus: row.action.fromStatus,
+    toStatus: row.action.toStatus,
+    actorWorkflowRole: row.action.actorWorkflowRole,
+    remarks: row.action.remarks ?? null,
+    createdAt: row.action.createdAt.toISOString(),
+    actor: toPersonSummary(row.actorUser, row.actorEmployee)!,
+  }));
+}
+
+async function loadIssueActionRows(issueId: string): Promise<ItemIssueAction[]> {
+  const actionActorUsers = alias(applicationUsers, "issue_action_users");
+  const actionActorEmployees = alias(employees, "issue_action_employees");
+  const rows = await getDb()
+    .select({
+      action: itemIssueActions,
+      actorUser: actionActorUsers,
+      actorEmployee: actionActorEmployees,
+    })
+    .from(itemIssueActions)
+    .innerJoin(
+      actionActorUsers,
+      eq(itemIssueActions.actorApplicationUserId, actionActorUsers.id),
+    )
+    .leftJoin(
+      actionActorEmployees,
+      eq(actionActorUsers.employeeId, actionActorEmployees.id),
+    )
+    .where(eq(itemIssueActions.itemIssueId, issueId))
+    .orderBy(asc(itemIssueActions.createdAt), asc(itemIssueActions.id));
+
+  return rows.map((row) => ({
+    id: row.action.id,
+    action: row.action.action,
+    fromStatus: row.action.fromStatus ?? null,
+    toStatus: row.action.toStatus,
+    actorWorkflowRole: row.action.actorWorkflowRole,
+    remarks: row.action.remarks ?? null,
+    stockLedgerReferenceId: row.action.stockLedgerReferenceId ?? null,
+    createdAt: row.action.createdAt.toISOString(),
+    actor: toPersonSummary(row.actorUser, row.actorEmployee)!,
+  }));
+}
+
 export async function getItemIssueEligibility(
   requestId: string,
   actor: AuthenticatedUser,
 ): Promise<ItemIssueEligibility> {
-  const request = await loadApprovedRequestOrThrow(requestId);
-  const assignment = await requireSupplyingStoreChecker(
-    actor,
-    request.corporateStore.id,
-  );
+  const request = await loadIssueSourceRequest(requestId);
+  await requireSupplyingStoreMaker(actor, request.corporateStore.id);
   const availability = await buildAvailability(
     requestId,
     request.corporateStore.id,
   );
 
-  const draftRows = await getDb()
-    .select({ id: itemIssues.id })
+  const openRows = await getDb()
+    .select({ id: itemIssues.id, status: itemIssues.status })
     .from(itemIssues)
     .where(
       and(
         eq(itemIssues.requestId, requestId),
-        eq(itemIssues.fromStoreId, assignment.store.id),
-        eq(itemIssues.status, "DRAFT"),
+        inArray(itemIssues.status, ["DRAFT", "PENDING_VERIFICATION", "RETURNED"]),
       ),
     )
     .orderBy(desc(itemIssues.updatedAt), desc(itemIssues.createdAt), desc(itemIssues.id))
     .limit(1);
 
-  const canCreate = canCreateIssueFromAvailability(availability);
+  const openIssue = openRows[0];
+  const remainingOk = canCreateIssueFromAvailability(availability);
+  const statusOk = requestStatusAllowsItemIssue(request.request.status);
+  let canCreate = statusOk && remainingOk && !openIssue;
+  let reason: string | null = null;
+  if (!statusOk) {
+    reason = "An item issue can be created only from an approved request.";
+    canCreate = false;
+  } else if (!remainingOk) {
+    reason = "This request has no remaining quantity available for a new issue.";
+    canCreate = false;
+  } else if (openIssue?.status === "PENDING_VERIFICATION") {
+    reason = "An item issue for this request is already pending verification.";
+  } else if (openIssue) {
+    reason = null;
+  }
 
   return {
     canCreate,
-    reason: canCreate
-      ? null
-      : "This request has no remaining quantity available for a new issue.",
-    draftIssueId: draftRows[0]?.id ?? null,
+    reason,
+    draftIssueId:
+      openIssue && openIssue.status !== "PENDING_VERIFICATION"
+        ? openIssue.id
+        : null,
     request: {
       id: request.request.id,
       requestNumber: request.request.requestNumber,
@@ -830,6 +1103,7 @@ export async function getItemIssueEligibility(
         request.requestedByBranch,
       ),
       lines: toIssueRequestLines(await loadRequestLineRows(requestId), availability),
+      actions: [],
     },
     lines: availability,
   };
@@ -875,6 +1149,7 @@ export async function createItemIssueFromRequest(
       status: "DRAFT",
       remarks: input.remarks,
       createdByApplicationUserId: actor.id,
+      issueDate: new Date(),
       version: 1,
     },
     input.lines.map((line) => {
@@ -888,6 +1163,14 @@ export async function createItemIssueFromRequest(
         issueQuantity: line.issueQuantity,
       };
     }),
+    {
+      actorUserId: actor.id,
+      actorWorkflowRole: issueActorWorkflowRole(
+        actor,
+        "MAKER",
+        eligibility.request.corporateStore?.branch.branchType ?? "BRANCH",
+      ),
+    },
   );
 
   return getItemIssueById(createdId, actor);
@@ -897,8 +1180,8 @@ export async function listItemIssues(
   actor: AuthenticatedUser,
   query: ItemIssueListQuery,
 ): Promise<PaginatedItemIssueResponse> {
-  const visibleStoreIds = await loadIssueVisibilityIds(actor);
-  const where = issueListWhere(actor, visibleStoreIds, query);
+  const access = await loadIssueAccessContext(actor);
+  const where = issueListWhere(actor, access.visibleStoreIds, query);
 
   try {
     const countBase = getDb()
@@ -926,7 +1209,7 @@ export async function listItemIssues(
     const rows = where ? await listBase.where(where) : await listBase;
 
     return {
-      items: rows.map((row) => toIssueListItem(row, actor, visibleStoreIds)),
+      items: rows.map((row) => toIssueListItem(row, actor, access)),
       page: query.page,
       pageSize: query.pageSize,
       totalItems,
@@ -937,18 +1220,25 @@ export async function listItemIssues(
   }
 }
 
+export async function countItemIssuesForQueue(
+  actor: AuthenticatedUser,
+  queue: NonNullable<ItemIssueListQuery["queue"]>,
+): Promise<number> {
+  const result = await listItemIssues(actor, {
+    page: 1,
+    pageSize: 1,
+    status: "ALL",
+    queue,
+  });
+  return result.totalItems;
+}
+
 export async function getItemIssueById(
   issueId: string,
   actor: AuthenticatedUser,
 ): Promise<ItemIssue> {
-  const visibleStoreIds = await loadIssueVisibilityIds(actor);
-
-  const visibility = isAdminUser(actor)
-    ? undefined
-    : visibleStoreIds.length > 0
-      ? inArray(itemIssues.fromStoreId, visibleStoreIds)
-      : sql`1 = 0`;
-
+  const access = await loadIssueAccessContext(actor);
+  const visibility = issueVisibilityCondition(actor, access.visibleStoreIds);
   const where = visibility
     ? and(eq(itemIssues.id, issueId), visibility)
     : eq(itemIssues.id, issueId);
@@ -960,8 +1250,8 @@ export async function getItemIssueById(
       throw new AppError("Item issue not found", 404);
     }
 
-    const requestHeader = await loadApprovedRequestOrThrow(header.issue.requestId);
-    const [lineRows, availability] = await Promise.all([
+    const requestHeader = await loadIssueSourceRequest(header.issue.requestId);
+    const [lineRows, availability, requestActions, issueActions] = await Promise.all([
       getDb()
         .select({
           line: itemIssueLines,
@@ -981,10 +1271,12 @@ export async function getItemIssueById(
         header.issue.fromStoreId,
         header.issue.id,
       ),
+      loadRequestActionRows(header.issue.requestId),
+      loadIssueActionRows(issueId),
     ]);
 
     return {
-      ...toIssueListItem(header, actor, visibleStoreIds),
+      ...toIssueListItem(header, actor, access),
       request: {
         id: requestHeader.request.id,
         requestNumber: requestHeader.request.requestNumber,
@@ -1020,6 +1312,7 @@ export async function getItemIssueById(
           await loadRequestLineRows(header.issue.requestId),
           availability,
         ),
+        actions: requestActions,
       },
       lines: lineRows.map((row) => ({
         id: row.line.id,
@@ -1046,6 +1339,7 @@ export async function getItemIssueById(
         },
       })),
       availability,
+      actions: issueActions,
     };
   } catch (error) {
     if (error instanceof AppError) {
@@ -1065,7 +1359,7 @@ export async function updateItemIssue(
   if (!supplyingStoreId || existing.fromStore.id !== supplyingStoreId) {
     throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
   }
-  await requireSupplyingStoreChecker(actor, supplyingStoreId);
+  await requireSupplyingStoreMaker(actor, supplyingStoreId);
   if (!existing.canEdit) {
     throw new AppError("This issue cannot be edited.", 403);
   }
@@ -1097,7 +1391,7 @@ export async function updateItemIssue(
           and(
             eq(itemIssues.id, issueId),
             eq(itemIssues.version, input.expectedVersion),
-            eq(itemIssues.status, "DRAFT"),
+            inArray(itemIssues.status, ["DRAFT", "RETURNED"]),
           ),
         )
         .returning({ id: itemIssues.id });
@@ -1128,6 +1422,20 @@ export async function updateItemIssue(
           }),
         );
       }
+
+      await tx.insert(itemIssueActions).values({
+        itemIssueId: issueId,
+        action: "UPDATE",
+        fromStatus: existing.status,
+        toStatus: existing.status,
+        actorApplicationUserId: actor.id,
+        actorWorkflowRole: issueActorWorkflowRole(
+          actor,
+          "MAKER",
+          existing.fromStore.branch.branchType,
+        ),
+        remarks: input.remarks ?? existing.remarks,
+      });
     });
 
     return getItemIssueById(issueId, actor);
@@ -1145,6 +1453,7 @@ export async function submitItemIssue(
   input: { expectedVersion: number },
 ): Promise<ItemIssue> {
   try {
+    const actorRecord = await assertActiveParticipant(actor.id, "Maker");
     await getDb().transaction(async (tx) => {
       const issueRows = await tx
         .select()
@@ -1155,8 +1464,17 @@ export async function submitItemIssue(
       if (!issue) {
         throw new AppError("Item issue not found", 404);
       }
-      if (issue.status === "SUBMITTED") {
+      if (issue.status === "PENDING_VERIFICATION") {
         throw new AppError("This issue has already been submitted.", 409);
+      }
+      if (issue.status === "POSTED") {
+        throw new AppError("This issue has already been posted.", 409);
+      }
+      if (issue.status !== "DRAFT" && issue.status !== "RETURNED") {
+        throw new AppError(
+          "This item issue cannot be submitted from its current status.",
+          409,
+        );
       }
       if (issue.version !== input.expectedVersion) {
         throw new AppError(STALE_ISSUE_MESSAGE, 409);
@@ -1167,10 +1485,12 @@ export async function submitItemIssue(
           request: itemRequests,
           requestingStore: requestStores,
           corporateStore: corporateStores,
+          corporateBranch: corporateBranches,
         })
         .from(itemRequests)
         .innerJoin(requestStores, eq(itemRequests.requestingStoreId, requestStores.id))
         .innerJoin(corporateStores, eq(itemRequests.corporateStoreId, corporateStores.id))
+        .innerJoin(corporateBranches, eq(corporateStores.branchId, corporateBranches.id))
         .where(eq(itemRequests.id, issue.requestId))
         .for("update");
 
@@ -1178,12 +1498,7 @@ export async function submitItemIssue(
       if (!requestRow) {
         throw new AppError("Item request not found", 404);
       }
-      if (requestRow.request.status !== "APPROVED") {
-        throw new AppError(
-          "An item issue can be submitted only while the request is approved.",
-          409,
-        );
-      }
+      assertRequestCanCreateIssue(requestRow.request.status);
       if (!requestRow.requestingStore.isActive) {
         throw new AppError("The requesting store is inactive.", 409);
       }
@@ -1191,7 +1506,7 @@ export async function submitItemIssue(
         throw new AppError("The processing store is inactive.", 409);
       }
 
-      await requireSupplyingStoreChecker(actor, requestRow.corporateStore.id);
+      await requireSupplyingStoreMaker(actor, requestRow.corporateStore.id);
       if (issue.fromStoreId !== requestRow.corporateStore.id) {
         throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
       }
@@ -1214,6 +1529,165 @@ export async function submitItemIssue(
           requestLineId: itemIssueLines.requestLineId,
           itemId: itemIssueLines.itemId,
           issueQuantity: itemIssueLines.issueQuantity,
+        })
+        .from(itemIssueLines)
+        .where(eq(itemIssueLines.itemIssueId, issueId));
+
+      if (issueLineRows.length === 0) {
+        throw new AppError("At least one issue line is required.", 400);
+      }
+
+      validateIssueLinesAgainstAvailability({
+        lines: issueLineRows.map((line) => ({
+          requestLineId: line.requestLineId,
+          issueQuantity: String(line.issueQuantity),
+        })),
+        availability,
+      });
+
+      const updated = await tx
+        .update(itemIssues)
+        .set({
+          status: "PENDING_VERIFICATION",
+          submittedByApplicationUserId: actor.id,
+          submittedAt: new Date(),
+          returnedAt: null,
+          updatedAt: new Date(),
+          version: issue.version + 1,
+        })
+        .where(
+          and(
+            eq(itemIssues.id, issueId),
+            inArray(itemIssues.status, ["DRAFT", "RETURNED"]),
+            eq(itemIssues.version, input.expectedVersion),
+          ),
+        )
+        .returning({ id: itemIssues.id });
+
+      if (!updated[0]) {
+        throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+
+      await tx.insert(itemIssueActions).values({
+        itemIssueId: issueId,
+        action: "SUBMIT",
+        fromStatus: issue.status,
+        toStatus: "PENDING_VERIFICATION",
+        actorApplicationUserId: actor.id,
+        actorWorkflowRole: issueActorWorkflowRole(
+          actor,
+          "MAKER",
+          requestRow.corporateBranch.branchType,
+        ),
+        remarks: issue.remarks,
+      });
+
+      const actorName =
+        actorRecord.employee.employeeName ?? actorRecord.user.username;
+      await insertItemIssueWorkflowNotifications(tx, {
+        type: "ITEM_ISSUE_SUBMITTED",
+        issueId,
+        issueNumber: issue.issueNumber,
+        requestNumber: requestRow.request.requestNumber,
+        actorUserId: actor.id,
+        actorName,
+        remarks: issue.remarks ?? null,
+        createdByApplicationUserId: issue.createdByApplicationUserId,
+        corporateCheckerApplicationUserId:
+          requestRow.request.corporateCheckerApplicationUserId,
+        branchMakerApplicationUserId:
+          requestRow.request.createdByApplicationUserId,
+        branchCheckerApplicationUserId:
+          requestRow.request.branchCheckerApplicationUserId,
+      });
+    });
+
+    return getItemIssueById(issueId, actor);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    mapItemIssueDatabaseError(error);
+  }
+}
+
+export async function verifyAndPostItemIssue(
+  issueId: string,
+  actor: AuthenticatedUser,
+  input: VerifyItemIssueInput,
+): Promise<ItemIssue> {
+  try {
+    const actorRecord = await assertActiveParticipant(actor.id, "Checker");
+    await getDb().transaction(async (tx) => {
+      const issueRows = await tx
+        .select()
+        .from(itemIssues)
+        .where(eq(itemIssues.id, issueId))
+        .for("update");
+      const issue = issueRows[0];
+      if (!issue) {
+        throw new AppError("Item issue not found", 404);
+      }
+      if (issue.status === "POSTED") {
+        throw new AppError("This issue has already been posted.", 409);
+      }
+      if (issue.status !== "PENDING_VERIFICATION") {
+        throw new AppError(
+          "Only an item issue pending verification can be posted.",
+          409,
+        );
+      }
+      if (issue.version !== input.expectedVersion) {
+        throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+
+      const requestRows = await tx
+        .select({
+          request: itemRequests,
+          requestingStore: requestStores,
+          corporateStore: corporateStores,
+          corporateBranch: corporateBranches,
+        })
+        .from(itemRequests)
+        .innerJoin(requestStores, eq(itemRequests.requestingStoreId, requestStores.id))
+        .innerJoin(corporateStores, eq(itemRequests.corporateStoreId, corporateStores.id))
+        .innerJoin(corporateBranches, eq(corporateStores.branchId, corporateBranches.id))
+        .where(eq(itemRequests.id, issue.requestId))
+        .for("update");
+
+      const requestRow = requestRows[0];
+      if (!requestRow) {
+        throw new AppError("Item request not found", 404);
+      }
+      assertRequestCanCreateIssue(requestRow.request.status);
+      if (!requestRow.requestingStore.isActive) {
+        throw new AppError("The requesting store is inactive.", 409);
+      }
+      if (!requestRow.corporateStore.isActive) {
+        throw new AppError("The processing store is inactive.", 409);
+      }
+
+      await requireSupplyingStoreVerifier(
+        actor,
+        requestRow.corporateStore.id,
+        issue.createdByApplicationUserId,
+      );
+      if (issue.fromStoreId !== requestRow.corporateStore.id) {
+        throw new AppError(ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE, 403);
+      }
+      if (issue.fromStoreId === requestRow.request.requestingStoreId) {
+        throw new AppError(
+          "Stock cannot be deducted from the Request From Store to fulfil its own request.",
+          409,
+        );
+      }
+
+      const issueLineRows = await tx
+        .select({
+          id: itemIssueLines.id,
+          requestLineId: itemIssueLines.requestLineId,
+          itemId: itemIssueLines.itemId,
+          issueQuantity: itemIssueLines.issueQuantity,
           unitId: units.id,
           purchaseRate: items.purchaseRate,
         })
@@ -1226,93 +1700,66 @@ export async function submitItemIssue(
         throw new AppError("At least one issue line is required.", 400);
       }
 
-      const requestLineRows = await tx
-        .select({
-          id: itemRequestLines.id,
-          requestedQuantity: itemRequestLines.requestedQuantity,
-        })
-        .from(itemRequestLines)
-        .where(eq(itemRequestLines.itemRequestId, issue.requestId));
-      const requestLineMap = new Map(
-        requestLineRows.map((line) => [
-          line.id,
-          parseQuantityToScaled(String(line.requestedQuantity)),
-        ]),
+      await lockStoreStockForUpdate(
+        tx,
+        issue.fromStoreId,
+        issueLineRows.map((line) => line.itemId),
       );
 
-      const submittedTotals = await tx
-        .select({
-          requestLineId: itemIssueLines.requestLineId,
-          totalQuantity: sql<string>`coalesce(sum(${itemIssueLines.issueQuantity}), 0)::text`,
-        })
-        .from(itemIssueLines)
-        .innerJoin(itemIssues, eq(itemIssueLines.itemIssueId, itemIssues.id))
-        .where(
-          and(
-            eq(itemIssues.requestId, issue.requestId),
-            eq(itemIssues.status, "SUBMITTED"),
-            sql`${itemIssues.id} <> ${issueId}`,
-          ),
-        )
-        .groupBy(itemIssueLines.requestLineId);
-      const submittedMap = new Map(
-        submittedTotals.map((row) => [
-          row.requestLineId,
-          parseQuantityToScaled(row.totalQuantity),
+      const availability = await buildAvailability(
+        issue.requestId,
+        issue.fromStoreId,
+        issue.id,
+      );
+      const lockedStock = await getOperationalAvailableQuantities(
+        {
+          storeId: issue.fromStoreId,
+          itemIds: issueLineRows.map((line) => line.itemId),
+        },
+        tx,
+      );
+      const stockByItemUnit = new Map(
+        lockedStock.map((row) => [
+          operationalStockKey(row.storeId, row.itemId, row.unitId),
+          row.availableQuantity,
         ]),
       );
-
-      let positiveLineCount = 0;
-      for (const line of issueLineRows) {
-        const requested = requestLineMap.get(line.requestLineId);
-        if (requested === undefined) {
-          throw new AppError("Issue lines must belong to the selected request.", 400);
-        }
-        const alreadyIssued = submittedMap.get(line.requestLineId) ?? 0n;
-        const remaining = requested - alreadyIssued;
-        const issueQuantity = parseQuantityToScaled(String(line.issueQuantity));
-
-        if (issueQuantity <= 0n) {
-          throw new AppError("Issue quantity must be greater than zero", 400);
-        }
-        if (issueQuantity > remaining) {
-          throw new AppError(
-            "One or more issue lines exceed the remaining requested quantity.",
-            409,
-          );
-        }
-        positiveLineCount += 1;
-      }
-
-      if (positiveLineCount === 0) {
-        throw new AppError(
-          "At least one line must have an issue quantity greater than zero.",
-          400,
+      const availabilityWithLockedStock = availability.map((line) => {
+        const stockKey = operationalStockKey(
+          issue.fromStoreId,
+          line.itemId,
+          line.unit.id,
         );
-      }
+        return {
+          ...line,
+          availableStockQuantity: stockByItemUnit.get(stockKey) ?? "0",
+          stockBalanceKnown: true,
+        };
+      });
 
       validateIssueLinesAgainstAvailability({
         lines: issueLineRows.map((line) => ({
           requestLineId: line.requestLineId,
           issueQuantity: String(line.issueQuantity),
         })),
-        availability,
+        availability: availabilityWithLockedStock,
         enforceStock: true,
       });
 
+      const postedAt = new Date();
       const updated = await tx
         .update(itemIssues)
         .set({
-          status: "SUBMITTED",
-          submittedByApplicationUserId: actor.id,
-          submittedAt: new Date(),
-          updatedAt: new Date(),
+          status: "POSTED",
+          verifiedByApplicationUserId: actor.id,
+          verifiedAt: postedAt,
+          updatedAt: postedAt,
           version: issue.version + 1,
         })
         .where(
           and(
             eq(itemIssues.id, issueId),
-            eq(itemIssues.status, "DRAFT"),
+            eq(itemIssues.status, "PENDING_VERIFICATION"),
             eq(itemIssues.version, input.expectedVersion),
           ),
         )
@@ -1322,30 +1769,68 @@ export async function submitItemIssue(
         throw new AppError(STALE_ISSUE_MESSAGE, 409);
       }
 
-      const postedAt = new Date();
-      await tx.insert(stockLedger).values(
-        issueLineRows.map((line) => ({
-          storeId: issue.fromStoreId,
-          itemId: line.itemId,
-          unitId: line.unitId,
-          rate: String(line.purchaseRate),
-          movementType: "ITEM_ISSUE" as const,
-          quantityIn: "0",
-          quantityOut: String(line.issueQuantity),
-          amountIn: "0",
-          amountOut: multiplyDecimalStrings(
-            String(line.issueQuantity),
-            String(line.purchaseRate),
-            2,
-          ),
-          transactionDate: postedAt,
-          referenceType: "ITEM_ISSUE" as const,
-          referenceId: issueId,
-          referenceLineId: line.id,
-          postedByApplicationUserId: actor.id,
-          postedAt,
-        })),
-      );
+      const ledgerRows = await tx
+        .insert(stockLedger)
+        .values(
+          issueLineRows.map((line) => ({
+            storeId: issue.fromStoreId,
+            itemId: line.itemId,
+            unitId: line.unitId,
+            rate: String(line.purchaseRate),
+            movementType: "ITEM_ISSUE" as const,
+            quantityIn: "0",
+            quantityOut: String(line.issueQuantity),
+            amountIn: "0",
+            amountOut: multiplyDecimalStrings(
+              String(line.issueQuantity),
+              String(line.purchaseRate),
+              2,
+            ),
+            transactionDate: postedAt,
+            referenceType: "ITEM_ISSUE" as const,
+            referenceId: issueId,
+            referenceLineId: line.id,
+            postedByApplicationUserId: actor.id,
+            postedAt,
+          })),
+        )
+        .returning({ id: stockLedger.id });
+
+      await applyRequestFulfilmentStatus(tx, issue.requestId);
+
+      await tx.insert(itemIssueActions).values({
+        itemIssueId: issueId,
+        action: "VERIFY_POST",
+        fromStatus: "PENDING_VERIFICATION",
+        toStatus: "POSTED",
+        actorApplicationUserId: actor.id,
+        actorWorkflowRole: issueActorWorkflowRole(
+          actor,
+          "CHECKER",
+          requestRow.corporateBranch.branchType,
+        ),
+        remarks: input.remarks,
+        stockLedgerReferenceId: ledgerRows[0]?.id ?? null,
+      });
+
+      const actorName =
+        actorRecord.employee.employeeName ?? actorRecord.user.username;
+      await insertItemIssueWorkflowNotifications(tx, {
+        type: "ITEM_ISSUE_POSTED",
+        issueId,
+        issueNumber: issue.issueNumber,
+        requestNumber: requestRow.request.requestNumber,
+        actorUserId: actor.id,
+        actorName,
+        remarks: input.remarks,
+        createdByApplicationUserId: issue.createdByApplicationUserId,
+        corporateCheckerApplicationUserId:
+          requestRow.request.corporateCheckerApplicationUserId,
+        branchMakerApplicationUserId:
+          requestRow.request.createdByApplicationUserId,
+        branchCheckerApplicationUserId:
+          requestRow.request.branchCheckerApplicationUserId,
+      });
     });
 
     return getItemIssueById(issueId, actor);
@@ -1355,4 +1840,196 @@ export async function submitItemIssue(
     }
     mapItemIssueDatabaseError(error);
   }
+}
+
+export async function returnItemIssue(
+  issueId: string,
+  actor: AuthenticatedUser,
+  input: ReturnItemIssueInput,
+): Promise<ItemIssue> {
+  return concludePendingIssue(issueId, actor, {
+    action: "RETURN",
+    toStatus: "RETURNED",
+    remarks: input.remarks,
+    expectedVersion: input.expectedVersion,
+  });
+}
+
+export async function rejectItemIssue(
+  issueId: string,
+  actor: AuthenticatedUser,
+  input: RejectItemIssueInput,
+): Promise<ItemIssue> {
+  return concludePendingIssue(issueId, actor, {
+    action: "REJECT",
+    toStatus: "REJECTED",
+    remarks: input.remarks,
+    expectedVersion: input.expectedVersion,
+  });
+}
+
+async function concludePendingIssue(
+  issueId: string,
+  actor: AuthenticatedUser,
+  params: {
+    action: "RETURN" | "REJECT";
+    toStatus: "RETURNED" | "REJECTED";
+    remarks: string | null;
+    expectedVersion: number;
+  },
+): Promise<ItemIssue> {
+  try {
+    const actorRecord = await assertActiveParticipant(actor.id, "Checker");
+    await getDb().transaction(async (tx) => {
+      const issueRows = await tx
+        .select()
+        .from(itemIssues)
+        .where(eq(itemIssues.id, issueId))
+        .for("update");
+      const issue = issueRows[0];
+      if (!issue) {
+        throw new AppError("Item issue not found", 404);
+      }
+      if (issue.status !== "PENDING_VERIFICATION") {
+        throw new AppError(
+          params.action === "RETURN"
+            ? "Only an item issue pending verification can be returned."
+            : "Only an item issue pending verification can be rejected.",
+          409,
+        );
+      }
+      if (issue.version !== params.expectedVersion) {
+        throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+
+      const requestRows = await tx
+        .select({
+          request: itemRequests,
+          corporateStore: corporateStores,
+          corporateBranch: corporateBranches,
+        })
+        .from(itemRequests)
+        .innerJoin(corporateStores, eq(itemRequests.corporateStoreId, corporateStores.id))
+        .innerJoin(corporateBranches, eq(corporateStores.branchId, corporateBranches.id))
+        .where(eq(itemRequests.id, issue.requestId))
+        .for("update");
+      const requestRow = requestRows[0];
+      if (!requestRow) {
+        throw new AppError("Item request not found", 404);
+      }
+
+      await requireSupplyingStoreVerifier(
+        actor,
+        requestRow.corporateStore.id,
+        issue.createdByApplicationUserId,
+      );
+
+      const now = new Date();
+      const updated = await tx
+        .update(itemIssues)
+        .set({
+          status: params.toStatus,
+          returnedAt: params.toStatus === "RETURNED" ? now : issue.returnedAt,
+          rejectedAt: params.toStatus === "REJECTED" ? now : issue.rejectedAt,
+          updatedAt: now,
+          version: issue.version + 1,
+        })
+        .where(
+          and(
+            eq(itemIssues.id, issueId),
+            eq(itemIssues.status, "PENDING_VERIFICATION"),
+            eq(itemIssues.version, params.expectedVersion),
+          ),
+        )
+        .returning({ id: itemIssues.id });
+
+      if (!updated[0]) {
+        throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+
+      await tx.insert(itemIssueActions).values({
+        itemIssueId: issueId,
+        action: params.action,
+        fromStatus: "PENDING_VERIFICATION",
+        toStatus: params.toStatus,
+        actorApplicationUserId: actor.id,
+        actorWorkflowRole: issueActorWorkflowRole(
+          actor,
+          "CHECKER",
+          requestRow.corporateBranch.branchType,
+        ),
+        remarks: params.remarks,
+      });
+
+      const actorName =
+        actorRecord.employee.employeeName ?? actorRecord.user.username;
+      await insertItemIssueWorkflowNotifications(tx, {
+        type:
+          params.action === "RETURN" ? "ITEM_ISSUE_RETURNED" : "ITEM_ISSUE_REJECTED",
+        issueId,
+        issueNumber: issue.issueNumber,
+        requestNumber: requestRow.request.requestNumber,
+        actorUserId: actor.id,
+        actorName,
+        remarks: params.remarks,
+        createdByApplicationUserId: issue.createdByApplicationUserId,
+        corporateCheckerApplicationUserId:
+          requestRow.request.corporateCheckerApplicationUserId,
+        branchMakerApplicationUserId:
+          requestRow.request.createdByApplicationUserId,
+        branchCheckerApplicationUserId:
+          requestRow.request.branchCheckerApplicationUserId,
+      });
+    });
+
+    return getItemIssueById(issueId, actor);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    mapItemIssueDatabaseError(error);
+  }
+}
+
+async function applyRequestFulfilmentStatus(
+  tx: Pick<ReturnType<typeof getDb>, "select" | "update">,
+  requestId: string,
+): Promise<void> {
+  const requestLineRows = await tx
+    .select({
+      requestedQuantity: itemRequestLines.requestedQuantity,
+    })
+    .from(itemRequestLines)
+    .where(eq(itemRequestLines.itemRequestId, requestId));
+
+  const postedRows = await tx
+    .select({
+      totalQuantity: sql<string>`coalesce(sum(${itemIssueLines.issueQuantity}), 0)::text`,
+    })
+    .from(itemIssueLines)
+    .innerJoin(itemIssues, eq(itemIssueLines.itemIssueId, itemIssues.id))
+    .where(
+      and(eq(itemIssues.requestId, requestId), eq(itemIssues.status, "POSTED")),
+    );
+
+  const requested = requestLineRows.reduce(
+    (sum, row) => sum + parseQuantityToScaled(String(row.requestedQuantity)),
+    0n,
+  );
+  const issued = parseQuantityToScaled(postedRows[0]?.totalQuantity ?? "0");
+  const nextStatus =
+    issued <= 0n ? "APPROVED" : issued >= requested ? "ISSUED" : "PARTIALLY_ISSUED";
+
+  await tx
+    .update(itemRequests)
+    .set({
+      status: nextStatus,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(itemRequests.id, requestId),
+        inArray(itemRequests.status, ["APPROVED", "PARTIALLY_ISSUED", "ISSUED"]),
+      ),
+    );
 }

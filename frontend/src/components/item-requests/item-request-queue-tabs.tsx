@@ -9,12 +9,14 @@ type ItemRequestQueueTabsProps = {
   activeQueue: ItemRequestQueue;
   workflowRoles: readonly ItemRequestWorkflowRole[];
   canViewFulfilment: boolean;
+  readyToIssueCount?: number;
 };
 
 export function ItemRequestQueueTabs({
   activeQueue,
   workflowRoles,
   canViewFulfilment,
+  readyToIssueCount = 0,
 }: ItemRequestQueueTabsProps) {
   const queues = getItemRequestTabQueues({
     activeQueue,
@@ -44,13 +46,18 @@ export function ItemRequestQueueTabs({
               <Link
                 href={queue.href}
                 aria-current={isActive ? "page" : undefined}
-                className={`inline-block whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition-colors ${
+                className={`inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition-colors ${
                   isActive
                     ? "border-accent font-semibold text-accent"
                     : "border-transparent text-ink-muted hover:border-accent-tint hover:text-accent"
                 }`}
               >
                 {queue.tabLabel}
+                {queue.key === "ready-to-issue" && readyToIssueCount > 0 ? (
+                  <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-accent px-1.5 py-0.5 text-[0.65rem] font-semibold text-white">
+                    {readyToIssueCount > 99 ? "99+" : readyToIssueCount}
+                  </span>
+                ) : null}
               </Link>
             </li>
           );

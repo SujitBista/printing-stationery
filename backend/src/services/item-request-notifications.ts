@@ -3,6 +3,16 @@ import type {
   ItemRequestStatus,
   NotificationType,
 } from "@printing-stationery/shared";
+
+type ItemRequestNotificationType = Extract<
+  NotificationType,
+  | "ITEM_REQUEST_SUBMITTED"
+  | "ITEM_REQUEST_RECOMMENDED"
+  | "ITEM_REQUEST_FORWARDED"
+  | "ITEM_REQUEST_APPROVED"
+  | "ITEM_REQUEST_RETURNED"
+  | "ITEM_REQUEST_REJECTED"
+>;
 import {
   itemRequestNotificationRecipientIds,
   notificationTypeForItemRequestAction,
@@ -11,7 +21,7 @@ import { getDb } from "../db/client.js";
 import type { NewNotificationRow } from "../db/schema/notifications.js";
 import { insertNotifications } from "./notifications.service.js";
 
-const TITLE_BY_TYPE: Record<NotificationType, string> = {
+const TITLE_BY_TYPE: Record<ItemRequestNotificationType, string> = {
   ITEM_REQUEST_SUBMITTED: "Item request submitted",
   ITEM_REQUEST_RECOMMENDED: "Item request recommended",
   ITEM_REQUEST_FORWARDED: "Item request forwarded",
@@ -20,7 +30,7 @@ const TITLE_BY_TYPE: Record<NotificationType, string> = {
   ITEM_REQUEST_REJECTED: "Item request rejected",
 };
 
-const VERB_BY_TYPE: Record<NotificationType, string> = {
+const VERB_BY_TYPE: Record<ItemRequestNotificationType, string> = {
   ITEM_REQUEST_SUBMITTED: "submitted",
   ITEM_REQUEST_RECOMMENDED: "recommended",
   ITEM_REQUEST_FORWARDED: "forwarded",
@@ -32,7 +42,7 @@ const VERB_BY_TYPE: Record<NotificationType, string> = {
 const MESSAGE_MAX_LENGTH = 500;
 
 export function itemRequestNotificationVerb(
-  type: NotificationType,
+  type: ItemRequestNotificationType,
   action: ItemRequestActionType,
 ): string {
   if (action === "RESUBMIT") {
@@ -42,7 +52,7 @@ export function itemRequestNotificationVerb(
 }
 
 export function buildItemRequestNotificationMessage(params: {
-  type: NotificationType;
+  type: ItemRequestNotificationType;
   action: ItemRequestActionType;
   actorName: string;
   requestNumber: string;

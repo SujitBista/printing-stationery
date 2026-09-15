@@ -183,6 +183,13 @@
       "when": 1788800000000,
       "tag": "0025_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788805000000,
+      "tag": "0026_item_issue_fulfilment",
+      "breakpoints": true
     }
   ]
 }

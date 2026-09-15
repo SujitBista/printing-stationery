@@ -92,12 +92,16 @@ export {
 
 export {
   itemIssueStatusEnum,
+  itemIssueActionEnum,
   itemIssues,
   itemIssueLines,
+  itemIssueActions,
   type ItemIssueRow,
   type NewItemIssueRow,
   type ItemIssueLineRow,
   type NewItemIssueLineRow,
+  type ItemIssueActionRow,
+  type NewItemIssueActionRow,
 } from "./item-issues.js";
 
 export {

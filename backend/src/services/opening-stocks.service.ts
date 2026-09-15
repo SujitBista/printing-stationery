@@ -466,13 +466,6 @@ async function getOpeningStockBatchSummaryById(id: string): Promise<OpeningStock
   };
 }
 
-async function mapLineRow(
-  line: typeof openingStockLines.$inferSelect,
-): Promise<OpeningStockBatchLine> {
-  const lines = await mapLineRows([line]);
-  return lines[0]!;
-}
-
 async function mapLineRows(
   lineRows: Array<typeof openingStockLines.$inferSelect>,
 ): Promise<OpeningStockBatchLine[]> {
@@ -1589,11 +1582,34 @@ export function operationalStockKey(
   return `${storeId}|${itemId}|${unitId}`;
 }
 
-export async function getOperationalAvailableQuantities(params: {
-  storeId?: string;
-  itemId?: string;
-  itemIds?: string[];
-} = {}): Promise<StockBalanceSummary[]> {
+export async function lockStoreStockForUpdate(
+  tx: Pick<ReturnType<typeof getDb>, "select" | "execute">,
+  storeId: string,
+  itemIds: string[],
+): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`item-issue:${storeId}`}))`,
+  );
+  if (itemIds.length === 0) {
+    return;
+  }
+  await tx
+    .select({ id: stockLedger.id })
+    .from(stockLedger)
+    .where(
+      and(eq(stockLedger.storeId, storeId), inArray(stockLedger.itemId, itemIds)),
+    )
+    .for("update");
+}
+
+export async function getOperationalAvailableQuantities(
+  params: {
+    storeId?: string;
+    itemId?: string;
+    itemIds?: string[];
+  } = {},
+  executor: Pick<ReturnType<typeof getDb>, "select"> = getDb(),
+): Promise<StockBalanceSummary[]> {
   const itemIds = [
     ...new Set(
       [
@@ -1623,7 +1639,7 @@ export async function getOperationalAvailableQuantities(params: {
         ? conditions[0]
         : and(...conditions);
 
-  const grouped = await getDb()
+  const grouped = await executor
     .select({
       storeId: stockLedger.storeId,
       itemId: stockLedger.itemId,

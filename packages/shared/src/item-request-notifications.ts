@@ -7,7 +7,15 @@ import type {
 
 export function notificationTypeForItemRequestAction(
   action: ItemRequestActionType,
-): NotificationType | null {
+): Extract<
+  NotificationType,
+  | "ITEM_REQUEST_SUBMITTED"
+  | "ITEM_REQUEST_RECOMMENDED"
+  | "ITEM_REQUEST_FORWARDED"
+  | "ITEM_REQUEST_APPROVED"
+  | "ITEM_REQUEST_RETURNED"
+  | "ITEM_REQUEST_REJECTED"
+> | null {
   switch (action) {
     case "SUBMIT":
     case "RESUBMIT":
@@ -87,7 +95,13 @@ export function itemRequestNotificationRecipientIds(params: {
     ids.add(pendingId);
   }
 
-  if (params.toStatus === "APPROVED" || params.toStatus === "REJECTED") {
+  if (params.toStatus === "APPROVED") {
+    if (params.corporateMakerApplicationUserId) {
+      ids.add(params.corporateMakerApplicationUserId);
+    }
+  }
+
+  if (params.toStatus === "REJECTED") {
     ids.add(params.createdByApplicationUserId);
     if (params.branchCheckerApplicationUserId) {
       ids.add(params.branchCheckerApplicationUserId);

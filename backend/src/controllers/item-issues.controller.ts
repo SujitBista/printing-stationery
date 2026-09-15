@@ -5,16 +5,22 @@ import {
   itemIssueIdSchema,
   itemIssueListQuerySchema,
   itemRequestIdSchema,
+  rejectItemIssueInputSchema,
+  returnItemIssueInputSchema,
   submitItemIssueInputSchema,
   updateItemIssueInputSchema,
+  verifyItemIssueInputSchema,
 } from "@printing-stationery/shared";
 import {
   createItemIssueFromRequest,
   getItemIssueById,
   getItemIssueEligibility,
   listItemIssues,
+  rejectItemIssue,
+  returnItemIssue,
   submitItemIssue,
   updateItemIssue,
+  verifyAndPostItemIssue,
 } from "../services/item-issues.service.js";
 import { AppError } from "../utils/errors.js";
 
@@ -131,6 +137,54 @@ export async function submitItemIssueHandler(
     const issueId = parseOrThrow(itemIssueIdSchema.safeParse(req.params.issueId));
     const input = parseOrThrow(submitItemIssueInputSchema.safeParse(req.body));
     const result = await submitItemIssue(issueId, actor, input);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function verifyItemIssueHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const issueId = parseOrThrow(itemIssueIdSchema.safeParse(req.params.issueId));
+    const input = parseOrThrow(verifyItemIssueInputSchema.safeParse(req.body));
+    const result = await verifyAndPostItemIssue(issueId, actor, input);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function returnItemIssueHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const issueId = parseOrThrow(itemIssueIdSchema.safeParse(req.params.issueId));
+    const input = parseOrThrow(returnItemIssueInputSchema.safeParse(req.body));
+    const result = await returnItemIssue(issueId, actor, input);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function rejectItemIssueHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const issueId = parseOrThrow(itemIssueIdSchema.safeParse(req.params.issueId));
+    const input = parseOrThrow(rejectItemIssueInputSchema.safeParse(req.body));
+    const result = await rejectItemIssue(issueId, actor, input);
     res.status(200).json(result);
   } catch (error) {
     next(error);

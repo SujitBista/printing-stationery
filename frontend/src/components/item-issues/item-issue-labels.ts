@@ -5,8 +5,28 @@ import type {
 
 export const ITEM_ISSUE_STATUS_LABELS: Record<ItemIssueStatus, string> = {
   DRAFT: "Draft",
-  SUBMITTED: "Submitted",
+  PENDING_VERIFICATION: "Pending Verification",
+  RETURNED: "Returned",
+  REJECTED: "Rejected",
+  POSTED: "Posted",
 };
+
+export function itemIssueStatusTone(
+  status: ItemIssueStatus,
+): "success" | "warning" | "danger" | "neutral" | "info" {
+  switch (status) {
+    case "POSTED":
+      return "success";
+    case "RETURNED":
+      return "warning";
+    case "REJECTED":
+      return "danger";
+    case "DRAFT":
+      return "neutral";
+    default:
+      return "info";
+  }
+}
 
 export function personDisplayName(
   person: ItemRequestPersonSummary | null | undefined,

@@ -3,8 +3,13 @@ import { describe, it } from "node:test";
 import { createItemIssueInputSchema } from "@printing-stationery/shared";
 import {
   ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+  ADMIN_ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE,
   ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
-  actorMayOperateItemIssue,
+  ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE,
+  actorMayCreateItemIssue,
+  actorMayVerifyItemIssue,
   isCorporateSupplyingStore,
   isEligibleSupplyingStore,
   requestAllowsItemIssueCreation,
@@ -86,56 +91,56 @@ describe("item issue authorization", () => {
     );
   });
 
-  it("allows an active checker assigned to the supplying store", () => {
+  it("allows an active maker assigned to the supplying store", () => {
     assert.equal(
-      actorMayOperateItemIssue({
-        actor: actor(["CHECKER"]),
+      actorMayCreateItemIssue({
+        actor: actor(["MAKER"]),
         supplyingStoreId: CORPORATE_STORE_ID,
-        supervisedStoreIds: [CORPORATE_STORE_ID],
+        makerStoreIds: [CORPORATE_STORE_ID],
       }),
       true,
     );
   });
 
-  it("denies a maker assigned to the supplying store", () => {
+  it("denies a checker assigned to the supplying store from creating an issue", () => {
     assert.equal(
-      actorMayOperateItemIssue({
+      actorMayCreateItemIssue({
+        actor: actor(["CHECKER"]),
+        supplyingStoreId: CORPORATE_STORE_ID,
+        makerStoreIds: [CORPORATE_STORE_ID],
+      }),
+      false,
+    );
+  });
+
+  it("denies a maker assigned only to the requesting store", () => {
+    assert.equal(
+      actorMayCreateItemIssue({
         actor: actor(["MAKER"]),
         supplyingStoreId: CORPORATE_STORE_ID,
-        supervisedStoreIds: [CORPORATE_STORE_ID],
+        makerStoreIds: [BRANCH_STORE_ID],
       }),
       false,
     );
   });
 
-  it("denies a checker assigned only to the requesting store", () => {
+  it("denies a maker assigned to an unrelated store", () => {
     assert.equal(
-      actorMayOperateItemIssue({
-        actor: actor(["CHECKER"]),
+      actorMayCreateItemIssue({
+        actor: actor(["MAKER"]),
         supplyingStoreId: CORPORATE_STORE_ID,
-        supervisedStoreIds: [BRANCH_STORE_ID],
+        makerStoreIds: [OTHER_STORE_ID],
       }),
       false,
     );
   });
 
-  it("denies a checker assigned to an unrelated store", () => {
+  it("denies administrators even when they are assigned to the supplying store", () => {
     assert.equal(
-      actorMayOperateItemIssue({
-        actor: actor(["CHECKER"]),
+      actorMayCreateItemIssue({
+        actor: actor(["ADMIN", "MAKER"]),
         supplyingStoreId: CORPORATE_STORE_ID,
-        supervisedStoreIds: [OTHER_STORE_ID],
-      }),
-      false,
-    );
-  });
-
-  it("denies administrators even when they supervise the supplying store", () => {
-    assert.equal(
-      actorMayOperateItemIssue({
-        actor: actor(["ADMIN", "CHECKER"]),
-        supplyingStoreId: CORPORATE_STORE_ID,
-        supervisedStoreIds: [CORPORATE_STORE_ID],
+        makerStoreIds: [CORPORATE_STORE_ID],
       }),
       false,
     );
@@ -146,18 +151,56 @@ describe("item issue authorization", () => {
     const databaseSupplyingStoreId = CORPORATE_STORE_ID;
 
     assert.equal(
-      actorMayOperateItemIssue({
-        actor: actor(["CHECKER"]),
+      actorMayCreateItemIssue({
+        actor: actor(["MAKER"]),
         supplyingStoreId: databaseSupplyingStoreId,
-        supervisedStoreIds: [databaseSupplyingStoreId],
+        makerStoreIds: [databaseSupplyingStoreId],
       }),
       true,
     );
     assert.equal(
-      actorMayOperateItemIssue({
-        actor: actor(["CHECKER"]),
+      actorMayCreateItemIssue({
+        actor: actor(["MAKER"]),
         supplyingStoreId: browserProvidedStoreId,
-        supervisedStoreIds: [databaseSupplyingStoreId],
+        makerStoreIds: [databaseSupplyingStoreId],
+      }),
+      false,
+    );
+  });
+
+  it("allows a checker assigned to the supplying store to verify another user's issue", () => {
+    assert.equal(
+      actorMayVerifyItemIssue({
+        actor: actor(["CHECKER"]),
+        supplyingStoreId: CORPORATE_STORE_ID,
+        supervisedStoreIds: [CORPORATE_STORE_ID],
+        createdByApplicationUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        actorUserId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      }),
+      true,
+    );
+  });
+
+  it("denies a maker from verifying an item issue", () => {
+    assert.equal(
+      actorMayVerifyItemIssue({
+        actor: actor(["MAKER"]),
+        supplyingStoreId: CORPORATE_STORE_ID,
+        supervisedStoreIds: [CORPORATE_STORE_ID],
+      }),
+      false,
+    );
+  });
+
+  it("denies a checker from verifying their own item issue", () => {
+    const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    assert.equal(
+      actorMayVerifyItemIssue({
+        actor: actor(["CHECKER"]),
+        supplyingStoreId: CORPORATE_STORE_ID,
+        supervisedStoreIds: [CORPORATE_STORE_ID],
+        createdByApplicationUserId: userId,
+        actorUserId: userId,
       }),
       false,
     );
@@ -179,6 +222,22 @@ describe("item issue authorization", () => {
         supplyingStore: corporateStore,
       }),
       true,
+    );
+    assert.equal(
+      requestAllowsItemIssueCreation({
+        requestStatus: "PARTIALLY_ISSUED",
+        supplyingStoreId: CORPORATE_STORE_ID,
+        supplyingStore: corporateStore,
+      }),
+      true,
+    );
+    assert.equal(
+      requestAllowsItemIssueCreation({
+        requestStatus: "ISSUED",
+        supplyingStoreId: CORPORATE_STORE_ID,
+        supplyingStore: corporateStore,
+      }),
+      false,
     );
     assert.equal(
       requestAllowsItemIssueCreation({
@@ -218,10 +277,13 @@ describe("item issue authorization", () => {
     );
   });
 
-  it("keeps a safe authorization message that does not mention makers", () => {
-    assert.match(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, /checker/i);
-    assert.doesNotMatch(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, /maker/i);
+  it("keeps authorization messages that name the required maker or checker role", () => {
+    assert.match(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, /maker/i);
+    assert.match(ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE, /checker/i);
+    assert.match(ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE, /checker/i);
+    assert.match(ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE, /cannot verify/i);
     assert.match(ADMIN_ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, /Administrator/i);
+    assert.match(ADMIN_ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE, /Administrator/i);
   });
 });
 

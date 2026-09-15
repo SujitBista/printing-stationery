@@ -51,7 +51,8 @@ type ItemRequestListPageProps = {
 export function ItemRequestListPage({
   queue = "request-list",
 }: ItemRequestListPageProps) {
-  const { workflowRoles, canViewFulfilment } = useItemRequestNavContext();
+  const { workflowRoles, canViewFulfilment, readyToIssueCount } =
+    useItemRequestNavContext();
   const queueMeta = getItemRequestQueue(queue, workflowRoles);
   const { canAccessItemRequests, isAdmin, user } = useAuth();
   const [requests, setRequests] = useState<ItemRequestListItem[]>([]);
@@ -299,6 +300,7 @@ export function ItemRequestListPage({
           activeQueue={queue}
           workflowRoles={workflowRoles}
           canViewFulfilment={canViewFulfilment}
+          readyToIssueCount={readyToIssueCount}
         />
       </div>
 
@@ -500,7 +502,7 @@ export function ItemRequestListPage({
                                 href={`/requests/item-requests/${request.id}/issue`}
                                 className="font-medium text-accent hover:text-accent-dark hover:underline"
                               >
-                                Create Item Issue
+                                Create Issue
                               </Link>
                             ) : null}
                             {rowActions.workflowActions.map((action) => (

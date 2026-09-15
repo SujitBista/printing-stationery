@@ -9,6 +9,8 @@ export const ITEM_REQUEST_STATUSES = [
   "PENDING_CORPORATE_CHECKER",
   "RETURNED_TO_CORPORATE_MAKER",
   "APPROVED",
+  "PARTIALLY_ISSUED",
+  "ISSUED",
   "REJECTED",
   "CANCELLED",
 ] as const;
@@ -16,9 +18,14 @@ export const ITEM_REQUEST_STATUSES = [
 export const itemRequestStatusSchema = z.enum(ITEM_REQUEST_STATUSES);
 
 export const ITEM_REQUEST_TERMINAL_STATUSES = [
-  "APPROVED",
+  "ISSUED",
   "REJECTED",
   "CANCELLED",
+] as const;
+
+export const ITEM_REQUEST_ISSUE_ELIGIBLE_STATUSES = [
+  "APPROVED",
+  "PARTIALLY_ISSUED",
 ] as const;
 
 export const itemRequestTerminalStatusSchema = z.enum(
@@ -66,6 +73,7 @@ export const ITEM_REQUEST_QUEUES = [
   "forwarded",
   "approve",
   "approved",
+  "ready-to-issue",
   "returned",
   "partial-pending",
   "issued",
@@ -75,9 +83,9 @@ export const ITEM_REQUEST_QUEUES = [
 export const itemRequestQueueSchema = z.enum(ITEM_REQUEST_QUEUES);
 
 /**
- * Statuses shown in each queue. Partial pending / issued currently use APPROVED
- * until remaining-qty filters are added. Actor-specific pending-with filters
- * are applied in the backend.
+ * Statuses shown in each queue. Ready-to-issue / partial-pending also require
+ * remaining approved quantity, applied in the backend. Actor-specific
+ * pending-with filters are applied in the backend.
  */
 export const ITEM_REQUEST_QUEUE_STATUSES = {
   "request-list": "ALL",
@@ -89,14 +97,17 @@ export const ITEM_REQUEST_QUEUE_STATUSES = {
     "PENDING_CORPORATE_CHECKER",
     "RETURNED_TO_CORPORATE_MAKER",
     "APPROVED",
+    "PARTIALLY_ISSUED",
+    "ISSUED",
   ],
   review: ["PENDING_CORPORATE_MAKER"],
   forwarded: ["PENDING_CORPORATE_CHECKER"],
   approve: ["PENDING_CORPORATE_CHECKER"],
-  approved: ["APPROVED"],
+  approved: ["APPROVED", "PARTIALLY_ISSUED", "ISSUED"],
+  "ready-to-issue": ["APPROVED", "PARTIALLY_ISSUED"],
   returned: ["RETURNED_TO_BRANCH_MAKER", "RETURNED_TO_CORPORATE_MAKER"],
-  "partial-pending": ["APPROVED"],
-  issued: ["APPROVED"],
+  "partial-pending": ["PARTIALLY_ISSUED"],
+  issued: ["ISSUED"],
   rejected: ["REJECTED"],
 } as const satisfies Record<
   (typeof ITEM_REQUEST_QUEUES)[number],
@@ -512,6 +523,9 @@ export const itemRequestContextSchema = z.object({
   canCreate: z.boolean(),
   workflowRoles: z.array(itemRequestWorkflowRoleSchema),
   canViewFulfilment: z.boolean(),
+  readyToIssueCount: z.number().int().nonnegative(),
+  pendingIssueVerificationCount: z.number().int().nonnegative(),
+  returnedIssueCount: z.number().int().nonnegative(),
   canSelectRequestFromStore: z.boolean(),
   canSelectRequestToStore: z.boolean(),
   /** Admin may change Request From Store. Alias of `canSelectRequestFromStore`. */

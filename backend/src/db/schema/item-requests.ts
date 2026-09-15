@@ -25,6 +25,8 @@ export const itemRequestStatusEnum = pgEnum("item_request_status", [
   "PENDING_CORPORATE_CHECKER",
   "RETURNED_TO_CORPORATE_MAKER",
   "APPROVED",
+  "PARTIALLY_ISSUED",
+  "ISSUED",
   "REJECTED",
   "CANCELLED",
 ]);

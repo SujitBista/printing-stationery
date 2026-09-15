@@ -39,6 +39,10 @@ const ITEM_ISSUE_LINE_REQUEST_LINE_UNIQUE_INDEX =
   "item_issue_lines_issue_request_line_uidx";
 const ITEM_ISSUE_LINE_QUANTITY_CHECK =
   "item_issue_lines_issue_quantity_positive";
+const ITEM_ISSUES_ONE_OPEN_PER_REQUEST_INDEX =
+  "item_issues_one_open_per_request_uidx";
+const STOCK_LEDGER_REFERENCE_LINE_UNIQUE_INDEX =
+  "stock_ledger_reference_line_uidx";
 const PARTY_CODE_UNIQUE_INDEX = "parties_party_code_lower_uidx";
 const PURCHASES_PARTY_ID_FK = "purchases_party_id_fk";
 const PURCHASE_NUMBER_UNIQUE_INDEX = "purchases_purchase_number_uidx";
@@ -567,6 +571,26 @@ export function isItemIssueLineQuantityCheckViolation(error: unknown): boolean {
   return constraint === ITEM_ISSUE_LINE_QUANTITY_CHECK;
 }
 
+export function isItemIssueOpenDuplicateViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === ITEM_ISSUES_ONE_OPEN_PER_REQUEST_INDEX;
+}
+
+export function isStockLedgerReferenceLineUniqueViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23505") {
+    return false;
+  }
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STOCK_LEDGER_REFERENCE_LINE_UNIQUE_INDEX;
+}
+
 export function mapItemIssueDatabaseError(error: unknown): never {
   if (isItemIssueNumberUniqueViolation(error)) {
     throw new AppError("An issue with this number already exists.", 409, {
@@ -584,6 +608,20 @@ export function mapItemIssueDatabaseError(error: unknown): never {
 
   if (isItemIssueLineQuantityCheckViolation(error)) {
     throw new AppError("Issue quantity must be greater than zero", 400, {
+      cause: error,
+    });
+  }
+
+  if (isItemIssueOpenDuplicateViolation(error)) {
+    throw new AppError(
+      "An open item issue already exists for this request.",
+      409,
+      { cause: error },
+    );
+  }
+
+  if (isStockLedgerReferenceLineUniqueViolation(error)) {
+    throw new AppError("This item issue has already been posted.", 409, {
       cause: error,
     });
   }

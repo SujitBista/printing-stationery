@@ -70,8 +70,17 @@ describe("item request list row actions", () => {
       });
 
       assert.deepEqual(actions.workflowActions, []);
-      assert.equal(actions.showCreateIssue, queue !== "rejected");
+      assert.equal(actions.showCreateIssue, false);
     }
+  });
+
+  it("shows Create Issue only on Ready to Issue", () => {
+    const ready = getItemRequestListRowActions("ready-to-issue", {
+      canCreateIssue: true,
+      allowedActions: ALL_WORKFLOW_ACTIONS,
+    });
+    assert.equal(ready.showCreateIssue, true);
+    assert.deepEqual(ready.workflowActions, []);
   });
 });
 
@@ -148,6 +157,7 @@ describe("item request role queues", () => {
     assert.equal(branchChecker.includes("approve"), false);
 
     assert.ok(corporateMaker.includes("review"));
+    assert.ok(corporateMaker.includes("ready-to-issue"));
     assert.equal(corporateMaker.includes("recommend"), false);
     assert.equal(corporateMaker.includes("approve"), false);
 

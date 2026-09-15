@@ -14,6 +14,8 @@ export const ITEM_REQUEST_STATUS_LABELS: Record<ItemRequestStatus, string> = {
   PENDING_CORPORATE_CHECKER: "Pending Corporate Checker",
   RETURNED_TO_CORPORATE_MAKER: "Returned to Corporate Maker",
   APPROVED: "Approved",
+  PARTIALLY_ISSUED: "Partially Issued",
+  ISSUED: "Issued",
   REJECTED: "Rejected",
   CANCELLED: "Cancelled",
 };
@@ -82,7 +84,10 @@ export function itemRequestStatusTone(
 ): ItemRequestStatusTone {
   switch (status) {
     case "APPROVED":
+    case "ISSUED":
       return "success";
+    case "PARTIALLY_ISSUED":
+      return "info";
     case "REJECTED":
     case "CANCELLED":
       return "danger";
