@@ -70,6 +70,7 @@ export {
 export {
   itemRequestStatusEnum,
   itemRequestActionEnum,
+  itemRequestWorkflowRoleEnum,
   itemRequests,
   itemRequestLines,
   itemRequestActions,

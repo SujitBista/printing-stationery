@@ -22,6 +22,7 @@ const REQUIRED_REMARK_ACTIONS = new Set<ItemRequestActionType>([
 type ItemRequestActionDialogProps = {
   open: boolean;
   action: ItemRequestActionType | null;
+  actionLabel?: string;
   saving: boolean;
   onClose: () => void;
   onConfirm: (remarks: string | null) => Promise<void>;
@@ -30,6 +31,7 @@ type ItemRequestActionDialogProps = {
 export function ItemRequestActionDialog({
   open,
   action,
+  actionLabel,
   saving,
   onClose,
   onConfirm,
@@ -87,7 +89,7 @@ export function ItemRequestActionDialog({
 
   const remarksRequired = action ? REQUIRED_REMARK_ACTIONS.has(action) : false;
   const confirmLabel = action
-    ? ITEM_REQUEST_ACTION_LABELS[action]
+    ? (actionLabel ?? ITEM_REQUEST_ACTION_LABELS[action])
     : "Confirm";
 
   return (

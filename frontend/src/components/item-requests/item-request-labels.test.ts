@@ -4,6 +4,7 @@ import {
   departmentDisplayName,
   employeeDisplayName,
   formatStoreTransferDirection,
+  getItemRequestActionLabel,
   requestedByDisplayName,
   storeOptionLabel,
 } from "./item-request-labels.js";
@@ -68,6 +69,25 @@ describe("requested by labels", () => {
         },
       ),
       "Anjani Chaudhary (368)",
+    );
+  });
+});
+
+describe("item request action labels", () => {
+  it("uses Return to Corporate Maker on the approval queue", () => {
+    assert.equal(
+      getItemRequestActionLabel("RETURN", { queue: "approve" }),
+      "Return to Corporate Maker",
+    );
+    assert.equal(
+      getItemRequestActionLabel("RETURN", {
+        status: "PENDING_CORPORATE_CHECKER",
+      }),
+      "Return to Corporate Maker",
+    );
+    assert.equal(
+      getItemRequestActionLabel("APPROVE", { queue: "approve" }),
+      "Approve",
     );
   });
 });

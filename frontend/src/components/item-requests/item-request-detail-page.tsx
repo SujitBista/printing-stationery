@@ -20,8 +20,9 @@ import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import {
   formatDateTime,
   formatStoreTransferDirection,
-  ITEM_REQUEST_ACTION_LABELS,
+  getItemRequestActionLabel,
   ITEM_REQUEST_STATUS_LABELS,
+  ITEM_REQUEST_WORKFLOW_ROLE_LABELS,
   itemRequestStatusTone,
   departmentDisplayName,
   personDisplayName,
@@ -138,7 +139,9 @@ export function ItemRequestDetailPage() {
     setRequest(result.data);
     setFeedback({
       type: "success",
-      message: `${ITEM_REQUEST_ACTION_LABELS[pendingAction]} completed.`,
+      message: `${getItemRequestActionLabel(pendingAction, {
+        status: request.status,
+      })} completed.`,
     });
   }
 
@@ -256,7 +259,9 @@ export function ItemRequestDetailPage() {
                   onClick={() => setPendingAction(action)}
                   className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
                 >
-                  {ITEM_REQUEST_ACTION_LABELS[action]}
+                  {getItemRequestActionLabel(action, {
+                    status: request.status,
+                  })}
                 </button>
               ))}
             </div>
@@ -426,16 +431,29 @@ export function ItemRequestDetailPage() {
                     className="rounded-md border border-border bg-paper-elevated px-4 py-3"
                   >
                     <p className="font-medium">
-                      {ITEM_REQUEST_ACTION_LABELS[entry.action]}
+                      {getItemRequestActionLabel(entry.action, {
+                        status: entry.fromStatus,
+                      })}
                     </p>
                     <p className="text-sm text-ink-muted">
-                      {personDisplayName(entry.actor)} ·{" "}
-                      {formatDateTime(entry.createdAt)} ·{" "}
-                      {ITEM_REQUEST_STATUS_LABELS[entry.fromStatus]} →{" "}
-                      {ITEM_REQUEST_STATUS_LABELS[entry.toStatus]}
+                      Previous status:{" "}
+                      {ITEM_REQUEST_STATUS_LABELS[entry.fromStatus]}
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      New status: {ITEM_REQUEST_STATUS_LABELS[entry.toStatus]}
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      Performed by: {personDisplayName(entry.actor)}
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      Role:{" "}
+                      {ITEM_REQUEST_WORKFLOW_ROLE_LABELS[entry.actorWorkflowRole]}
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      {formatDateTime(entry.createdAt)}
                     </p>
                     {entry.remarks ? (
-                      <p className="mt-1 text-sm">{entry.remarks}</p>
+                      <p className="mt-1 text-sm">Remarks: {entry.remarks}</p>
                     ) : null}
                   </li>
                 ))}
@@ -448,6 +466,13 @@ export function ItemRequestDetailPage() {
       <ItemRequestActionDialog
         open={Boolean(pendingAction)}
         action={pendingAction}
+        actionLabel={
+          pendingAction && request
+            ? getItemRequestActionLabel(pendingAction, {
+                status: request.status,
+              })
+            : undefined
+        }
         saving={saving}
         onClose={() => {
           if (!saving) {

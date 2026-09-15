@@ -38,18 +38,35 @@ export const ITEM_REQUEST_ACTIONS = [
 
 export const itemRequestActionTypeSchema = z.enum(ITEM_REQUEST_ACTIONS);
 
+export const ITEM_REQUEST_WORKFLOW_ROLES = [
+  "ADMIN",
+  "BRANCH_MAKER",
+  "BRANCH_CHECKER",
+  "CORPORATE_MAKER",
+  "CORPORATE_CHECKER",
+] as const;
+
+export const itemRequestWorkflowRoleSchema = z.enum(
+  ITEM_REQUEST_WORKFLOW_ROLES,
+);
+
 export const itemRequestStatusFilterSchema = z.enum([
   "ALL",
   ...ITEM_REQUEST_STATUSES,
 ]);
 
-/** Legacy-aligned request queues (sidebar + tabs). */
+/** Role-specific request queues (sidebar + tabs). */
 export const ITEM_REQUEST_QUEUES = [
   "request-list",
+  "drafts",
+  "submitted",
   "recommend",
+  "recommended",
   "review",
+  "forwarded",
   "approve",
   "approved",
+  "returned",
   "partial-pending",
   "issued",
   "rejected",
@@ -59,14 +76,25 @@ export const itemRequestQueueSchema = z.enum(ITEM_REQUEST_QUEUES);
 
 /**
  * Statuses shown in each queue. Partial pending / issued currently use APPROVED
- * until remaining-qty filters are added.
+ * until remaining-qty filters are added. Actor-specific pending-with filters
+ * are applied in the backend.
  */
 export const ITEM_REQUEST_QUEUE_STATUSES = {
   "request-list": "ALL",
+  drafts: ["DRAFT"],
+  submitted: ["PENDING_BRANCH_CHECKER"],
   recommend: ["PENDING_BRANCH_CHECKER"],
-  review: ["PENDING_CORPORATE_MAKER", "RETURNED_TO_CORPORATE_MAKER"],
+  recommended: [
+    "PENDING_CORPORATE_MAKER",
+    "PENDING_CORPORATE_CHECKER",
+    "RETURNED_TO_CORPORATE_MAKER",
+    "APPROVED",
+  ],
+  review: ["PENDING_CORPORATE_MAKER"],
+  forwarded: ["PENDING_CORPORATE_CHECKER"],
   approve: ["PENDING_CORPORATE_CHECKER"],
   approved: ["APPROVED"],
+  returned: ["RETURNED_TO_BRANCH_MAKER", "RETURNED_TO_CORPORATE_MAKER"],
   "partial-pending": ["APPROVED"],
   issued: ["APPROVED"],
   rejected: ["REJECTED"],
@@ -385,6 +413,7 @@ export const itemRequestActionSchema = z.object({
   action: itemRequestActionTypeSchema,
   fromStatus: itemRequestStatusSchema,
   toStatus: itemRequestStatusSchema,
+  actorWorkflowRole: itemRequestWorkflowRoleSchema,
   remarks: z.string().nullable(),
   createdAt: z.string(),
   actor: itemRequestPersonSummarySchema,
@@ -481,6 +510,8 @@ export const paginatedEligibleItemRequestStoreResponseSchema = z.object({
 
 export const itemRequestContextSchema = z.object({
   canCreate: z.boolean(),
+  workflowRoles: z.array(itemRequestWorkflowRoleSchema),
+  canViewFulfilment: z.boolean(),
   canSelectRequestFromStore: z.boolean(),
   canSelectRequestToStore: z.boolean(),
   /** Admin may change Request From Store. Alias of `canSelectRequestFromStore`. */

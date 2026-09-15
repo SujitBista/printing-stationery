@@ -27,6 +27,7 @@ import {
   getItemRequestListRowActions,
   getItemRequestQueue,
 } from "@/lib/item-requests/queues";
+import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import { ItemRequestQueueTabs } from "./item-request-queue-tabs";
@@ -34,7 +35,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   formatDateTime,
   formatStoreTransferDirection,
-  ITEM_REQUEST_ACTION_LABELS,
+  getItemRequestActionLabel,
   ITEM_REQUEST_STATUS_LABELS,
   itemRequestStatusTone,
   personDisplayName,
@@ -50,7 +51,8 @@ type ItemRequestListPageProps = {
 export function ItemRequestListPage({
   queue = "request-list",
 }: ItemRequestListPageProps) {
-  const queueMeta = getItemRequestQueue(queue);
+  const { workflowRoles, canViewFulfilment } = useItemRequestNavContext();
+  const queueMeta = getItemRequestQueue(queue, workflowRoles);
   const { canAccessItemRequests, isAdmin, user } = useAuth();
   const [requests, setRequests] = useState<ItemRequestListItem[]>([]);
   const [page, setPage] = useState(1);
@@ -199,7 +201,10 @@ export function ItemRequestListPage({
     setActionTarget(null);
     setFeedback({
       type: "success",
-      message: `${ITEM_REQUEST_ACTION_LABELS[actionTarget.action]} completed.`,
+      message: `${getItemRequestActionLabel(actionTarget.action, {
+        queue,
+        status: actionTarget.request.status,
+      })} completed.`,
     });
     await loadRequests();
   }
@@ -280,7 +285,21 @@ export function ItemRequestListPage({
       </div>
 
       <div className="mt-6">
-        <ItemRequestQueueTabs activeQueue={queue} />
+        {queueMeta.navGroup === "fulfilment" ? (
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
+              Fulfilment / Issue Tracking
+            </h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Read-only progress of approved requests that are being issued.
+            </p>
+          </div>
+        ) : null}
+        <ItemRequestQueueTabs
+          activeQueue={queue}
+          workflowRoles={workflowRoles}
+          canViewFulfilment={canViewFulfilment}
+        />
       </div>
 
       {showCreateAssignmentWarning ? (
@@ -493,7 +512,10 @@ export function ItemRequestListPage({
                                 }
                                 className="text-ink-muted hover:text-ink hover:underline"
                               >
-                                {ITEM_REQUEST_ACTION_LABELS[action]}
+                                {getItemRequestActionLabel(action, {
+                                  queue,
+                                  status: request.status,
+                                })}
                               </button>
                             ))}
                             {request.canDelete ? (
@@ -555,6 +577,14 @@ export function ItemRequestListPage({
       <ItemRequestActionDialog
         open={Boolean(actionTarget)}
         action={actionTarget?.action ?? null}
+        actionLabel={
+          actionTarget
+            ? getItemRequestActionLabel(actionTarget.action, {
+                queue,
+                status: actionTarget.request.status,
+              })
+            : undefined
+        }
         saving={saving}
         onClose={() => {
           if (!saving) {

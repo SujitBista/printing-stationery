@@ -372,11 +372,13 @@ export {
   ITEM_REQUEST_STATUSES,
   ITEM_REQUEST_TERMINAL_STATUSES,
   ITEM_REQUEST_ACTIONS,
+  ITEM_REQUEST_WORKFLOW_ROLES,
   ITEM_REQUEST_QUEUES,
   ITEM_REQUEST_QUEUE_STATUSES,
   itemRequestStatusSchema,
   itemRequestTerminalStatusSchema,
   itemRequestActionTypeSchema,
+  itemRequestWorkflowRoleSchema,
   itemRequestStatusFilterSchema,
   itemRequestQueueSchema,
   requestedQuantitySchema,
@@ -411,6 +413,7 @@ export type {
   ItemRequestStatus,
   ItemRequestStatusFilter,
   ItemRequestQueue,
+  ItemRequestWorkflowRole,
   ItemRequestActionType,
   ItemRequestTerminalStatus,
   CreateItemRequestInput,
@@ -436,6 +439,15 @@ export type {
   RequestedQuantity,
   ItemRequestLineInput,
 } from "./types/item-request.js";
+
+export {
+  ITEM_REQUEST_ROLE_WORKFLOW_QUEUES,
+  ITEM_REQUEST_FULFILMENT_QUEUES,
+  getItemRequestNavQueues,
+  itemRequestQueueIsFulfilment,
+  inferItemRequestActorWorkflowRole,
+} from "./item-request-workflow.js";
+export type { ItemRequestNavQueues } from "./item-request-workflow.js";
 
 export {
   ITEM_ISSUE_STATUSES,

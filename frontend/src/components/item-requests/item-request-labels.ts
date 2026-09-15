@@ -1,7 +1,9 @@
 import type {
   ItemRequestActionType,
   ItemRequestPersonSummary,
+  ItemRequestQueue,
   ItemRequestStatus,
+  ItemRequestWorkflowRole,
 } from "@printing-stationery/shared";
 
 export const ITEM_REQUEST_STATUS_LABELS: Record<ItemRequestStatus, string> = {
@@ -27,6 +29,46 @@ export const ITEM_REQUEST_ACTION_LABELS: Record<ItemRequestActionType, string> =
     REJECT: "Reject",
     CANCEL: "Cancel Request",
   };
+
+export const ITEM_REQUEST_WORKFLOW_ROLE_LABELS: Record<
+  ItemRequestWorkflowRole,
+  string
+> = {
+  ADMIN: "Admin",
+  BRANCH_MAKER: "Branch Maker",
+  BRANCH_CHECKER: "Branch Checker",
+  CORPORATE_MAKER: "Corporate Maker",
+  CORPORATE_CHECKER: "Corporate Checker",
+};
+
+export function getItemRequestActionLabel(
+  action: ItemRequestActionType,
+  context?: {
+    queue?: ItemRequestQueue;
+    status?: ItemRequestStatus;
+  },
+): string {
+  if (action !== "RETURN") {
+    return ITEM_REQUEST_ACTION_LABELS[action];
+  }
+
+  if (
+    context?.queue === "approve" ||
+    context?.status === "PENDING_CORPORATE_CHECKER"
+  ) {
+    return "Return to Corporate Maker";
+  }
+  if (
+    context?.queue === "recommend" ||
+    context?.queue === "review" ||
+    context?.status === "PENDING_BRANCH_CHECKER" ||
+    context?.status === "PENDING_CORPORATE_MAKER" ||
+    context?.status === "RETURNED_TO_CORPORATE_MAKER"
+  ) {
+    return "Return to Branch Maker";
+  }
+  return "Return";
+}
 
 export type ItemRequestStatusTone =
   | "success"

@@ -4,7 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
-import { ITEM_REQUEST_SIDEBAR_QUEUES } from "@/lib/item-requests/queues";
+import {
+  getItemRequestSidebarQueues,
+  ITEM_REQUEST_SIDEBAR_QUEUES,
+} from "@/lib/item-requests/queues";
+import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
 
 type NavItem = {
   label: string;
@@ -13,6 +17,7 @@ type NavItem = {
   /** When true, only users who can mutate master data (ADMIN) see this link. */
   adminSetup?: boolean;
   children?: NavItem[];
+  group?: "workflow" | "fulfilment";
 };
 
 type NavSection = {
@@ -20,10 +25,21 @@ type NavSection = {
   items: NavItem[];
 };
 
-const REQUEST_CHILDREN: NavItem[] = ITEM_REQUEST_SIDEBAR_QUEUES.map((queue) => ({
-  label: queue.sidebarLabel,
-  href: queue.href,
-}));
+const ALL_ITEM_REQUEST_QUEUE_HREFS: readonly string[] = [
+  "/requests/item-requests",
+  "/requests/item-requests/drafts",
+  "/requests/item-requests/submitted",
+  "/requests/item-requests/recommend",
+  "/requests/item-requests/recommended",
+  "/requests/item-requests/review",
+  "/requests/item-requests/forwarded",
+  "/requests/item-requests/approve",
+  "/requests/item-requests/approved",
+  "/requests/item-requests/returned",
+  "/requests/item-requests/rejected",
+  "/requests/item-requests/issued",
+  "/requests/item-requests/partial-pending",
+];
 
 const NAV_SECTIONS: NavSection[] = [
   {
@@ -36,7 +52,10 @@ const NAV_SECTIONS: NavSection[] = [
       {
         label: "Requests",
         href: "/requests/item-requests",
-        children: REQUEST_CHILDREN,
+        children: ITEM_REQUEST_SIDEBAR_QUEUES.map((queue) => ({
+          label: queue.sidebarLabel,
+          href: queue.href,
+        })),
       },
     ],
   },
@@ -82,9 +101,7 @@ function isPathActive(pathname: string, href: string): boolean {
 }
 
 const REQUEST_QUEUE_HREFS = new Set(
-  ITEM_REQUEST_SIDEBAR_QUEUES.filter((queue) => queue.key !== "request-list").map(
-    (queue) => queue.href,
-  ),
+  ALL_ITEM_REQUEST_QUEUE_HREFS.filter((href) => href !== "/requests/item-requests"),
 );
 
 function isUnderRequests(pathname: string): boolean {
@@ -215,15 +232,26 @@ function CollapsibleNavGroup({
         hidden={!expanded}
         className="ml-2 flex flex-col gap-0.5 border-l border-border pl-2"
       >
-        {children.map((child) => (
-          <NavLink
-            key={child.href}
-            item={child}
-            pathname={pathname}
-            onClose={onClose}
-            nested
-          />
-        ))}
+        {children.map((child, index) => {
+          const previous = children[index - 1];
+          const showFulfilmentHeading =
+            child.group === "fulfilment" && previous?.group !== "fulfilment";
+          return (
+            <div key={child.href}>
+              {showFulfilmentHeading ? (
+                <p className="mt-2 px-3 pt-2 text-[0.65rem] font-semibold uppercase tracking-wider text-ink-subtle">
+                  Fulfilment / Issue Tracking
+                </p>
+              ) : null}
+              <NavLink
+                item={child}
+                pathname={pathname}
+                onClose={onClose}
+                nested
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -238,6 +266,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     canAccessOpeningStock,
     canAccessPurchases,
   } = useAuth();
+  const { workflowRoles, canViewFulfilment } = useItemRequestNavContext();
+  const requestChildren: NavItem[] = getItemRequestSidebarQueues({
+    workflowRoles,
+    canViewFulfilment,
+  }).map((queue) => ({
+    label: queue.sidebarLabel,
+    href: queue.href,
+    group: queue.navGroup,
+  }));
 
   return (
     <>
@@ -287,11 +324,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 </p>
                 <div className="flex flex-col gap-1">
                   {filteredItems.map((item) => {
-                    if (item.children && item.children.length > 0) {
+                    const navItem =
+                      item.href === "/requests/item-requests"
+                        ? { ...item, children: requestChildren }
+                        : item;
+                    if (navItem.children && navItem.children.length > 0) {
                       return (
                         <CollapsibleNavGroup
-                          key={item.label}
-                          item={item}
+                          key={navItem.label}
+                          item={navItem}
                           pathname={pathname}
                           onClose={onClose}
                         />

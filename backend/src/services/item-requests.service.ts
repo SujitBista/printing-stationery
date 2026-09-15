@@ -7,6 +7,7 @@ import {
   eq,
   exists,
   inArray,
+  isNotNull,
   isNull,
   notInArray,
   or,
@@ -28,9 +29,11 @@ import type {
   ItemRequestListItem,
   ItemRequestListQuery,
   ItemRequestPersonSummary,
+  ItemRequestQueue,
   ItemRequestRequestedByEmployee,
   ItemRequestStatus,
   ItemRequestStoreSummary,
+  ItemRequestWorkflowRole,
   PaginatedEligibleItemRequestItemResponse,
   PaginatedEligibleItemRequestStoreResponse,
   PaginatedItemRequestResponse,
@@ -39,6 +42,8 @@ import type {
 import {
   CORPORATE_STORE_CODE,
   ITEM_REQUEST_QUEUE_STATUSES,
+  inferItemRequestActorWorkflowRole,
+  isCorporateControlStore,
   preferCorporateControlStore,
   userHasRole,
 } from "@printing-stationery/shared";
@@ -351,6 +356,28 @@ function actorMatchesKind(
   }
 }
 
+function actorWorkflowRoleForTransition(
+  actor: AuthenticatedUser,
+  kind: ActorKind,
+): ItemRequestWorkflowRole {
+  if (isAdminUser(actor)) {
+    return "ADMIN";
+  }
+  return kind;
+}
+
+function storeIsCorporateControl(
+  store: Pick<StoreRow, "storeCode" | "storeName" | "underStoreId">,
+  branch: Pick<BranchRow, "branchType">,
+): boolean {
+  return isCorporateControlStore({
+    storeCode: store.storeCode,
+    storeName: store.storeName,
+    underStoreId: store.underStoreId,
+    branchType: branch.branchType,
+  });
+}
+
 function computeAllowedActions(
   request: ItemRequestRow,
   actor: AuthenticatedUser,
@@ -525,11 +552,17 @@ async function getActiveMakerAssignment(
   return rows[0];
 }
 
-async function listSupervisedStoreIds(applicationUserId: string): Promise<string[]> {
-  const rows = await getDb()
-    .select({ storeId: storeUsers.storeId })
+async function listSupervisedStores(
+  applicationUserId: string,
+): Promise<Array<{ store: StoreRow; branch: BranchRow }>> {
+  return getDb()
+    .select({
+      store: stores,
+      branch: branches,
+    })
     .from(storeUsers)
     .innerJoin(stores, eq(storeUsers.storeId, stores.id))
+    .innerJoin(branches, eq(stores.branchId, branches.id))
     .where(
       and(
         eq(storeUsers.supervisorApplicationUserId, applicationUserId),
@@ -537,8 +570,53 @@ async function listSupervisedStoreIds(applicationUserId: string): Promise<string
         eq(stores.isActive, true),
       ),
     );
+}
 
-  return rows.map((row) => row.storeId);
+async function listSupervisedStoreIds(applicationUserId: string): Promise<string[]> {
+  const rows = await listSupervisedStores(applicationUserId);
+  return rows.map((row) => row.store.id);
+}
+
+async function resolveItemRequestWorkflowRoles(
+  actor: AuthenticatedUser,
+): Promise<ItemRequestWorkflowRole[]> {
+  if (isAdminUser(actor)) {
+    return ["ADMIN"];
+  }
+
+  const roles: ItemRequestWorkflowRole[] = [];
+  const makerAssignment = await getActiveMakerAssignment(actor.id);
+  if (makerAssignment) {
+    roles.push(
+      storeIsCorporateControl(makerAssignment.store, makerAssignment.branch)
+        ? "CORPORATE_MAKER"
+        : "BRANCH_MAKER",
+    );
+  }
+
+  const supervised = await listSupervisedStores(actor.id);
+  for (const row of supervised) {
+    const role: ItemRequestWorkflowRole = storeIsCorporateControl(
+      row.store,
+      row.branch,
+    )
+      ? "CORPORATE_CHECKER"
+      : "BRANCH_CHECKER";
+    if (!roles.includes(role)) {
+      roles.push(role);
+    }
+  }
+
+  return roles;
+}
+
+async function actorCanViewFulfilment(actor: AuthenticatedUser): Promise<boolean> {
+  if (isAdminUser(actor)) {
+    return true;
+  }
+
+  const supervised = await listSupervisedStores(actor.id);
+  return supervised.some((row) => storeIsEligibleSupplying(row.store, row.branch));
 }
 
 async function getActiveStoreAssignmentByStoreId(
@@ -969,6 +1047,56 @@ function buildVisibilityCondition(
   return or(...conditions);
 }
 
+function buildQueueActorCondition(
+  queue: ItemRequestQueue,
+  actor: AuthenticatedUser,
+): SQL | undefined {
+  if (isAdminUser(actor)) {
+    if (queue === "approve") {
+      return isNotNull(itemRequests.forwardedAt);
+    }
+    return undefined;
+  }
+
+  switch (queue) {
+    case "drafts":
+    case "submitted":
+      return eq(itemRequests.createdByApplicationUserId, actor.id);
+    case "recommend":
+    case "recommended":
+      return eq(itemRequests.branchCheckerApplicationUserId, actor.id);
+    case "review":
+    case "forwarded":
+      return eq(itemRequests.corporateMakerApplicationUserId, actor.id);
+    case "approve":
+      return and(
+        eq(itemRequests.corporateCheckerApplicationUserId, actor.id),
+        isNotNull(itemRequests.forwardedAt),
+      );
+    case "approved":
+      return eq(itemRequests.corporateCheckerApplicationUserId, actor.id);
+    case "returned":
+      return or(
+        and(
+          eq(itemRequests.status, "RETURNED_TO_CORPORATE_MAKER"),
+          or(
+            eq(itemRequests.corporateCheckerApplicationUserId, actor.id),
+            eq(itemRequests.corporateMakerApplicationUserId, actor.id),
+          ),
+        ),
+        and(
+          eq(itemRequests.status, "RETURNED_TO_BRANCH_MAKER"),
+          or(
+            eq(itemRequests.createdByApplicationUserId, actor.id),
+            eq(itemRequests.branchCheckerApplicationUserId, actor.id),
+          ),
+        ),
+      );
+    default:
+      return undefined;
+  }
+}
+
 function buildListFilters(
   query: ItemRequestListQuery,
   actor: AuthenticatedUser,
@@ -989,6 +1117,10 @@ function buildListFilters(
           [...queueStatuses] as ItemRequestStatus[],
         ),
       );
+    }
+    const actorCondition = buildQueueActorCondition(query.queue, actor);
+    if (actorCondition) {
+      conditions.push(actorCondition);
     }
   } else if (query.status !== "ALL") {
     conditions.push(eq(itemRequests.status, query.status));
@@ -1416,12 +1548,17 @@ export async function getItemRequestContext(
     : requestFromStores;
 
   const canCreate = isAdminUser(actor) || Boolean(assignment);
-  const requestedByEmployee = await loadRequestedBySummaryById(
-    actor.employee?.id,
-  );
+  const [requestedByEmployee, workflowRoles, canViewFulfilment] =
+    await Promise.all([
+      loadRequestedBySummaryById(actor.employee?.id),
+      resolveItemRequestWorkflowRoles(actor),
+      actorCanViewFulfilment(actor),
+    ]);
 
   return {
     canCreate,
+    workflowRoles,
+    canViewFulfilment,
     canSelectRequestFromStore: isAdminUser(actor),
     canSelectRequestToStore: isAdminUser(actor),
     canSelectDestinationStore: isAdminUser(actor),
@@ -1873,6 +2010,12 @@ export async function getItemRequestById(
         action: row.action.action,
         fromStatus: row.action.fromStatus,
         toStatus: row.action.toStatus,
+        actorWorkflowRole:
+          row.action.actorWorkflowRole ??
+          inferItemRequestActorWorkflowRole({
+            action: row.action.action,
+            fromStatus: row.action.fromStatus,
+          }),
         remarks: row.action.remarks ?? null,
         createdAt: row.action.createdAt.toISOString(),
         actor: toPersonSummary(row.actorUser, row.actorEmployee)!,
@@ -2094,12 +2237,19 @@ export async function performItemRequestAction(
         throw new AppError(INVALID_TRANSITION_MESSAGE, 409);
       }
 
+      if (
+        (input.action === "RETURN" || input.action === "REJECT") &&
+        input.remarks == null
+      ) {
+        throw new AppError("Remarks are required for this action", 400);
+      }
+
       if (isAdminUser(actor) && match.actor !== "BRANCH_MAKER") {
         throw new AppError(ADMIN_WORKFLOW_MESSAGE, 403);
       }
 
       if (!actorMatchesKind(request, actor, match.actor)) {
-        throw new AppError("Forbidden", 403);
+        throw new AppError("This request is not pending with you.", 403);
       }
 
       if (!isAdminUser(actor)) {
@@ -2232,6 +2382,7 @@ export async function performItemRequestAction(
         fromStatus: request.status,
         toStatus: match.to,
         actorApplicationUserId: actor.id,
+        actorWorkflowRole: actorWorkflowRoleForTransition(actor, match.actor),
         remarks: input.remarks,
       });
     });

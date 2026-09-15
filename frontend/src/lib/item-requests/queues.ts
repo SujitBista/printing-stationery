@@ -1,6 +1,11 @@
 import type {
   ItemRequestActionType,
   ItemRequestQueue,
+  ItemRequestWorkflowRole,
+} from "@printing-stationery/shared";
+import {
+  getItemRequestNavQueues,
+  itemRequestQueueIsFulfilment,
 } from "@printing-stationery/shared";
 
 export type ItemRequestQueueDefinition = {
@@ -15,10 +20,16 @@ export type ItemRequestQueueDefinition = {
   href: string;
   /** Show New Request only on the maker request list. */
   showCreate?: boolean;
+  /** Sidebar grouping; fulfilment queues are listed separately. */
+  navGroup?: "workflow" | "fulfilment";
 };
 
-/** Sidebar order matches legacy Request menu. */
-export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
+type QueueLabelOverride = Pick<
+  ItemRequestQueueDefinition,
+  "sidebarLabel" | "tabLabel" | "title" | "description"
+>;
+
+const ITEM_REQUEST_QUEUE_DEFINITIONS: ItemRequestQueueDefinition[] = [
   {
     key: "request-list",
     sidebarLabel: "Item Request",
@@ -28,6 +39,26 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
       "Overview of stationery requests, including current status and who they are pending with.",
     href: "/requests/item-requests",
     showCreate: true,
+    navGroup: "workflow",
+  },
+  {
+    key: "drafts",
+    sidebarLabel: "Drafts",
+    tabLabel: "Drafts",
+    title: "Item Request Drafts",
+    description: "Requests you have created but not yet submitted.",
+    href: "/requests/item-requests/drafts",
+    showCreate: true,
+    navGroup: "workflow",
+  },
+  {
+    key: "submitted",
+    sidebarLabel: "Submitted",
+    tabLabel: "Submitted",
+    title: "Submitted Item Requests",
+    description: "Requests waiting for the Branch Checker to recommend.",
+    href: "/requests/item-requests/submitted",
+    navGroup: "workflow",
   },
   {
     key: "recommend",
@@ -37,6 +68,16 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     description:
       "Branch checker queue — recommend requests to corporate, or return them to the maker.",
     href: "/requests/item-requests/recommend",
+    navGroup: "workflow",
+  },
+  {
+    key: "recommended",
+    sidebarLabel: "Recommended",
+    tabLabel: "Recommended",
+    title: "Recommended Item Requests",
+    description: "Requests you recommended that are now with corporate.",
+    href: "/requests/item-requests/recommended",
+    navGroup: "workflow",
   },
   {
     key: "review",
@@ -46,6 +87,16 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     description:
       "Corporate maker queue — forward requests for approval or return them to the branch.",
     href: "/requests/item-requests/review",
+    navGroup: "workflow",
+  },
+  {
+    key: "forwarded",
+    sidebarLabel: "Forwarded",
+    tabLabel: "Forwarded",
+    title: "Forwarded Item Requests",
+    description: "Requests forwarded to the Corporate Checker for approval.",
+    href: "/requests/item-requests/forwarded",
+    navGroup: "workflow",
   },
   {
     key: "rejected",
@@ -54,6 +105,7 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     title: "Item Request Rejected",
     description: "Requests that were rejected during corporate approval.",
     href: "/requests/item-requests/rejected",
+    navGroup: "workflow",
   },
   {
     key: "approve",
@@ -63,6 +115,7 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     description:
       "Corporate checker queue — approve, reject, or return requests.",
     href: "/requests/item-requests/approve",
+    navGroup: "workflow",
   },
   {
     key: "approved",
@@ -72,6 +125,16 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     description:
       "Approved requests ready for item issue from the processing/supplying store.",
     href: "/requests/item-requests/approved",
+    navGroup: "workflow",
+  },
+  {
+    key: "returned",
+    sidebarLabel: "Returned",
+    tabLabel: "Returned",
+    title: "Returned Item Requests",
+    description: "Requests returned one workflow level backward.",
+    href: "/requests/item-requests/returned",
+    navGroup: "workflow",
   },
   {
     key: "issued",
@@ -81,6 +144,7 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     description:
       "Approved requests. Full issued-vs-pending quantity filtering will refine this list further.",
     href: "/requests/item-requests/issued",
+    navGroup: "fulfilment",
   },
   {
     key: "partial-pending",
@@ -90,30 +154,145 @@ export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] = [
     description:
       "Approved requests that may still have remaining quantity to issue.",
     href: "/requests/item-requests/partial-pending",
+    navGroup: "fulfilment",
   },
 ];
 
-/** Tab order matches legacy Item Request tabs. */
-export const ITEM_REQUEST_TAB_QUEUES: ItemRequestQueueDefinition[] = [
-  ITEM_REQUEST_SIDEBAR_QUEUES[0]!,
-  ITEM_REQUEST_SIDEBAR_QUEUES[1]!,
-  ITEM_REQUEST_SIDEBAR_QUEUES[2]!,
-  ITEM_REQUEST_SIDEBAR_QUEUES[4]!,
-  ITEM_REQUEST_SIDEBAR_QUEUES[5]!,
-  ITEM_REQUEST_SIDEBAR_QUEUES[7]!,
-  ITEM_REQUEST_SIDEBAR_QUEUES[6]!,
-  ITEM_REQUEST_SIDEBAR_QUEUES[3]!,
-];
+const CORPORATE_CHECKER_LABELS: Partial<
+  Record<ItemRequestQueue, QueueLabelOverride>
+> = {
+  approve: {
+    sidebarLabel: "Pending Approval",
+    tabLabel: "Pending Approval",
+    title: "Item Request Approval",
+    description: "Review requests forwarded by the Corporate Maker.",
+  },
+  approved: {
+    sidebarLabel: "Approved",
+    tabLabel: "Approved",
+    title: "Approved Item Requests",
+    description: "Requests you have finally approved, ready for fulfilment.",
+  },
+  returned: {
+    sidebarLabel: "Returned",
+    tabLabel: "Returned",
+    title: "Returned Item Requests",
+    description: "Requests you returned to the Corporate Maker.",
+  },
+  rejected: {
+    sidebarLabel: "Rejected",
+    tabLabel: "Rejected",
+    title: "Rejected Item Requests",
+    description: "Requests you rejected. These requests are closed.",
+  },
+  "request-list": {
+    sidebarLabel: "All Requests",
+    tabLabel: "All Requests",
+    title: "All Requests",
+    description:
+      "Read-only history of item requests you are authorized to view.",
+  },
+};
+
+const QUEUE_BY_KEY = new Map(
+  ITEM_REQUEST_QUEUE_DEFINITIONS.map((queue) => [queue.key, queue]),
+);
+
+function applyRoleLabels(
+  queue: ItemRequestQueueDefinition,
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): ItemRequestQueueDefinition {
+  const corporateCheckerOnly =
+    workflowRoles.length === 1 && workflowRoles[0] === "CORPORATE_CHECKER";
+  if (!corporateCheckerOnly) {
+    return queue;
+  }
+  const override = CORPORATE_CHECKER_LABELS[queue.key];
+  if (!override) {
+    return queue;
+  }
+  return { ...queue, ...override, showCreate: false };
+}
 
 export function getItemRequestQueue(
   key: ItemRequestQueue,
+  workflowRoles: readonly ItemRequestWorkflowRole[] = [],
 ): ItemRequestQueueDefinition {
-  const found = ITEM_REQUEST_SIDEBAR_QUEUES.find((queue) => queue.key === key);
+  const found = QUEUE_BY_KEY.get(key);
   if (!found) {
     throw new Error(`Unknown item request queue: ${key}`);
   }
-  return found;
+  return applyRoleLabels(found, workflowRoles);
 }
+
+export function getItemRequestWorkflowTabQueues(
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): ItemRequestQueueDefinition[] {
+  const { workflowQueues } = getItemRequestNavQueues(workflowRoles, false);
+  return workflowQueues.map((key) => getItemRequestQueue(key, workflowRoles));
+}
+
+export function getItemRequestFulfilmentTabQueues(
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): ItemRequestQueueDefinition[] {
+  const { fulfilmentQueues } = getItemRequestNavQueues(workflowRoles, true);
+  return fulfilmentQueues.map((key) => getItemRequestQueue(key, workflowRoles));
+}
+
+export function getItemRequestSidebarQueues(params: {
+  workflowRoles: readonly ItemRequestWorkflowRole[];
+  canViewFulfilment: boolean;
+}): ItemRequestQueueDefinition[] {
+  const nav = getItemRequestNavQueues(
+    params.workflowRoles,
+    params.canViewFulfilment,
+  );
+  return [...nav.workflowQueues, ...nav.fulfilmentQueues].map((key) =>
+    getItemRequestQueue(key, params.workflowRoles),
+  );
+}
+
+export function getItemRequestTabQueues(params: {
+  activeQueue: ItemRequestQueue;
+  workflowRoles: readonly ItemRequestWorkflowRole[];
+  canViewFulfilment: boolean;
+}): ItemRequestQueueDefinition[] {
+  if (itemRequestQueueIsFulfilment(params.activeQueue)) {
+    return params.canViewFulfilment
+      ? getItemRequestFulfilmentTabQueues(params.workflowRoles)
+      : [];
+  }
+  return getItemRequestWorkflowTabQueues(params.workflowRoles);
+}
+
+/** @deprecated Use getItemRequestSidebarQueues with the actor's workflow roles. */
+export const ITEM_REQUEST_SIDEBAR_QUEUES: ItemRequestQueueDefinition[] =
+  ITEM_REQUEST_QUEUE_DEFINITIONS.filter((queue) =>
+    (
+      [
+        "request-list",
+        "recommend",
+        "review",
+        "rejected",
+        "approve",
+        "approved",
+        "issued",
+        "partial-pending",
+      ] as ItemRequestQueue[]
+    ).includes(queue.key),
+  );
+
+/** @deprecated Use getItemRequestTabQueues with the actor's workflow roles. */
+export const ITEM_REQUEST_TAB_QUEUES: ItemRequestQueueDefinition[] = [
+  getItemRequestQueue("request-list"),
+  getItemRequestQueue("recommend"),
+  getItemRequestQueue("review"),
+  getItemRequestQueue("approve"),
+  getItemRequestQueue("approved"),
+  getItemRequestQueue("partial-pending"),
+  getItemRequestQueue("issued"),
+  getItemRequestQueue("rejected"),
+];
 
 /**
  * Workflow decision actions that belong on each queue’s row actions.
@@ -125,10 +304,15 @@ export const ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS: Record<
   readonly ItemRequestActionType[]
 > = {
   "request-list": [],
+  drafts: ["SUBMIT", "CANCEL"],
+  submitted: [],
   recommend: ["RECOMMEND", "RETURN"],
+  recommended: [],
   review: ["FORWARD", "RETURN"],
+  forwarded: [],
   approve: ["APPROVE", "REJECT", "RETURN"],
   approved: [],
+  returned: ["FORWARD", "RETURN", "RESUBMIT", "CANCEL"],
   "partial-pending": [],
   issued: [],
   rejected: [],

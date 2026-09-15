@@ -24,6 +24,7 @@ import {
   getItemRequestById,
   getItemRequestContext,
   listEligibleItemRequestSourceStores,
+  listItemRequests,
   performItemRequestAction,
 } from "./item-requests.service.js";
 import {
@@ -65,6 +66,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   let birtamodStoreId = "";
   let birtamodMaker: AuthenticatedUser;
   let birtamodChecker: AuthenticatedUser;
+  let corporateMaker: AuthenticatedUser | null = null;
   let corporateChecker: AuthenticatedUser | null = null;
   let originalCorporateAssignment: {
     id: string;
@@ -637,6 +639,9 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       .where(eq(storeUsers.storeId, corporateStoreId))
       .limit(1);
     if (existingCorporateAssignment[0]?.isActive) {
+      corporateMaker = await loadActor(
+        existingCorporateAssignment[0].makerApplicationUserId,
+      );
       corporateChecker = await loadActor(
         existingCorporateAssignment[0].supervisorApplicationUserId,
       );
@@ -713,6 +718,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
           isActive: true,
         });
       }
+      corporateMaker = await loadActor(makerUser[0]!.id);
       corporateChecker = await loadActor(checkerUser[0]!.id);
     }
 
@@ -737,6 +743,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   it("lets an admin request from one store to another", async () => {
     const context = await getItemRequestContext(admin);
     assert.equal(context.canCreate, true);
+    assert.deepEqual(context.workflowRoles, ["ADMIN"]);
+    assert.equal(context.canViewFulfilment, true);
     assert.equal(context.canSelectRequestFromStore, true);
     assert.equal(context.canSelectDestinationStore, true);
     assert.equal(context.canSelectRequestedByEmployee, true);
@@ -915,6 +923,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   it("lets a normal maker request only for their assigned Request From Store", async () => {
     const context = await getItemRequestContext(destinationMaker);
     assert.equal(context.canCreate, true);
+    assert.deepEqual(context.workflowRoles, ["BRANCH_MAKER"]);
+    assert.equal(context.canViewFulfilment, false);
     assert.equal(context.canSelectRequestFromStore, false);
     assert.equal(context.canSelectRequestToStore, false);
     assert.equal(context.canSelectDestinationStore, false);
@@ -1434,5 +1444,402 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     const afterQty = Number(afterIssueCorporate[0]?.availableQuantity ?? "0");
     assert.equal(afterQty, beforeQty - 3);
     assert.deepEqual(afterIssueBirtamod, birtamodBefore);
+  });
+
+  async function forwardRequestToCorporateChecker() {
+    assert.ok(corporateMaker, "Corporate Store maker assignment is required");
+    assert.ok(corporateChecker, "Corporate Store checker assignment is required");
+
+    const created = await trackRequest(
+      await createItemRequest(birtamodMaker, {
+        sourceStoreId: birtamodStoreId,
+        destinationStoreId: corporateStoreId,
+        requestedByEmployeeId: birtamodMaker.employee!.id,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "2" }],
+      }),
+    );
+    const submitted = await performItemRequestAction(created.id, birtamodMaker, {
+      action: "SUBMIT",
+      remarks: null,
+      expectedVersion: created.version,
+    });
+    const recommended = await performItemRequestAction(
+      submitted.id,
+      birtamodChecker,
+      {
+        action: "RECOMMEND",
+        remarks: "Branch recommended",
+        expectedVersion: submitted.version,
+      },
+    );
+    return performItemRequestAction(recommended.id, corporateMaker, {
+      action: "FORWARD",
+      remarks: null,
+      expectedVersion: recommended.version,
+    });
+  }
+
+  it("exposes Corporate Checker queues and pending-approval filtering", async () => {
+    assert.ok(corporateMaker);
+    assert.ok(corporateChecker);
+
+    const checkerContext = await getItemRequestContext(corporateChecker);
+    assert.ok(checkerContext.workflowRoles.includes("CORPORATE_CHECKER"));
+    assert.equal(checkerContext.canCreate, false);
+
+    const makerContext = await getItemRequestContext(birtamodMaker);
+    assert.deepEqual(makerContext.workflowRoles, ["BRANCH_MAKER"]);
+
+    const branchCheckerContext = await getItemRequestContext(birtamodChecker);
+    assert.deepEqual(branchCheckerContext.workflowRoles, ["BRANCH_CHECKER"]);
+
+    const corporateMakerContext = await getItemRequestContext(corporateMaker);
+    assert.ok(corporateMakerContext.workflowRoles.includes("CORPORATE_MAKER"));
+
+    const created = await trackRequest(
+      await createItemRequest(birtamodMaker, {
+        sourceStoreId: birtamodStoreId,
+        destinationStoreId: corporateStoreId,
+        requestedByEmployeeId: birtamodMaker.employee!.id,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "2" }],
+      }),
+    );
+    const submitted = await performItemRequestAction(created.id, birtamodMaker, {
+      action: "SUBMIT",
+      remarks: null,
+      expectedVersion: created.version,
+    });
+    const recommended = await performItemRequestAction(
+      submitted.id,
+      birtamodChecker,
+      {
+        action: "RECOMMEND",
+        remarks: "Branch recommended",
+        expectedVersion: submitted.version,
+      },
+    );
+
+    const pendingBeforeForward = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "approve",
+    });
+    assert.equal(
+      pendingBeforeForward.items.some((item) => item.id === recommended.id),
+      false,
+      "requests that are still with the Corporate Maker must not appear in Pending Approval",
+    );
+
+    const forwarded = await performItemRequestAction(
+      recommended.id,
+      corporateMaker,
+      {
+        action: "FORWARD",
+        remarks: null,
+        expectedVersion: recommended.version,
+      },
+    );
+    assert.equal(forwarded.status, "PENDING_CORPORATE_CHECKER");
+    assert.equal(forwarded.pendingWith?.id, corporateChecker.id);
+    assert.ok(forwarded.forwardedAt);
+    const pendingForChecker = await getItemRequestById(
+      forwarded.id,
+      corporateChecker,
+    );
+    assert.deepEqual([...pendingForChecker.allowedActions].sort(), [
+      "APPROVE",
+      "REJECT",
+      "RETURN",
+    ]);
+
+    const pendingApproval = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "approve",
+    });
+    assert.ok(
+      pendingApproval.items.some((item) => item.id === forwarded.id),
+      "properly forwarded requests must appear in Pending Approval",
+    );
+
+    const recommendQueue = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "recommend",
+    });
+    assert.equal(
+      recommendQueue.items.some((item) => item.id === forwarded.id),
+      false,
+    );
+
+    const reviewQueue = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "review",
+    });
+    assert.equal(
+      reviewQueue.items.some((item) => item.id === forwarded.id),
+      false,
+    );
+
+    await getDb()
+      .update(itemRequests)
+      .set({ forwardedAt: null })
+      .where(eq(itemRequests.id, forwarded.id));
+
+    const pendingWithoutForward = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "approve",
+    });
+    assert.equal(
+      pendingWithoutForward.items.some((item) => item.id === forwarded.id),
+      false,
+      "requests missing Corporate Maker forward must not appear in Pending Approval",
+    );
+
+    await getDb()
+      .update(itemRequests)
+      .set({ forwardedAt: new Date(forwarded.forwardedAt!) })
+      .where(eq(itemRequests.id, forwarded.id));
+  });
+
+  it("lets the assigned Corporate Checker approve, return, and reject with history", async () => {
+    const forwarded = await forwardRequestToCorporateChecker();
+    assert.ok(corporateChecker);
+    assert.ok(corporateMaker);
+
+    await assert.rejects(
+      () =>
+        performItemRequestAction(forwarded.id, corporateChecker, {
+          action: "RETURN",
+          remarks: null,
+          expectedVersion: forwarded.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 400, "Remarks are required for this action"),
+    );
+
+    const returned = await performItemRequestAction(
+      forwarded.id,
+      corporateChecker,
+      {
+        action: "RETURN",
+        remarks: "Please correct quantities",
+        expectedVersion: forwarded.version,
+      },
+    );
+    assert.equal(returned.status, "RETURNED_TO_CORPORATE_MAKER");
+    assert.equal(returned.pendingWith?.id, corporateMaker.id);
+    assert.equal(returned.allowedActions.length, 0);
+    const pendingForMaker = await getItemRequestById(returned.id, corporateMaker);
+    assert.deepEqual([...pendingForMaker.allowedActions].sort(), [
+      "FORWARD",
+      "RETURN",
+    ]);
+    const returnEntry = returned.actions.at(-1);
+    assert.equal(returnEntry?.action, "RETURN");
+    assert.equal(returnEntry?.fromStatus, "PENDING_CORPORATE_CHECKER");
+    assert.equal(returnEntry?.toStatus, "RETURNED_TO_CORPORATE_MAKER");
+    assert.equal(returnEntry?.actorWorkflowRole, "CORPORATE_CHECKER");
+    assert.equal(returnEntry?.remarks, "Please correct quantities");
+    assert.equal(returnEntry?.actor.id, corporateChecker.id);
+
+    const returnedQueue = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "returned",
+    });
+    assert.ok(returnedQueue.items.some((item) => item.id === returned.id));
+
+    const forwardedAgain = await performItemRequestAction(
+      returned.id,
+      corporateMaker,
+      {
+        action: "FORWARD",
+        remarks: "Corrected",
+        expectedVersion: returned.version,
+      },
+    );
+    assert.equal(forwardedAgain.status, "PENDING_CORPORATE_CHECKER");
+    assert.equal(forwardedAgain.actions.length, returned.actions.length + 1);
+
+    const approved = await performItemRequestAction(
+      forwardedAgain.id,
+      corporateChecker,
+      {
+        action: "APPROVE",
+        remarks: null,
+        expectedVersion: forwardedAgain.version,
+      },
+    );
+    assert.equal(approved.status, "APPROVED");
+    assert.ok(approved.approvedAt);
+    assert.equal(approved.allowedActions.length, 0);
+    const approveEntry = approved.actions.at(-1);
+    assert.equal(approveEntry?.action, "APPROVE");
+    assert.equal(approveEntry?.actorWorkflowRole, "CORPORATE_CHECKER");
+    assert.equal(approveEntry?.fromStatus, "PENDING_CORPORATE_CHECKER");
+    assert.equal(approveEntry?.toStatus, "APPROVED");
+
+    const approvedQueue = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "approved",
+    });
+    assert.ok(approvedQueue.items.some((item) => item.id === approved.id));
+
+    await assert.rejects(
+      () =>
+        performItemRequestAction(approved.id, corporateChecker, {
+          action: "APPROVE",
+          remarks: null,
+          expectedVersion: approved.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 409, "This action is not allowed for the current request status."),
+    );
+
+    const toReject = await forwardRequestToCorporateChecker();
+    await assert.rejects(
+      () =>
+        performItemRequestAction(toReject.id, corporateChecker, {
+          action: "REJECT",
+          remarks: null,
+          expectedVersion: toReject.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 400, "Remarks are required for this action"),
+    );
+
+    const rejected = await performItemRequestAction(
+      toReject.id,
+      corporateChecker,
+      {
+        action: "REJECT",
+        remarks: "Not required",
+        expectedVersion: toReject.version,
+      },
+    );
+    assert.equal(rejected.status, "REJECTED");
+    assert.ok(rejected.rejectedAt);
+    assert.equal(rejected.allowedActions.length, 0);
+    assert.equal(rejected.canCreateIssue, false);
+
+    const rejectedQueue = await listItemRequests(corporateChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "rejected",
+    });
+    assert.ok(rejectedQueue.items.some((item) => item.id === rejected.id));
+
+    await assert.rejects(
+      () =>
+        performItemRequestAction(rejected.id, corporateChecker, {
+          action: "APPROVE",
+          remarks: null,
+          expectedVersion: rejected.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 409, "This action is not allowed for the current request status."),
+    );
+  });
+
+  it("rejects unauthorized Corporate Checker actions and keeps other role queues", async () => {
+    const forwarded = await forwardRequestToCorporateChecker();
+    assert.ok(corporateChecker);
+    assert.ok(corporateMaker);
+
+    await assert.rejects(
+      () =>
+        performItemRequestAction(forwarded.id, birtamodChecker, {
+          action: "APPROVE",
+          remarks: null,
+          expectedVersion: forwarded.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, "This request is not pending with you."),
+    );
+
+    await assert.rejects(
+      () =>
+        performItemRequestAction(forwarded.id, birtamodMaker, {
+          action: "APPROVE",
+          remarks: null,
+          expectedVersion: forwarded.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, "This request is not pending with you."),
+    );
+
+    await assert.rejects(
+      () =>
+        performItemRequestAction(forwarded.id, corporateMaker, {
+          action: "APPROVE",
+          remarks: null,
+          expectedVersion: forwarded.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, "This request is not pending with you."),
+    );
+
+    await assert.rejects(
+      () =>
+        performItemRequestAction(forwarded.id, corporateChecker, {
+          action: "RECOMMEND",
+          remarks: null,
+          expectedVersion: forwarded.version,
+        }),
+      (error: unknown) =>
+        isAppError(
+          error,
+          409,
+          "This action is not allowed for the current request status.",
+        ),
+    );
+
+    const makerDrafts = await listItemRequests(birtamodMaker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "drafts",
+    });
+    assert.ok(
+      makerDrafts.items.every((item) => item.status === "DRAFT"),
+    );
+
+    const checkerRecommend = await listItemRequests(birtamodChecker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "recommend",
+    });
+    assert.ok(
+      checkerRecommend.items.every(
+        (item) => item.status === "PENDING_BRANCH_CHECKER",
+      ),
+    );
+
+    const corporateReview = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "review",
+    });
+    assert.ok(
+      corporateReview.items.every(
+        (item) => item.status === "PENDING_CORPORATE_MAKER",
+      ),
+    );
   });
 });

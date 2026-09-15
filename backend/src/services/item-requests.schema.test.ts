@@ -5,7 +5,10 @@ import {
   createItemRequestInputSchema,
   eligibleItemRequestItemListQuerySchema,
   eligibleItemRequestStoreListQuerySchema,
+  getItemRequestNavQueues,
+  inferItemRequestActorWorkflowRole,
   isCorporateControlStore,
+  itemRequestActionInputSchema,
   preferCorporateControlStore,
 } from "@printing-stationery/shared";
 
@@ -170,5 +173,88 @@ describe("corporate store identity", () => {
       },
     ]);
     assert.equal(preferred?.storeCode, "999");
+  });
+});
+
+describe("item request workflow remarks and history", () => {
+  it("requires remarks for Return and Reject but not Approve", () => {
+    const base = { expectedVersion: 2 };
+    assert.equal(
+      itemRequestActionInputSchema.safeParse({
+        ...base,
+        action: "RETURN",
+        remarks: null,
+      }).success,
+      false,
+    );
+    assert.equal(
+      itemRequestActionInputSchema.safeParse({
+        ...base,
+        action: "REJECT",
+        remarks: "   ",
+      }).success,
+      false,
+    );
+    assert.equal(
+      itemRequestActionInputSchema.safeParse({
+        ...base,
+        action: "APPROVE",
+        remarks: null,
+      }).success,
+      true,
+    );
+    assert.equal(
+      itemRequestActionInputSchema.safeParse({
+        ...base,
+        action: "RETURN",
+        remarks: "Send back to Corporate Maker",
+      }).success,
+      true,
+    );
+  });
+
+  it("infers Corporate Checker history role for final approval actions", () => {
+    assert.equal(
+      inferItemRequestActorWorkflowRole({
+        action: "APPROVE",
+        fromStatus: "PENDING_CORPORATE_CHECKER",
+      }),
+      "CORPORATE_CHECKER",
+    );
+    assert.equal(
+      inferItemRequestActorWorkflowRole({
+        action: "RETURN",
+        fromStatus: "PENDING_CORPORATE_CHECKER",
+      }),
+      "CORPORATE_CHECKER",
+    );
+    assert.equal(
+      inferItemRequestActorWorkflowRole({
+        action: "FORWARD",
+        fromStatus: "PENDING_CORPORATE_MAKER",
+      }),
+      "CORPORATE_MAKER",
+    );
+    assert.equal(
+      inferItemRequestActorWorkflowRole({
+        action: "RECOMMEND",
+        fromStatus: "PENDING_BRANCH_CHECKER",
+      }),
+      "BRANCH_CHECKER",
+    );
+  });
+
+  it("keeps fulfilment queues out of Corporate Checker approval navigation", () => {
+    const nav = getItemRequestNavQueues(["CORPORATE_CHECKER"], true);
+    assert.deepEqual(nav.workflowQueues, [
+      "approve",
+      "approved",
+      "returned",
+      "rejected",
+      "request-list",
+    ]);
+    assert.deepEqual(nav.fulfilmentQueues, ["issued", "partial-pending"]);
+    assert.equal(nav.workflowQueues.includes("recommend"), false);
+    assert.equal(nav.workflowQueues.includes("review"), false);
   });
 });

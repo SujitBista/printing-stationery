@@ -40,6 +40,17 @@ export const itemRequestActionEnum = pgEnum("item_request_action", [
   "CANCEL",
 ]);
 
+export const itemRequestWorkflowRoleEnum = pgEnum(
+  "item_request_workflow_role",
+  [
+    "ADMIN",
+    "BRANCH_MAKER",
+    "BRANCH_CHECKER",
+    "CORPORATE_MAKER",
+    "CORPORATE_CHECKER",
+  ],
+);
+
 export const itemRequests = pgTable(
   "item_requests",
   {
@@ -210,6 +221,9 @@ export const itemRequestActions = pgTable(
     fromStatus: itemRequestStatusEnum("from_status").notNull(),
     toStatus: itemRequestStatusEnum("to_status").notNull(),
     actorApplicationUserId: uuid("actor_application_user_id").notNull(),
+    actorWorkflowRole: itemRequestWorkflowRoleEnum(
+      "actor_workflow_role",
+    ).notNull(),
     remarks: varchar("remarks", { length: 500 }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

@@ -10,6 +10,7 @@ import type {
   deleteItemRequestInputSchema,
   itemRequestListQuerySchema,
   itemRequestQueueSchema,
+  itemRequestWorkflowRoleSchema,
   eligibleItemRequestItemListQuerySchema,
   eligibleItemRequestStoreListQuerySchema,
   itemRequestSchema,
@@ -34,6 +35,9 @@ export type ItemRequestStatusFilter = z.infer<
   typeof itemRequestStatusFilterSchema
 >;
 export type ItemRequestQueue = z.infer<typeof itemRequestQueueSchema>;
+export type ItemRequestWorkflowRole = z.infer<
+  typeof itemRequestWorkflowRoleSchema
+>;
 export type ItemRequestActionType = z.infer<typeof itemRequestActionTypeSchema>;
 export type ItemRequestTerminalStatus = z.infer<
   typeof itemRequestTerminalStatusSchema
