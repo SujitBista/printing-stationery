@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import type { AuthenticatedUser } from "@printing-stationery/shared";
 import { loadEnv } from "../config/env.js";
 import { closePool, createDb, getDb } from "../db/client.js";
@@ -14,18 +15,22 @@ import { employees } from "../db/schema/employees.js";
 import { itemIssueLines, itemIssues } from "../db/schema/item-issues.js";
 import { itemRequestActions, itemRequestLines, itemRequests } from "../db/schema/item-requests.js";
 import { items } from "../db/schema/items.js";
+import { stockLedger } from "../db/schema/opening-stocks.js";
 import { stores } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
 import {
-  createItemIssueFromRequest,
-  getItemIssueEligibility,
-} from "./item-issues.service.js";
-import {
   createItemRequest,
+  deleteItemRequest,
   getItemRequestById,
   getItemRequestContext,
   listEligibleItemRequestSourceStores,
+  performItemRequestAction,
 } from "./item-requests.service.js";
+import {
+  createItemIssueFromRequest,
+  getItemIssueEligibility,
+  submitItemIssue,
+} from "./item-issues.service.js";
 import { listEmployees } from "./employees.service.js";
 import { getOperationalAvailableQuantities } from "./opening-stocks.service.js";
 import { AppError } from "../utils/errors.js";
@@ -55,10 +60,23 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   let unassignedMaker: AuthenticatedUser;
   let sourceStoreId = "";
   let destinationStoreId = "";
+  let corporateStoreId = "";
+  let corporateStoreName = "";
+  let birtamodStoreId = "";
+  let birtamodMaker: AuthenticatedUser;
+  let birtamodChecker: AuthenticatedUser;
+  let corporateChecker: AuthenticatedUser | null = null;
+  let originalCorporateAssignment: {
+    id: string;
+    makerApplicationUserId: string;
+    supervisorApplicationUserId: string;
+    isActive: boolean;
+  } | null = null;
   let inactiveStoreId = "";
   let noTransferStoreId = "";
   let beyondFifthStoreId = "";
   let itemId = "";
+  let itemUnitId = "";
   let otherEmployeeId = "";
   let inactiveEmployeeId = "";
   let defaultRequestedById = "";
@@ -67,6 +85,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   let createdStoreIds: string[] = [];
   let createdUserIds: string[] = [];
   let createdEmployeeIds: string[] = [];
+  let createdLedgerIds: string[] = [];
 
   async function loadActor(userId: string): Promise<AuthenticatedUser> {
     const rows = await getDb()
@@ -114,21 +133,109 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     return created;
   }
 
+  async function seedStoreStock(
+    storeId: string,
+    quantity: string,
+  ): Promise<void> {
+    const inserted = await getDb()
+      .insert(stockLedger)
+      .values({
+        storeId,
+        itemId,
+        unitId: itemUnitId,
+        rate: "1",
+        movementType: "PURCHASE",
+        quantityIn: quantity,
+        quantityOut: "0",
+        amountIn: quantity,
+        amountOut: "0",
+        transactionDate: new Date(),
+        referenceType: "PURCHASE",
+        referenceId: randomUUID(),
+        referenceLineId: randomUUID(),
+        postedByApplicationUserId: admin.id,
+        postedAt: new Date(),
+      })
+      .returning({ id: stockLedger.id });
+    createdLedgerIds.push(inserted[0]!.id);
+  }
+
   async function cleanup(): Promise<void> {
     const db = getDb();
-    const requestIds = [...createdRequestIds];
+    const leftoverStores = await db
+      .select({ id: stores.id })
+      .from(stores)
+      .where(like(stores.storeCode, `${PREFIX}%`));
+    const storeIds = [
+      ...new Set([...createdStoreIds, ...leftoverStores.map((row) => row.id)]),
+    ];
+
+    const leftoverByNumber = await db
+      .select({ id: itemRequests.id })
+      .from(itemRequests)
+      .where(like(itemRequests.requestNumber, `${PREFIX}%`));
+    const leftoverByStore =
+      storeIds.length > 0
+        ? await db
+            .select({ id: itemRequests.id })
+            .from(itemRequests)
+            .where(
+              or(
+                inArray(itemRequests.requestingStoreId, storeIds),
+                inArray(itemRequests.corporateStoreId, storeIds),
+              ),
+            )
+        : [];
+    const requestIds = [
+      ...new Set([
+        ...createdRequestIds,
+        ...leftoverByNumber.map((row) => row.id),
+        ...leftoverByStore.map((row) => row.id),
+      ]),
+    ];
+    const issueRows =
+      requestIds.length > 0
+        ? await db
+            .select({ id: itemIssues.id })
+            .from(itemIssues)
+            .where(inArray(itemIssues.requestId, requestIds))
+        : [];
+    const issueIds = issueRows.map((row) => row.id);
+
+    const leftoverUsers = await db
+      .select({ id: applicationUsers.id })
+      .from(applicationUsers)
+      .where(like(applicationUsers.username, `${PREFIX}%`.toLowerCase()));
+    const userIds = [
+      ...new Set([...createdUserIds, ...leftoverUsers.map((row) => row.id)]),
+    ];
+
+    if (createdLedgerIds.length > 0) {
+      await db
+        .delete(stockLedger)
+        .where(inArray(stockLedger.id, createdLedgerIds));
+    }
+    if (issueIds.length > 0) {
+      await db
+        .delete(stockLedger)
+        .where(inArray(stockLedger.referenceId, issueIds));
+    }
+    if (storeIds.length > 0) {
+      await db.delete(stockLedger).where(inArray(stockLedger.storeId, storeIds));
+    }
+    if (userIds.length > 0) {
+      await db
+        .delete(stockLedger)
+        .where(inArray(stockLedger.postedByApplicationUserId, userIds));
+    }
+
+    if (issueIds.length > 0) {
+      await db
+        .delete(itemIssueLines)
+        .where(inArray(itemIssueLines.itemIssueId, issueIds));
+      await db.delete(itemIssues).where(inArray(itemIssues.id, issueIds));
+    }
     if (requestIds.length > 0) {
-      const issueRows = await db
-        .select({ id: itemIssues.id })
-        .from(itemIssues)
-        .where(inArray(itemIssues.requestId, requestIds));
-      const issueIds = issueRows.map((row) => row.id);
-      if (issueIds.length > 0) {
-        await db
-          .delete(itemIssueLines)
-          .where(inArray(itemIssueLines.itemIssueId, issueIds));
-        await db.delete(itemIssues).where(inArray(itemIssues.id, issueIds));
-      }
       await db
         .delete(itemRequestActions)
         .where(inArray(itemRequestActions.itemRequestId, requestIds));
@@ -138,25 +245,35 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       await db.delete(itemRequests).where(inArray(itemRequests.id, requestIds));
     }
 
-    const leftoverStores = await db
-      .select({ id: stores.id })
-      .from(stores)
-      .where(like(stores.storeCode, `${PREFIX}%`));
-    const storeIds = [
-      ...new Set([...createdStoreIds, ...leftoverStores.map((row) => row.id)]),
-    ];
+    if (originalCorporateAssignment) {
+      await db
+        .update(storeUsers)
+        .set({
+          makerApplicationUserId:
+            originalCorporateAssignment.makerApplicationUserId,
+          supervisorApplicationUserId:
+            originalCorporateAssignment.supervisorApplicationUserId,
+          isActive: originalCorporateAssignment.isActive,
+          updatedAt: new Date(),
+        })
+        .where(eq(storeUsers.id, originalCorporateAssignment.id));
+    }
+
+    if (userIds.length > 0) {
+      await db
+        .delete(storeUsers)
+        .where(
+          or(
+            inArray(storeUsers.makerApplicationUserId, userIds),
+            inArray(storeUsers.supervisorApplicationUserId, userIds),
+          ),
+        );
+    }
     if (storeIds.length > 0) {
       await db.delete(storeUsers).where(inArray(storeUsers.storeId, storeIds));
       await db.delete(stores).where(inArray(stores.id, storeIds));
     }
 
-    const leftoverUsers = await db
-      .select({ id: applicationUsers.id })
-      .from(applicationUsers)
-      .where(like(applicationUsers.username, `${PREFIX}%`.toLowerCase()));
-    const userIds = [
-      ...new Set([...createdUserIds, ...leftoverUsers.map((row) => row.id)]),
-    ];
     for (const userId of userIds) {
       await db.delete(authSessions).where(eq(authSessions.userId, userId));
       await db.delete(userRoles).where(eq(userRoles.userId, userId));
@@ -196,6 +313,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     createdUserIds = [];
     createdEmployeeIds = [];
     createdBranchIds = [];
+    createdLedgerIds = [];
+    originalCorporateAssignment = null;
   }
 
   before(async () => {
@@ -222,6 +341,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       throw new Error("No requestable item exists");
     }
     itemId = itemRows[0].id;
+    itemUnitId = itemRows[0].unitId;
 
     const passwordHash = await hashPassword("StoreToStore!1a");
 
@@ -487,8 +607,123 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     inactiveEmployeeId = inactiveEmployee[0]!.id;
     createdEmployeeIds.push(inactiveEmployeeId);
 
-    defaultRequestedById =
-      admin.employee?.id ?? destinationMaker.employee!.id;
+    defaultRequestedById = destinationMaker.employee!.id;
+
+    const corporateRows = await getDb()
+      .select({ store: stores, branch: branches })
+      .from(stores)
+      .innerJoin(branches, eq(stores.branchId, branches.id))
+      .where(
+        and(
+          eq(stores.isActive, true),
+          eq(branches.isActive, true),
+        ),
+      );
+    const corporateRow =
+      corporateRows.find((row) => row.store.storeCode.trim() === "999") ??
+      corporateRows.find(
+        (row) =>
+          row.branch.branchType === "HEAD_OFFICE" &&
+          row.store.underStoreId === null,
+      );
+    if (!corporateRow) {
+      throw new Error("Corporate Store is required for item request tests");
+    }
+    corporateStoreId = corporateRow.store.id;
+    corporateStoreName = corporateRow.store.storeName;
+    const existingCorporateAssignment = await getDb()
+      .select()
+      .from(storeUsers)
+      .where(eq(storeUsers.storeId, corporateStoreId))
+      .limit(1);
+    if (existingCorporateAssignment[0]?.isActive) {
+      corporateChecker = await loadActor(
+        existingCorporateAssignment[0].supervisorApplicationUserId,
+      );
+    } else {
+      const makerEmployee = await getDb()
+        .insert(employees)
+        .values({
+          employeeCode: `${PREFIX}COM`,
+          employeeName: "Corporate Store Maker",
+          branchId: corporateRow.branch.id,
+          isActive: true,
+        })
+        .returning({ id: employees.id });
+      createdEmployeeIds.push(makerEmployee[0]!.id);
+      const checkerEmployee = await getDb()
+        .insert(employees)
+        .values({
+          employeeCode: `${PREFIX}COC`,
+          employeeName: "Corporate Store Checker",
+          branchId: corporateRow.branch.id,
+          isActive: true,
+        })
+        .returning({ id: employees.id });
+      createdEmployeeIds.push(checkerEmployee[0]!.id);
+      const makerUser = await getDb()
+        .insert(applicationUsers)
+        .values({
+          employeeId: makerEmployee[0]!.id,
+          username: `${PREFIX}comaker`.toLowerCase(),
+          passwordHash,
+          mustChangePassword: false,
+          isActive: true,
+        })
+        .returning({ id: applicationUsers.id });
+      createdUserIds.push(makerUser[0]!.id);
+      const checkerUser = await getDb()
+        .insert(applicationUsers)
+        .values({
+          employeeId: checkerEmployee[0]!.id,
+          username: `${PREFIX}cochecker`.toLowerCase(),
+          passwordHash,
+          mustChangePassword: false,
+          isActive: true,
+        })
+        .returning({ id: applicationUsers.id });
+      createdUserIds.push(checkerUser[0]!.id);
+      await getDb().insert(userRoles).values([
+        { userId: makerUser[0]!.id, role: "MAKER" },
+        { userId: checkerUser[0]!.id, role: "CHECKER" },
+      ]);
+      if (existingCorporateAssignment[0]) {
+        originalCorporateAssignment = {
+          id: existingCorporateAssignment[0].id,
+          makerApplicationUserId:
+            existingCorporateAssignment[0].makerApplicationUserId,
+          supervisorApplicationUserId:
+            existingCorporateAssignment[0].supervisorApplicationUserId,
+          isActive: existingCorporateAssignment[0].isActive,
+        };
+        await getDb()
+          .update(storeUsers)
+          .set({
+            makerApplicationUserId: makerUser[0]!.id,
+            supervisorApplicationUserId: checkerUser[0]!.id,
+            isActive: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(storeUsers.id, existingCorporateAssignment[0].id));
+      } else {
+        await getDb().insert(storeUsers).values({
+          storeId: corporateStoreId,
+          makerApplicationUserId: makerUser[0]!.id,
+          supervisorApplicationUserId: checkerUser[0]!.id,
+          isActive: true,
+        });
+      }
+      corporateChecker = await loadActor(checkerUser[0]!.id);
+    }
+
+    const birtamod = await createAssignedStore({
+      suffix: "BM",
+      storeName: "Birtamod Store",
+      allowTransfer: false,
+    });
+    birtamodStoreId = birtamod.storeId;
+    birtamodMaker = birtamod.maker;
+    birtamodChecker = birtamod.checker;
   });
 
   after(async () => {
@@ -502,9 +737,12 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   it("lets an admin request from one store to another", async () => {
     const context = await getItemRequestContext(admin);
     assert.equal(context.canCreate, true);
+    assert.equal(context.canSelectRequestFromStore, true);
     assert.equal(context.canSelectDestinationStore, true);
     assert.equal(context.canSelectRequestedByEmployee, true);
+    assert.equal(context.requestFromStore, null);
     assert.equal(context.destinationStore, null);
+    assert.equal(context.requestToStore?.id, corporateStoreId);
     if (admin.employee) {
       assert.equal(context.requestedByEmployee?.id, admin.employee.id);
       assert.equal(context.requestedByEmployee?.department, null);
@@ -512,20 +750,20 @@ describe("store-to-store item requests", { concurrency: false }, () => {
 
     const created = await trackRequest(
       await createItemRequest(admin, {
-        sourceStoreId,
-        destinationStoreId,
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: sourceStoreId,
         requestedByEmployeeId: defaultRequestedById,
         remarks: null,
         lines: [{ itemId, requestedQuantity: "3" }],
       }),
     );
 
-    assert.equal(created.sourceStoreId, sourceStoreId);
-    assert.equal(created.destinationStoreId, destinationStoreId);
-    assert.equal(created.corporateStoreId, sourceStoreId);
+    assert.equal(created.sourceStoreId, destinationStoreId);
+    assert.equal(created.destinationStoreId, sourceStoreId);
     assert.equal(created.requestingStoreId, destinationStoreId);
-    assert.equal(created.sourceStore?.id, sourceStoreId);
-    assert.equal(created.destinationStore.id, destinationStoreId);
+    assert.equal(created.corporateStoreId, sourceStoreId);
+    assert.equal(created.sourceStore?.id, destinationStoreId);
+    assert.equal(created.destinationStore?.id, sourceStoreId);
     assert.equal(created.status, "DRAFT");
     assert.equal(created.requestedBy?.id, defaultRequestedById);
     assert.equal(created.createdBy.id, admin.id);
@@ -535,8 +773,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   it("lets an admin create a request for another active employee", async () => {
     const created = await trackRequest(
       await createItemRequest(admin, {
-        sourceStoreId,
-        destinationStoreId,
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: sourceStoreId,
         requestedByEmployeeId: otherEmployeeId,
         remarks: null,
         lines: [{ itemId, requestedQuantity: "1" }],
@@ -553,7 +791,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     assert.equal(created.requestedBy?.department, null);
   });
 
-  it("lets an admin search a supplying store beyond the first five results and submit it", async () => {
+  it("lets an admin search a requesting store beyond the first five results and submit it", async () => {
     const firstPage = await listEligibleItemRequestSourceStores(admin, {
       page: 1,
       pageSize: 5,
@@ -566,9 +804,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       !firstPage.items.some((store) => store.id === beyondFifthStoreId),
     );
     assert.ok(
-      !firstPage.items.some((store) =>
-        /inactive|notransfer/i.test(store.storeName),
-      ),
+      !firstPage.items.some((store) => /inactive/i.test(store.storeName)),
     );
 
     const searched = await listEligibleItemRequestSourceStores(admin, {
@@ -595,17 +831,23 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     assert.ok(
       !hidden.items.some((store) => store.storeName.includes("Inactive Needle")),
     );
-    assert.ok(
-      !hidden.items.some((store) =>
-        store.storeName.includes("NoTransfer Needle"),
-      ),
-    );
+
+    const zuluEmployee = await getDb()
+      .insert(employees)
+      .values({
+        employeeCode: `${PREFIX}ZULU`,
+        employeeName: "Zulu Requestor",
+        branchId: found.branch.id,
+        isActive: true,
+      })
+      .returning({ id: employees.id });
+    createdEmployeeIds.push(zuluEmployee[0]!.id);
 
     const created = await trackRequest(
       await createItemRequest(admin, {
         sourceStoreId: beyondFifthStoreId,
-        destinationStoreId,
-        requestedByEmployeeId: defaultRequestedById,
+        destinationStoreId: sourceStoreId,
+        requestedByEmployeeId: zuluEmployee[0]!.id,
         remarks: null,
         lines: [{ itemId, requestedQuantity: "1" }],
       }),
@@ -640,8 +882,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     await assert.rejects(
       () =>
         createItemRequest(admin, {
-          sourceStoreId,
-          destinationStoreId,
+          sourceStoreId: destinationStoreId,
+          destinationStoreId: sourceStoreId,
           requestedByEmployeeId: inactiveEmployeeId,
           remarks: null,
           lines: [{ itemId, requestedQuantity: "1" }],
@@ -655,8 +897,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     await assert.rejects(
       () =>
         createItemRequest(destinationMaker, {
-          sourceStoreId,
-          destinationStoreId,
+          sourceStoreId: destinationStoreId,
+          destinationStoreId: corporateStoreId,
           requestedByEmployeeId: otherEmployeeId,
           remarks: null,
           lines: [{ itemId, requestedQuantity: "1" }],
@@ -670,35 +912,42 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     );
   });
 
-  it("lets a normal maker request only for their assigned receiving store", async () => {
+  it("lets a normal maker request only for their assigned Request From Store", async () => {
     const context = await getItemRequestContext(destinationMaker);
     assert.equal(context.canCreate, true);
+    assert.equal(context.canSelectRequestFromStore, false);
+    assert.equal(context.canSelectRequestToStore, false);
     assert.equal(context.canSelectDestinationStore, false);
-    assert.equal(context.canSelectRequestedByEmployee, false);
+    assert.equal(context.requestFromStore?.id, destinationStoreId);
     assert.equal(context.destinationStore?.id, destinationStoreId);
+    assert.equal(context.requestToStore?.id, corporateStoreId);
     assert.equal(context.requestedByEmployee?.id, destinationMaker.employee!.id);
 
     const created = await trackRequest(
       await createItemRequest(destinationMaker, {
-        sourceStoreId,
-        destinationStoreId,
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: corporateStoreId,
         requestedByEmployeeId: destinationMaker.employee!.id,
         remarks: null,
         lines: [{ itemId, requestedQuantity: "2" }],
       }),
     );
-    assert.equal(created.destinationStoreId, destinationStoreId);
-    assert.equal(created.sourceStoreId, sourceStoreId);
+    assert.equal(created.sourceStoreId, destinationStoreId);
+    assert.equal(created.destinationStoreId, corporateStoreId);
+    assert.equal(created.requestingStoreId, destinationStoreId);
+    assert.equal(created.corporateStoreId, corporateStoreId);
+    assert.equal(created.requestingStoreId, destinationStoreId);
+    assert.equal(created.corporateStoreId, corporateStoreId);
     assert.equal(created.requestedBy?.id, destinationMaker.employee!.id);
     assert.equal(created.createdBy.id, destinationMaker.id);
   });
 
-  it("rejects unauthorized destination store selection from a normal user", async () => {
+  it("rejects unauthorized Request From Store selection from a normal user", async () => {
     await assert.rejects(
       () =>
         createItemRequest(destinationMaker, {
-          sourceStoreId,
-          destinationStoreId: sourceStoreId,
+          sourceStoreId: sourceStoreId,
+          destinationStoreId: corporateStoreId,
           requestedByEmployeeId: destinationMaker.employee!.id,
           remarks: null,
           lines: [{ itemId, requestedQuantity: "1" }],
@@ -718,8 +967,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     await assert.rejects(
       () =>
         createItemRequest(unassignedMaker, {
-          sourceStoreId,
-          destinationStoreId,
+          sourceStoreId: destinationStoreId,
+          destinationStoreId: corporateStoreId,
           requestedByEmployeeId: unassignedMaker.employee!.id,
           remarks: null,
           lines: [{ itemId, requestedQuantity: "1" }],
@@ -737,8 +986,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     await assert.rejects(
       () =>
         createItemRequest(admin, {
-          sourceStoreId,
-          destinationStoreId: sourceStoreId,
+          sourceStoreId: destinationStoreId,
+          destinationStoreId: destinationStoreId,
           requestedByEmployeeId: defaultRequestedById,
           remarks: null,
           lines: [{ itemId, requestedQuantity: "1" }],
@@ -757,7 +1006,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       () =>
         createItemRequest(admin, {
           sourceStoreId: inactiveStoreId,
-          destinationStoreId,
+          destinationStoreId: sourceStoreId,
           requestedByEmployeeId: defaultRequestedById,
           remarks: null,
           lines: [{ itemId, requestedQuantity: "1" }],
@@ -767,12 +1016,12 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     );
   });
 
-  it("rejects a supplying store that is not allowed to transfer", async () => {
+  it("rejects a Request To Store that is not allowed to transfer", async () => {
     await assert.rejects(
       () =>
         createItemRequest(admin, {
-          sourceStoreId: noTransferStoreId,
-          destinationStoreId,
+          sourceStoreId: destinationStoreId,
+          destinationStoreId: noTransferStoreId,
           requestedByEmployeeId: defaultRequestedById,
           remarks: null,
           lines: [{ itemId, requestedQuantity: "1" }],
@@ -781,7 +1030,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         isAppError(
           error,
           400,
-          "The supplying store is not allowed to transfer or issue stock.",
+          "The Request To Store is not allowed to transfer or issue stock.",
         ),
     );
   });
@@ -793,8 +1042,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     });
     await trackRequest(
       await createItemRequest(admin, {
-        sourceStoreId,
-        destinationStoreId,
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: sourceStoreId,
         requestedByEmployeeId: defaultRequestedById,
         remarks: null,
         lines: [{ itemId, requestedQuantity: "8" }],
@@ -810,8 +1059,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   it("creates an issue from the supplying store and blocks over-issue and re-issue", async () => {
     const requested = await trackRequest(
       await createItemRequest(admin, {
-        sourceStoreId,
-        destinationStoreId,
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: sourceStoreId,
         requestedByEmployeeId: defaultRequestedById,
         remarks: null,
         lines: [{ itemId, requestedQuantity: "10" }],
@@ -894,5 +1143,296 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         }),
       (error: unknown) => isAppError(error, 409),
     );
+  });
+
+  it("lets an admin delete a request that has no item issues", async () => {
+    const created = await trackRequest(
+      await createItemRequest(admin, {
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: sourceStoreId,
+        requestedByEmployeeId: defaultRequestedById,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "1" }],
+      }),
+    );
+    assert.equal(created.canDelete, true);
+
+    await deleteItemRequest(created.id, admin, created.version);
+
+    await assert.rejects(
+      () => getItemRequestById(created.id, admin),
+      (error: unknown) => isAppError(error, 404, "Item request not found"),
+    );
+  });
+
+  it("does not let a maker delete an item request", async () => {
+    const created = await trackRequest(
+      await createItemRequest(destinationMaker, {
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: corporateStoreId,
+        requestedByEmployeeId: destinationMaker.employee!.id,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "1" }],
+      }),
+    );
+    assert.equal(created.canDelete, false);
+
+    await assert.rejects(
+      () => deleteItemRequest(created.id, destinationMaker, created.version),
+      (error: unknown) =>
+        isAppError(error, 403, "You cannot delete an item request"),
+    );
+
+    const stillThere = await getItemRequestById(created.id, admin);
+    assert.equal(stillThere.id, created.id);
+    assert.equal(stillThere.canDelete, true);
+  });
+
+  it("rejects deleting a request that has item issues", async () => {
+    const requested = await trackRequest(
+      await createItemRequest(admin, {
+        sourceStoreId: destinationStoreId,
+        destinationStoreId: sourceStoreId,
+        requestedByEmployeeId: defaultRequestedById,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "2" }],
+      }),
+    );
+    await getDb()
+      .update(itemRequests)
+      .set({
+        status: "APPROVED",
+        approvedAt: new Date(),
+        corporateMakerApplicationUserId: sourceChecker.id,
+        corporateCheckerApplicationUserId: sourceChecker.id,
+        branchCheckerApplicationUserId: destinationMaker.id,
+      })
+      .where(eq(itemRequests.id, requested.id));
+
+    const detail = await getItemRequestById(requested.id, admin);
+    const requestLineId = detail.lines[0]?.id;
+    assert.ok(requestLineId);
+
+    await createItemIssueFromRequest(requested.id, sourceChecker, {
+      remarks: null,
+      lines: [{ requestLineId, issueQuantity: "1" }],
+    });
+
+    await assert.rejects(
+      () => deleteItemRequest(requested.id, admin, detail.version),
+      (error: unknown) =>
+        isAppError(
+          error,
+          409,
+          "This item request cannot be deleted because it has item issue records.",
+        ),
+    );
+
+    const stillThere = await getItemRequestById(requested.id, admin);
+    assert.equal(stillThere.id, requested.id);
+  });
+
+  it("lets Birtamod Store request from Corporate Store with the corrected store meaning", async () => {
+    await seedStoreStock(corporateStoreId, "15");
+    await seedStoreStock(birtamodStoreId, "99");
+
+    const created = await trackRequest(
+      await createItemRequest(birtamodMaker, {
+        sourceStoreId: birtamodStoreId,
+        destinationStoreId: corporateStoreId,
+        requestedByEmployeeId: birtamodMaker.employee!.id,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "5" }],
+      }),
+    );
+
+    assert.equal(created.sourceStoreId, birtamodStoreId);
+    assert.equal(created.requestingStoreId, birtamodStoreId);
+    assert.equal(created.sourceStore?.storeName, "Birtamod Store");
+    assert.equal(created.destinationStoreId, corporateStoreId);
+    assert.equal(created.corporateStoreId, corporateStoreId);
+    assert.equal(created.destinationStore?.id, corporateStoreId);
+    assert.equal(created.destinationStore?.storeName, corporateStoreName);
+
+    const corporateStock = await getOperationalAvailableQuantities({
+      storeId: corporateStoreId,
+      itemIds: [itemId],
+    });
+    const birtamodStock = await getOperationalAvailableQuantities({
+      storeId: birtamodStoreId,
+      itemIds: [itemId],
+    });
+    assert.equal(
+      created.lines[0]?.availableStockQuantity,
+      corporateStock[0]?.availableQuantity ?? "0",
+    );
+    assert.notEqual(
+      created.lines[0]?.availableStockQuantity,
+      birtamodStock[0]?.availableQuantity ?? "0",
+    );
+
+    const submitted = await performItemRequestAction(created.id, birtamodMaker, {
+      action: "SUBMIT",
+      remarks: null,
+      expectedVersion: created.version,
+    });
+    assert.equal(submitted.status, "PENDING_BRANCH_CHECKER");
+    assert.equal(submitted.branchChecker?.id, birtamodChecker.id);
+
+    const recommended = await performItemRequestAction(
+      submitted.id,
+      birtamodChecker,
+      {
+        action: "RECOMMEND",
+        remarks: "Branch recommended",
+        expectedVersion: submitted.version,
+      },
+    );
+    assert.equal(recommended.status, "PENDING_CORPORATE_MAKER");
+    assert.ok(recommended.corporateMaker);
+    assert.ok(recommended.corporateChecker);
+    assert.notEqual(recommended.corporateMaker.id, birtamodMaker.id);
+    assert.notEqual(recommended.corporateChecker.id, birtamodChecker.id);
+  });
+
+  it("names the requesting store when a Maker assignment is missing", async () => {
+    await getDb()
+      .update(storeUsers)
+      .set({ isActive: false })
+      .where(eq(storeUsers.storeId, birtamodStoreId));
+
+    try {
+      const created = await trackRequest(
+        await createItemRequest(admin, {
+          sourceStoreId: birtamodStoreId,
+          destinationStoreId: corporateStoreId,
+          requestedByEmployeeId: birtamodMaker.employee!.id,
+          remarks: null,
+          lines: [{ itemId, requestedQuantity: "1" }],
+        }),
+      );
+
+      await assert.rejects(
+        () =>
+          performItemRequestAction(created.id, admin, {
+            action: "SUBMIT",
+            remarks: null,
+            expectedVersion: created.version,
+          }),
+        (error: unknown) =>
+          isAppError(
+            error,
+            400,
+            "Birtamod Store does not have an active Maker assignment.",
+          ),
+      );
+    } finally {
+      await getDb()
+        .update(storeUsers)
+        .set({ isActive: true })
+        .where(eq(storeUsers.storeId, birtamodStoreId));
+    }
+  });
+
+  it("does not reverse historically stored requesting and corporate store ids", async () => {
+    const inserted = await getDb()
+      .insert(itemRequests)
+      .values({
+        requestNumber: `${PREFIX}HIST-${Date.now().toString(36)}`,
+        requestingStoreId: birtamodStoreId,
+        corporateStoreId: corporateStoreId,
+        requestedByEmployeeId: birtamodMaker.employee!.id,
+        createdByApplicationUserId: admin.id,
+        status: "DRAFT",
+        remarks: "historical-row",
+        version: 1,
+      })
+      .returning({ id: itemRequests.id });
+    createdRequestIds.push(inserted[0]!.id);
+
+    const loaded = await getItemRequestById(inserted[0]!.id, admin);
+    assert.equal(loaded.requestingStoreId, birtamodStoreId);
+    assert.equal(loaded.corporateStoreId, corporateStoreId);
+    assert.equal(loaded.sourceStoreId, birtamodStoreId);
+    assert.equal(loaded.destinationStoreId, corporateStoreId);
+    assert.equal(loaded.sourceStore?.storeName, "Birtamod Store");
+    assert.equal(loaded.destinationStore?.id, corporateStoreId);
+  });
+
+  it("posting an issue deducts Corporate stock, not Birtamod stock", async () => {
+    assert.ok(corporateChecker, "Corporate Store checker assignment is required");
+
+    await seedStoreStock(corporateStoreId, "20");
+    await seedStoreStock(birtamodStoreId, "8");
+
+    const created = await trackRequest(
+      await createItemRequest(birtamodMaker, {
+        sourceStoreId: birtamodStoreId,
+        destinationStoreId: corporateStoreId,
+        requestedByEmployeeId: birtamodMaker.employee!.id,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "3" }],
+      }),
+    );
+
+    const approvedAtCreate = await getOperationalAvailableQuantities({
+      storeId: corporateStoreId,
+      itemIds: [itemId],
+    });
+    const birtamodBefore = await getOperationalAvailableQuantities({
+      storeId: birtamodStoreId,
+      itemIds: [itemId],
+    });
+
+    await getDb()
+      .update(itemRequests)
+      .set({
+        status: "APPROVED",
+        approvedAt: new Date(),
+        branchCheckerApplicationUserId: birtamodChecker.id,
+        corporateMakerApplicationUserId: corporateChecker.id,
+        corporateCheckerApplicationUserId: corporateChecker.id,
+      })
+      .where(eq(itemRequests.id, created.id));
+
+    const afterApproveCorporate = await getOperationalAvailableQuantities({
+      storeId: corporateStoreId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterApproveCorporate, approvedAtCreate);
+
+    const detail = await getItemRequestById(created.id, admin);
+    const requestLineId = detail.lines[0]?.id;
+    assert.ok(requestLineId);
+    assert.equal(
+      detail.lines[0]?.availableStockQuantity,
+      afterApproveCorporate[0]?.availableQuantity ?? "0",
+    );
+
+    const issue = await createItemIssueFromRequest(created.id, corporateChecker, {
+      remarks: null,
+      lines: [{ requestLineId, issueQuantity: "3" }],
+    });
+    assert.equal(issue.fromStore.id, corporateStoreId);
+    assert.equal(issue.toStore.id, birtamodStoreId);
+    assert.notEqual(issue.fromStore.id, birtamodStoreId);
+
+    await submitItemIssue(issue.id, corporateChecker, {
+      expectedVersion: issue.version,
+    });
+
+    const afterIssueCorporate = await getOperationalAvailableQuantities({
+      storeId: corporateStoreId,
+      itemIds: [itemId],
+    });
+    const afterIssueBirtamod = await getOperationalAvailableQuantities({
+      storeId: birtamodStoreId,
+      itemIds: [itemId],
+    });
+
+    const beforeQty = Number(approvedAtCreate[0]?.availableQuantity ?? "0");
+    const afterQty = Number(afterIssueCorporate[0]?.availableQuantity ?? "0");
+    assert.equal(afterQty, beforeQty - 3);
+    assert.deepEqual(afterIssueBirtamod, birtamodBefore);
   });
 });

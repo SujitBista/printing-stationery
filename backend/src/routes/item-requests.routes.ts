@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createItemRequestHandler,
+  deleteItemRequestHandler,
   getItemRequestContextHandler,
   getItemRequestHandler,
   listEligibleItemRequestItemsHandler,
@@ -33,6 +34,7 @@ itemRequestsRouter.get("/:requestId/issue-eligibility", getItemIssueEligibilityH
 itemRequestsRouter.post("/", createItemRequestHandler);
 itemRequestsRouter.patch("/:id", updateItemRequestHandler);
 itemRequestsRouter.post("/:id/actions", performItemRequestActionHandler);
+itemRequestsRouter.delete("/:id", deleteItemRequestHandler);
 itemRequestsRouter.post(
   "/:requestId/item-issues",
   createItemIssueFromRequestHandler,

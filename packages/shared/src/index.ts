@@ -384,6 +384,7 @@ export {
   createItemRequestInputSchema,
   updateItemRequestInputSchema,
   itemRequestActionInputSchema,
+  deleteItemRequestInputSchema,
   itemRequestListQuerySchema,
   eligibleItemRequestItemListQuerySchema,
   eligibleItemRequestStoreListQuerySchema,
@@ -415,6 +416,7 @@ export type {
   CreateItemRequestInput,
   UpdateItemRequestInput,
   ItemRequestActionInput,
+  DeleteItemRequestInput,
   ItemRequestListQuery,
   EligibleItemRequestItemListQuery,
   EligibleItemRequestStoreListQuery,
@@ -615,3 +617,9 @@ export {
   sumDecimalStrings,
   isNonNegativeDecimalString,
 } from "./decimal-amount.js";
+export {
+  CORPORATE_STORE_CODE,
+  isCorporateControlStore,
+  preferCorporateControlStore,
+} from "./store-identity.js";
+export type { CorporateStoreIdentity } from "./store-identity.js";

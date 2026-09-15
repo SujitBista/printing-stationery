@@ -45,9 +45,9 @@ export const itemRequests = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     requestNumber: varchar("request_number", { length: 40 }).notNull(),
-    /** Request To / receiving / destination store. API: destinationStoreId. */
+    /** Request From Store: the store making the request. API: sourceStoreId. */
     requestingStoreId: uuid("requesting_store_id").notNull(),
-    /** Request From / supplying / source store. API: sourceStoreId. */
+    /** Request To Store: the store that processes and supplies. API: destinationStoreId. */
     corporateStoreId: uuid("corporate_store_id"),
     /**
      * Employee on whose behalf the request is made (Requested By).

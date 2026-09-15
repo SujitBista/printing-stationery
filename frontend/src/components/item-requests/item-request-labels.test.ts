@@ -9,13 +9,13 @@ import {
 } from "./item-request-labels.js";
 
 describe("formatStoreTransferDirection", () => {
-  it("renders supplying store then receiving store", () => {
+  it("renders requesting store then processing store", () => {
     assert.equal(
       formatStoreTransferDirection(
+        { storeName: "Birtamod Store" },
         { storeName: "Corporate Store" },
-        { storeName: "Tankisinwari Store" },
       ),
-      "Corporate Store → Tankisinwari Store",
+      "Birtamod Store → Corporate Store",
     );
   });
 });

@@ -7,6 +7,7 @@ import type {
   createItemRequestInputSchema,
   updateItemRequestInputSchema,
   itemRequestActionInputSchema,
+  deleteItemRequestInputSchema,
   itemRequestListQuerySchema,
   itemRequestQueueSchema,
   eligibleItemRequestItemListQuerySchema,
@@ -45,6 +46,9 @@ export type UpdateItemRequestInput = z.infer<
 >;
 export type ItemRequestActionInput = z.infer<
   typeof itemRequestActionInputSchema
+>;
+export type DeleteItemRequestInput = z.infer<
+  typeof deleteItemRequestInputSchema
 >;
 export type ItemRequestListQuery = z.infer<typeof itemRequestListQuerySchema>;
 export type EligibleItemRequestItemListQuery = z.infer<

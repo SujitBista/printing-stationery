@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type {
   ItemRequest,
   ItemRequestActionType,
 } from "@printing-stationery/shared";
 import {
+  deleteItemRequest,
   fetchItemRequest,
   performItemRequestAction,
 } from "@/lib/api/item-requests";
@@ -60,6 +61,7 @@ function storeBlock(
 
 export function ItemRequestDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const { canAccessItemRequests } = useAuth();
   const [request, setRequest] = useState<ItemRequest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +72,7 @@ export function ItemRequestDetailPage() {
   const [pendingAction, setPendingAction] =
     useState<ItemRequestActionType | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [canCreateIssue, setCanCreateIssue] = useState(false);
 
   const loadRequest = useCallback(async () => {
@@ -137,6 +140,32 @@ export function ItemRequestDetailPage() {
       type: "success",
       message: `${ITEM_REQUEST_ACTION_LABELS[pendingAction]} completed.`,
     });
+  }
+
+  async function handleDelete() {
+    if (!request) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete request ${request.requestNumber}? This cannot be undone.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleting(true);
+    setFeedback(null);
+    const result = await deleteItemRequest(request.id, {
+      expectedVersion: request.version,
+    });
+    setDeleting(false);
+
+    if (!result.ok) {
+      setFeedback({ type: "error", message: result.error });
+      return;
+    }
+
+    router.push("/requests/item-requests");
   }
 
   if (!canAccessItemRequests) {
@@ -210,6 +239,16 @@ export function ItemRequestDetailPage() {
                   Edit
                 </Link>
               ) : null}
+              {request.canDelete ? (
+                <button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  disabled={deleting}
+                  className="rounded-lg border border-danger px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/10 disabled:opacity-60"
+                >
+                  {deleting ? "Deleting…" : "Delete"}
+                </button>
+              ) : null}
               {request.allowedActions.map((action) => (
                 <button
                   key={action}
@@ -239,13 +278,13 @@ export function ItemRequestDetailPage() {
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             {storeBlock(
               "Request From Store",
-              "Store that will supply the items",
-              request.sourceStore,
+              "Store making the request",
+              request.sourceStore ?? request.requestingStore,
             )}
             {storeBlock(
               "Request To Store",
-              "Store that will receive the items",
-              request.destinationStore,
+              "Store that will process and supply the request",
+              request.destinationStore ?? request.corporateStore,
             )}
             <div>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-muted">

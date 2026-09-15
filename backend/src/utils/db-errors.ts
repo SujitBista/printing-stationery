@@ -32,6 +32,8 @@ const ITEM_REQUEST_LINE_ITEM_UNIQUE_INDEX =
   "item_request_lines_request_item_uidx";
 const ITEM_REQUEST_LINE_QUANTITY_CHECK =
   "item_request_lines_requested_quantity_positive";
+const ITEM_ISSUES_REQUEST_ID_FK = "item_issues_request_id_fk";
+const ITEM_ISSUE_LINES_REQUEST_LINE_FK = "item_issue_lines_request_line_id_fk";
 const ITEM_ISSUE_NUMBER_UNIQUE_INDEX = "item_issues_issue_number_uidx";
 const ITEM_ISSUE_LINE_REQUEST_LINE_UNIQUE_INDEX =
   "item_issue_lines_issue_request_line_uidx";
@@ -501,11 +503,32 @@ export function mapItemRequestDatabaseError(error: unknown): never {
     });
   }
 
+  if (isItemRequestInUseForeignKeyViolation(error)) {
+    throw new AppError(
+      "This item request cannot be deleted because it has item issue records.",
+      409,
+      { cause: error },
+    );
+  }
+
   if (isDatabaseUnavailableError(error)) {
     throw new AppError(DATABASE_UNAVAILABLE_MESSAGE, 503, { cause: error });
   }
 
   throw error;
+}
+
+export function isItemRequestInUseForeignKeyViolation(error: unknown): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23503") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return (
+    constraint === ITEM_ISSUES_REQUEST_ID_FK ||
+    constraint === ITEM_ISSUE_LINES_REQUEST_LINE_FK
+  );
 }
 
 export function databaseUnavailableError(cause?: unknown): AppError {

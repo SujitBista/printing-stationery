@@ -11,6 +11,7 @@ import type {
 } from "@printing-stationery/shared";
 import { fetchBranches } from "@/lib/api/branches";
 import {
+  deleteItemRequest,
   fetchItemRequestContext,
   fetchItemRequests,
   performItemRequestAction,
@@ -77,6 +78,7 @@ export function ItemRequestListPage({
     action: ItemRequestActionType;
   } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   useEffect(() => {
@@ -202,6 +204,32 @@ export function ItemRequestListPage({
     await loadRequests();
   }
 
+  async function handleDelete(request: ItemRequestListItem) {
+    const confirmed = window.confirm(
+      `Delete request ${request.requestNumber}? This cannot be undone.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(request.id);
+    const result = await deleteItemRequest(request.id, {
+      expectedVersion: request.version,
+    });
+    setDeletingId(null);
+
+    if (!result.ok) {
+      setFeedback({ type: "error", message: result.error });
+      return;
+    }
+
+    setFeedback({
+      type: "success",
+      message: `Request ${request.requestNumber} deleted.`,
+    });
+    await loadRequests();
+  }
+
   if (!canAccessItemRequests) {
     return (
       <section className="w-full max-w-7xl">
@@ -279,7 +307,7 @@ export function ItemRequestListPage({
         {isAdmin ? (
           <>
             <label className="flex w-full flex-col gap-1 text-sm">
-              <span className="font-medium text-ink">Receiving store</span>
+              <span className="font-medium text-ink">Request From Store</span>
               <SearchableSelect
                 value={requestingStoreId}
                 onChange={(nextValue) => {
@@ -406,8 +434,9 @@ export function ItemRequestListPage({
                             )}
                           </Badge>
                           <div className="mt-1 text-xs text-ink-muted">
-                            From {request.sourceStore?.storeCode ?? "—"} to{" "}
-                            {request.destinationStore.storeCode}
+                            Requesting {request.sourceStore?.storeCode ?? "—"} ·
+                            Processing{" "}
+                            {request.destinationStore?.storeCode ?? "—"}
                           </div>
                         </td>
                         <td className="min-w-[10rem] px-3 py-3">
@@ -467,6 +496,18 @@ export function ItemRequestListPage({
                                 {ITEM_REQUEST_ACTION_LABELS[action]}
                               </button>
                             ))}
+                            {request.canDelete ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleDelete(request)}
+                                disabled={deletingId === request.id}
+                                className="font-medium text-danger hover:underline disabled:opacity-60"
+                              >
+                                {deletingId === request.id
+                                  ? "Deleting…"
+                                  : "Delete"}
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>

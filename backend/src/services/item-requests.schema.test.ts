@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  CORPORATE_STORE_CODE,
   createItemRequestInputSchema,
+  eligibleItemRequestItemListQuerySchema,
   eligibleItemRequestStoreListQuerySchema,
+  isCorporateControlStore,
+  preferCorporateControlStore,
 } from "@printing-stationery/shared";
 
 const SOURCE = "11111111-1111-4111-8111-111111111111";
@@ -73,7 +77,7 @@ describe("create item request store pair schema", () => {
   });
 });
 
-describe("eligible supplying store search query", () => {
+describe("eligible requesting store search query", () => {
   it("defaults to a page size larger than five", () => {
     const parsed = eligibleItemRequestStoreListQuerySchema.safeParse({});
     assert.equal(parsed.success, true);
@@ -95,5 +99,76 @@ describe("eligible supplying store search query", () => {
       assert.equal(parsed.data.pageSize, 5);
       assert.equal(parsed.data.search, "Zulu Distant");
     }
+  });
+});
+
+describe("eligible item stock query", () => {
+  it("reads available stock from Request To Store", () => {
+    const parsed = eligibleItemRequestItemListQuerySchema.safeParse({
+      destinationStoreId: DESTINATION,
+    });
+    assert.equal(parsed.success, true);
+    if (parsed.success) {
+      assert.equal(parsed.data.destinationStoreId, DESTINATION);
+    }
+  });
+
+  it("does not treat sourceStoreId as the stock store", () => {
+    const parsed = eligibleItemRequestItemListQuerySchema.safeParse({
+      sourceStoreId: SOURCE,
+    });
+    assert.equal(parsed.success, true);
+    if (parsed.success) {
+      assert.equal(parsed.data.destinationStoreId, undefined);
+      assert.equal(
+        (parsed.data as { sourceStoreId?: string }).sourceStoreId,
+        undefined,
+      );
+    }
+  });
+});
+
+describe("corporate store identity", () => {
+  it("identifies Corporate Store by configured store code 999", () => {
+    assert.equal(CORPORATE_STORE_CODE, "999");
+    assert.equal(
+      isCorporateControlStore({
+        storeCode: "999",
+        storeName: "Corporate Store",
+        underStoreId: null,
+        branchType: "HEAD_OFFICE",
+      }),
+      true,
+    );
+  });
+
+  it("does not treat a UUID or another store code as Corporate Store", () => {
+    assert.equal(
+      isCorporateControlStore({
+        storeCode: "001",
+        storeName: "Birtamod Store",
+        underStoreId: SOURCE,
+        branchType: "BRANCH",
+      }),
+      false,
+    );
+  });
+
+  it("prefers store code 999 when multiple head-office roots exist", () => {
+    const preferred = preferCorporateControlStore([
+      {
+        storeCode: "0999",
+        storeName: "Corporate Main Branch 999",
+        underStoreId: null,
+        branchType: "HEAD_OFFICE",
+      },
+      {
+        storeCode: "999",
+        storeName: "Corporate Store",
+        underStoreId: null,
+        branchType: "HEAD_OFFICE",
+      },
+    ]);
+    assert.equal(preferred?.storeCode, "999");
   });
 });

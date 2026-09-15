@@ -358,12 +358,12 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               <input
                 readOnly
                 value={formatStoreLabel(
-                  request.sourceStore ?? request.corporateStore,
+                  request.corporateStore ?? request.destinationStore,
                 )}
                 className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
               />
               <span className="text-xs text-ink-muted">
-                Store that will supply the items
+                Processing/supplying store (Request To Store)
               </span>
             </label>
             <label className="flex flex-col gap-1 text-sm">
@@ -371,12 +371,12 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               <input
                 readOnly
                 value={formatStoreLabel(
-                  request.destinationStore ?? request.requestingStore,
+                  request.requestingStore ?? request.sourceStore,
                 )}
                 className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
               />
               <span className="text-xs text-ink-muted">
-                Store that will receive the items
+                Requesting store that will receive the items (Request From Store)
               </span>
             </label>
             <label className="flex flex-col gap-1 text-sm">

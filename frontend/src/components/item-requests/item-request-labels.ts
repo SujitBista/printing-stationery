@@ -131,7 +131,7 @@ export function formatStoreTransferDirection(
   sourceStore: { storeName: string } | null | undefined,
   destinationStore: { storeName: string } | null | undefined,
 ): string {
-  const from = sourceStore?.storeName ?? "Supplying store not set";
-  const to = destinationStore?.storeName ?? "Receiving store not set";
+  const from = sourceStore?.storeName ?? "Requesting store not set";
+  const to = destinationStore?.storeName ?? "Processing store not set";
   return `${from} → ${to}`;
 }

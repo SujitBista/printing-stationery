@@ -89,7 +89,7 @@ export function ItemRequestStoreSelect(props: {
     <SearchableSelect
       value={props.value}
       disabled={props.disabled}
-      placeholder={props.placeholder ?? "Select supplying store"}
+      placeholder={props.placeholder ?? "Select Request From Store"}
       searchPlaceholder="Search stores…"
       emptyMessage="No matching stores found"
       filterLocally={false}

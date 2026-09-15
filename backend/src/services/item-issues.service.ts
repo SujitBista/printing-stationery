@@ -23,7 +23,7 @@ import type {
   PaginatedItemIssueResponse,
   UpdateItemIssueInput,
 } from "@printing-stationery/shared";
-import { userHasRole } from "@printing-stationery/shared";
+import { multiplyDecimalStrings, userHasRole } from "@printing-stationery/shared";
 import { AppError } from "../utils/errors.js";
 import {
   isItemIssueNumberUniqueViolation,
@@ -61,6 +61,7 @@ import {
   type ItemRequestRow,
 } from "../db/schema/item-requests.js";
 import { items, type ItemRow } from "../db/schema/items.js";
+import { stockLedger } from "../db/schema/opening-stocks.js";
 import { stores, type StoreRow } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
 import { units } from "../db/schema/units.js";
@@ -384,10 +385,10 @@ async function loadApprovedRequestOrThrow(requestId: string): Promise<{
     );
   }
   if (!row.requestingStore.isActive) {
-    throw new AppError("The receiving store is inactive.", 409);
+    throw new AppError("The requesting store is inactive.", 409);
   }
   if (!row.corporateStore.isActive) {
-    throw new AppError("The supplying store is inactive.", 409);
+    throw new AppError("The processing store is inactive.", 409);
   }
   if (
     !isEligibleSupplyingStore({
@@ -813,12 +814,12 @@ export async function getItemIssueEligibility(
         request.corporateBranch,
       ),
       sourceStore: toStoreSummary(
-        request.corporateStore,
-        request.corporateBranch,
-      ),
-      destinationStore: toStoreSummary(
         request.requestingStore,
         request.requestingBranch,
+      ),
+      destinationStore: toStoreSummary(
+        request.corporateStore,
+        request.corporateBranch,
       ),
       createdBy: toPersonSummary(
         request.createdByUser,
@@ -858,6 +859,12 @@ export async function createItemIssueFromRequest(
   const supplyingStoreId = eligibility.request.corporateStore?.id;
   if (!supplyingStoreId) {
     throw new AppError(NON_CORPORATE_SUPPLYING_STORE_MESSAGE, 409);
+  }
+  if (supplyingStoreId === eligibility.request.requestingStore.id) {
+    throw new AppError(
+      "Stock cannot be deducted from the Request From Store to fulfil its own request.",
+      409,
+    );
   }
 
   const createdId = await createDraftWithRetry(
@@ -994,12 +1001,12 @@ export async function getItemIssueById(
           requestHeader.corporateBranch,
         ),
         sourceStore: toStoreSummary(
-          requestHeader.corporateStore,
-          requestHeader.corporateBranch,
-        ),
-        destinationStore: toStoreSummary(
           requestHeader.requestingStore,
           requestHeader.requestingBranch,
+        ),
+        destinationStore: toStoreSummary(
+          requestHeader.corporateStore,
+          requestHeader.corporateBranch,
         ),
         createdBy: toPersonSummary(
           requestHeader.createdByUser,
@@ -1178,15 +1185,21 @@ export async function submitItemIssue(
         );
       }
       if (!requestRow.requestingStore.isActive) {
-        throw new AppError("The receiving store is inactive.", 409);
+        throw new AppError("The requesting store is inactive.", 409);
       }
       if (!requestRow.corporateStore.isActive) {
-        throw new AppError("The supplying store is inactive.", 409);
+        throw new AppError("The processing store is inactive.", 409);
       }
 
       await requireSupplyingStoreChecker(actor, requestRow.corporateStore.id);
       if (issue.fromStoreId !== requestRow.corporateStore.id) {
         throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
+      }
+      if (issue.fromStoreId === requestRow.request.requestingStoreId) {
+        throw new AppError(
+          "Stock cannot be deducted from the Request From Store to fulfil its own request.",
+          409,
+        );
       }
 
       const availability = await buildAvailability(
@@ -1197,10 +1210,16 @@ export async function submitItemIssue(
 
       const issueLineRows = await tx
         .select({
+          id: itemIssueLines.id,
           requestLineId: itemIssueLines.requestLineId,
+          itemId: itemIssueLines.itemId,
           issueQuantity: itemIssueLines.issueQuantity,
+          unitId: units.id,
+          purchaseRate: items.purchaseRate,
         })
         .from(itemIssueLines)
+        .innerJoin(items, eq(itemIssueLines.itemId, items.id))
+        .innerJoin(units, eq(items.unitId, units.id))
         .where(eq(itemIssueLines.itemIssueId, issueId));
 
       if (issueLineRows.length === 0) {
@@ -1302,6 +1321,31 @@ export async function submitItemIssue(
       if (!updated[0]) {
         throw new AppError(STALE_ISSUE_MESSAGE, 409);
       }
+
+      const postedAt = new Date();
+      await tx.insert(stockLedger).values(
+        issueLineRows.map((line) => ({
+          storeId: issue.fromStoreId,
+          itemId: line.itemId,
+          unitId: line.unitId,
+          rate: String(line.purchaseRate),
+          movementType: "ITEM_ISSUE" as const,
+          quantityIn: "0",
+          quantityOut: String(line.issueQuantity),
+          amountIn: "0",
+          amountOut: multiplyDecimalStrings(
+            String(line.issueQuantity),
+            String(line.purchaseRate),
+            2,
+          ),
+          transactionDate: postedAt,
+          referenceType: "ITEM_ISSUE" as const,
+          referenceId: issueId,
+          referenceLineId: line.id,
+          postedByApplicationUserId: actor.id,
+          postedAt,
+        })),
+      );
     });
 
     return getItemIssueById(issueId, actor);

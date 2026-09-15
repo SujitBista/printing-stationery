@@ -54,11 +54,13 @@ export const openingStockMappingEntityTypeEnum = pgEnum(
 export const stockLedgerMovementTypeEnum = pgEnum("stock_ledger_movement_type", [
   "OPENING_STOCK",
   "PURCHASE",
+  "ITEM_ISSUE",
 ]);
 
 export const stockLedgerReferenceTypeEnum = pgEnum("stock_ledger_reference_type", [
   "OPENING_STOCK",
   "PURCHASE",
+  "ITEM_ISSUE",
 ]);
 
 export const openingStockBatches = pgTable(

@@ -158,7 +158,7 @@ export const itemIssueRequestSummarySchema = z.object({
   requestingStore: itemRequestStoreSummarySchema,
   corporateStore: itemRequestStoreSummarySchema.nullable(),
   sourceStore: itemRequestStoreSummarySchema.nullable(),
-  destinationStore: itemRequestStoreSummarySchema,
+  destinationStore: itemRequestStoreSummarySchema.nullable(),
   createdBy: itemRequestPersonSummarySchema,
   requestedBy: itemRequestRequestedByEmployeeSchema.nullable(),
   lines: z.array(itemRequestLineSchema),

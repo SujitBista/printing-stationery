@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import {
   createItemRequestInputSchema,
+  deleteItemRequestInputSchema,
   eligibleItemRequestItemListQuerySchema,
   eligibleItemRequestStoreListQuerySchema,
   itemRequestActionInputSchema,
@@ -11,6 +12,7 @@ import {
 } from "@printing-stationery/shared";
 import {
   createItemRequest,
+  deleteItemRequest,
   getItemRequestById,
   getItemRequestContext,
   listEligibleItemRequestItems,
@@ -173,6 +175,24 @@ export async function performItemRequestActionHandler(
     );
     const result = await performItemRequestAction(id, actor, input);
     res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteItemRequestHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const id = parseOrThrow(itemRequestIdSchema.safeParse(req.params.id));
+    const input = parseOrThrow(
+      deleteItemRequestInputSchema.safeParse(req.body),
+    );
+    await deleteItemRequest(id, actor, input.expectedVersion);
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

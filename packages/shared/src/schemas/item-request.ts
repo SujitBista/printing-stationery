@@ -157,9 +157,9 @@ function rejectSameSourceAndDestination(
 }
 
 /**
- * `sourceStoreId` is Request From / supplying store.
- * `destinationStoreId` is Request To / receiving store.
- * Backend authorization still overrides destination for non-admin makers.
+ * `sourceStoreId` is Request From Store: the store making the request.
+ * `destinationStoreId` is Request To Store: the store that processes and supplies.
+ * Backend authorization still overrides Request From Store for non-admin makers.
  */
 export const createItemRequestInputSchema = z
   .object({
@@ -242,6 +242,18 @@ export const itemRequestActionInputSchema = z
     }
   });
 
+export const deleteItemRequestInputSchema = z
+  .object({
+    expectedVersion: z
+      .number({
+        required_error: "expectedVersion is required",
+        invalid_type_error: "expectedVersion must be a positive integer",
+      })
+      .int()
+      .positive(),
+  })
+  .strict();
+
 export const itemRequestListQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
@@ -265,11 +277,14 @@ export const eligibleItemRequestItemListQuerySchema = z.object({
     .trim()
     .optional()
     .transform((value) => (value && value.length > 0 ? value : undefined)),
-  /** When set, available stock is the Request From / supplying store balance. */
-  sourceStoreId: optionalUuidFilterSchema,
+  /**
+   * Request To Store whose available stock is shown. Required for stock
+   * balances; omitted quantities are returned as 0.
+   */
+  destinationStoreId: optionalUuidFilterSchema,
 });
 
-/** Paginated search of stores allowed to supply / transfer items. */
+/** Paginated search of stores that may make item requests (Request From). */
 export const eligibleItemRequestStoreListQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
@@ -278,7 +293,7 @@ export const eligibleItemRequestStoreListQuerySchema = z.object({
     .trim()
     .optional()
     .transform((value) => (value && value.length > 0 ? value : undefined)),
-  /** Exclude the Request To / receiving store from the supplying-store list. */
+  /** Exclude the Request To Store from the Request From Store list. */
   excludeStoreId: optionalUuidFilterSchema,
 });
 
@@ -389,21 +404,22 @@ export const itemRequestListItemSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   /**
-   * Request To / receiving store. Same value as `destinationStore`.
-   * Maps to database `requesting_store_id`.
+   * Request From Store: the store making the request.
+   * Maps to database `requesting_store_id`. Same value as `sourceStore`.
    */
   requestingStore: itemRequestStoreSummarySchema,
   /**
-   * Request From / supplying store. Same value as `sourceStore`.
-   * Maps to database `corporate_store_id`.
+   * Request To Store: the store that processes and supplies.
+   * Maps to database `corporate_store_id`. Same value as `destinationStore`.
    */
   corporateStore: itemRequestStoreSummarySchema.nullable(),
   sourceStore: itemRequestStoreSummarySchema.nullable(),
-  destinationStore: itemRequestStoreSummarySchema,
+  destinationStore: itemRequestStoreSummarySchema.nullable(),
   requestedBy: itemRequestRequestedByEmployeeSchema.nullable(),
   createdBy: itemRequestPersonSummarySchema,
   pendingWith: itemRequestPersonSummarySchema.nullable(),
   canEdit: z.boolean(),
+  canDelete: z.boolean(),
   allowedActions: z.array(itemRequestActionTypeSchema),
   canCreateIssue: z.boolean(),
 });
@@ -411,8 +427,8 @@ export const itemRequestListItemSchema = z.object({
 export const itemRequestSchema = itemRequestListItemSchema.extend({
   requestingStoreId: z.string().uuid(),
   corporateStoreId: z.string().uuid().nullable(),
-  sourceStoreId: z.string().uuid().nullable(),
-  destinationStoreId: z.string().uuid(),
+  sourceStoreId: z.string().uuid(),
+  destinationStoreId: z.string().uuid().nullable(),
   requestedByEmployeeId: z.string().uuid().nullable(),
   createdByApplicationUserId: z.string().uuid(),
   branchCheckerApplicationUserId: z.string().uuid().nullable(),
@@ -465,14 +481,26 @@ export const paginatedEligibleItemRequestStoreResponseSchema = z.object({
 
 export const itemRequestContextSchema = z.object({
   canCreate: z.boolean(),
+  canSelectRequestFromStore: z.boolean(),
+  canSelectRequestToStore: z.boolean(),
+  /** Admin may change Request From Store. Alias of `canSelectRequestFromStore`. */
   canSelectDestinationStore: z.boolean(),
   canSelectRequestedByEmployee: z.boolean(),
   /** Linked employee of the logged-in user, used as the Requested By default. */
   requestedByEmployee: itemRequestRequestedByEmployeeSchema.nullable(),
-  /** Assigned receiving store for a maker; null for Admin. */
+  /**
+   * Assigned Request From Store for a maker; null for Admin.
+   * Alias of `requestFromStore`.
+   */
   destinationStore: itemRequestStoreSummarySchema.nullable(),
-  /** Alias of `destinationStore` for older clients. */
+  requestFromStore: itemRequestStoreSummarySchema.nullable(),
+  /** Alias of `requestFromStore` for older clients. */
   requestingStore: itemRequestStoreSummarySchema.nullable(),
+  /** Default Request To Store (Corporate Store). */
+  requestToStore: itemRequestStoreSummarySchema.nullable(),
+  corporateStore: itemRequestStoreSummarySchema.nullable(),
+  /** Request From Store options (stores that may make requests). */
   sourceStores: z.array(itemRequestStoreSummarySchema),
+  /** Request To Store options (normally Corporate Store). */
   destinationStores: z.array(itemRequestStoreSummarySchema),
 });

@@ -37,7 +37,9 @@ import type {
   UpdateItemRequestInput,
 } from "@printing-stationery/shared";
 import {
+  CORPORATE_STORE_CODE,
   ITEM_REQUEST_QUEUE_STATUSES,
+  preferCorporateControlStore,
   userHasRole,
 } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
@@ -71,6 +73,7 @@ import {
 } from "./item-issue-authorization.js";
 import {
   INACTIVE_REQUESTED_BY_MESSAGE,
+  REQUESTED_BY_REQUIRED_MESSAGE,
   UNKNOWN_REQUESTED_BY_MESSAGE,
   canSelectRequestedByEmployee,
   resolveRequestedByEmployeeId,
@@ -87,26 +90,27 @@ const STALE_REQUEST_MESSAGE =
 const INVALID_TRANSITION_MESSAGE =
   "This action is not allowed for the current request status.";
 const ADMIN_WORKFLOW_MESSAGE =
-  "Administrators can create and submit requests on behalf of a receiving store, but cannot recommend, forward, approve, or reject them.";
+  "Administrators can create and submit requests on behalf of a requesting store, but cannot recommend, forward, approve, or reject them.";
 const CORPORATE_MISSING_MESSAGE =
   "Corporate Store routing is not configured. Contact an administrator.";
 const CORPORATE_AMBIGUOUS_MESSAGE =
   "Corporate Store routing is ambiguous. Contact an administrator.";
-const CORPORATE_SETUP_MESSAGE =
-  "The supplying store does not have an active maker and checker assignment.";
 const SAME_STORE_MESSAGE =
   "Request From Store and Request To Store must be different.";
-const INACTIVE_DESTINATION_MESSAGE = "The receiving store is inactive.";
-const INACTIVE_SOURCE_MESSAGE = "The supplying store is inactive.";
-const INELIGIBLE_SOURCE_MESSAGE =
-  "The supplying store is not allowed to transfer or issue stock.";
+const INACTIVE_SOURCE_MESSAGE = "The Request From Store is inactive.";
+const INACTIVE_DESTINATION_MESSAGE = "The Request To Store is inactive.";
+const INELIGIBLE_DESTINATION_MESSAGE =
+  "The Request To Store is not allowed to transfer or issue stock.";
 const NO_ASSIGNMENT_MESSAGE =
   "You can create a request only when you are an active maker of a store.";
-const UNAUTHORIZED_DESTINATION_MESSAGE =
+const UNAUTHORIZED_SOURCE_MESSAGE =
   "You can create a request only for your assigned store.";
-const DESTINATION_SETUP_MESSAGE =
-  "The receiving store does not have an active maker and checker assignment.";
 const SOURCE_REQUIRED_MESSAGE = "Request From Store is required.";
+const DESTINATION_REQUIRED_MESSAGE = "Request To Store is required.";
+const REQUEST_TO_MUST_BE_CORPORATE_MESSAGE =
+  "Request To Store must be the Corporate Store.";
+const REQUESTED_BY_BRANCH_MESSAGE =
+  "Requested By must be an active employee belonging to the Request From Store branch.";
 
 type ActorKind =
   | "BRANCH_MAKER"
@@ -424,6 +428,13 @@ async function loadSubmittedIssueTotalsByRequestLine(
   );
 }
 
+function missingAssignmentMessage(
+  storeName: string,
+  kind: "Maker" | "Checker",
+): string {
+  return `${storeName} does not have an active ${kind} assignment.`;
+}
+
 async function resolveCorporateStore(): Promise<CorporateStoreResolution> {
   const rows = await getDb()
     .select({
@@ -436,24 +447,51 @@ async function resolveCorporateStore(): Promise<CorporateStoreResolution> {
       and(
         eq(stores.isActive, true),
         eq(branches.isActive, true),
-        eq(branches.branchType, "HEAD_OFFICE"),
-        isNull(stores.underStoreId),
+        or(
+          sql`lower(${stores.storeCode}) = ${CORPORATE_STORE_CODE.toLowerCase()}`,
+          and(
+            eq(branches.branchType, "HEAD_OFFICE"),
+            isNull(stores.underStoreId),
+          ),
+        ),
       ),
-    )
-    .limit(2);
+    );
 
-  if (rows.length === 0) {
-    return { status: "MISSING" };
+  const preferred = preferCorporateControlStore(
+    rows.map((row) => ({
+      id: row.store.id,
+      storeCode: row.store.storeCode,
+      storeName: row.store.storeName,
+      underStoreId: row.store.underStoreId,
+      branchType: row.branch.branchType,
+    })),
+  );
+  if (preferred) {
+    const match = rows.find((row) => row.store.id === preferred.id);
+    if (match) {
+      return {
+        status: "OK",
+        store: match.store,
+        branch: match.branch,
+      };
+    }
   }
 
-  if (rows.length > 1) {
+  const hoRoots = rows.filter(
+    (row) =>
+      row.branch.branchType === "HEAD_OFFICE" && row.store.underStoreId === null,
+  );
+  if (hoRoots.length === 0) {
+    return { status: "MISSING" };
+  }
+  if (hoRoots.length > 1) {
     return { status: "AMBIGUOUS" };
   }
 
   return {
     status: "OK",
-    store: rows[0]!.store,
-    branch: rows[0]!.branch,
+    store: hoRoots[0]!.store,
+    branch: hoRoots[0]!.branch,
   };
 }
 
@@ -606,11 +644,27 @@ async function assertStorePairForRequest(params: {
   if (!destination || !destination.store.isActive || !destination.branch.isActive) {
     throw new AppError(INACTIVE_DESTINATION_MESSAGE, 400);
   }
-  if (!storeIsEligibleSupplying(source.store, source.branch)) {
-    throw new AppError(INELIGIBLE_SOURCE_MESSAGE, 400);
+  if (!storeIsEligibleSupplying(destination.store, destination.branch)) {
+    throw new AppError(INELIGIBLE_DESTINATION_MESSAGE, 400);
   }
 
   return { source, destination };
+}
+
+async function assertRequestedByMatchesFromStore(params: {
+  requestedByEmployeeId: string;
+  requestingStoreId: string;
+}): Promise<void> {
+  const [requestedBy, requesting] = await Promise.all([
+    loadRequestedBySummaryById(params.requestedByEmployeeId),
+    loadStoreWithBranch(params.requestingStoreId),
+  ]);
+  if (!requestedBy || !requesting) {
+    throw new AppError(REQUESTED_BY_BRANCH_MESSAGE, 400);
+  }
+  if (requestedBy.branch.id !== requesting.branch.id) {
+    throw new AppError(REQUESTED_BY_BRANCH_MESSAGE, 400);
+  }
 }
 
 async function resolveCreateStorePair(
@@ -627,18 +681,29 @@ async function resolveCreateStorePair(
     throw new AppError(NO_ASSIGNMENT_MESSAGE, 403);
   }
 
-  if (input.destinationStoreId !== assignment.store.id) {
-    throw new AppError(UNAUTHORIZED_DESTINATION_MESSAGE, 403);
+  if (input.sourceStoreId !== assignment.store.id) {
+    throw new AppError(UNAUTHORIZED_SOURCE_MESSAGE, 403);
+  }
+
+  const corporate = await resolveCorporateStore();
+  if (corporate.status === "MISSING") {
+    throw new AppError(CORPORATE_MISSING_MESSAGE, 400);
+  }
+  if (corporate.status === "AMBIGUOUS") {
+    throw new AppError(CORPORATE_AMBIGUOUS_MESSAGE, 400);
+  }
+  if (input.destinationStoreId !== corporate.store.id) {
+    throw new AppError(REQUEST_TO_MUST_BE_CORPORATE_MESSAGE, 400);
   }
 
   await assertStorePairForRequest({
-    sourceStoreId: input.sourceStoreId,
-    destinationStoreId: assignment.store.id,
+    sourceStoreId: assignment.store.id,
+    destinationStoreId: corporate.store.id,
   });
 
   return {
-    sourceStoreId: input.sourceStoreId,
-    destinationStoreId: assignment.store.id,
+    sourceStoreId: assignment.store.id,
+    destinationStoreId: corporate.store.id,
   };
 }
 
@@ -728,7 +793,7 @@ async function assertActiveParticipant(
   };
 }
 
-async function loadActiveSupplyingStoreSetup(storeId: string): Promise<{
+async function requireStoreMakerCheckerAssignment(storeId: string): Promise<{
   store: StoreRow;
   branch: BranchRow;
   makerApplicationUserId: string;
@@ -738,45 +803,73 @@ async function loadActiveSupplyingStoreSetup(storeId: string): Promise<{
   if (!loaded || !loaded.store.isActive || !loaded.branch.isActive) {
     throw new AppError(INACTIVE_SOURCE_MESSAGE, 400);
   }
-  if (!storeIsEligibleSupplying(loaded.store, loaded.branch)) {
-    throw new AppError(INELIGIBLE_SOURCE_MESSAGE, 400);
-  }
 
-  const assignmentRows = await getDb()
-    .select()
-    .from(storeUsers)
-    .where(
-      and(eq(storeUsers.storeId, loaded.store.id), eq(storeUsers.isActive, true)),
-    )
-    .limit(1);
-
-  const assignment = assignmentRows[0];
+  const storeName = loaded.store.storeName;
+  const assignment = await getActiveStoreAssignmentByStoreId(loaded.store.id);
   if (!assignment) {
-    throw new AppError(CORPORATE_SETUP_MESSAGE, 400);
+    throw new AppError(missingAssignmentMessage(storeName, "Maker"), 400);
   }
 
-  const maker = await assertActiveParticipant(
-    assignment.makerApplicationUserId,
-    "Supplying store maker",
-  );
-  if (!maker.roles.includes("MAKER")) {
-    throw new AppError(CORPORATE_SETUP_MESSAGE, 400);
+  try {
+    const maker = await assertActiveParticipant(
+      assignment.assignment.makerApplicationUserId,
+      "Maker",
+    );
+    if (!maker.roles.includes("MAKER")) {
+      throw new AppError(missingAssignmentMessage(storeName, "Maker"), 400);
+    }
+  } catch (error) {
+    if (
+      error instanceof AppError &&
+      error.message === missingAssignmentMessage(storeName, "Maker")
+    ) {
+      throw error;
+    }
+    throw new AppError(missingAssignmentMessage(storeName, "Maker"), 400);
   }
 
-  const checker = await assertActiveParticipant(
-    assignment.supervisorApplicationUserId,
-    "Supplying store checker",
-  );
-  if (!checker.roles.includes("CHECKER")) {
-    throw new AppError(CORPORATE_SETUP_MESSAGE, 400);
+  try {
+    const checker = await assertActiveParticipant(
+      assignment.assignment.supervisorApplicationUserId,
+      "Checker",
+    );
+    if (!checker.roles.includes("CHECKER")) {
+      throw new AppError(missingAssignmentMessage(storeName, "Checker"), 400);
+    }
+  } catch (error) {
+    if (
+      error instanceof AppError &&
+      error.message === missingAssignmentMessage(storeName, "Checker")
+    ) {
+      throw error;
+    }
+    throw new AppError(missingAssignmentMessage(storeName, "Checker"), 400);
   }
 
   return {
     store: loaded.store,
     branch: loaded.branch,
-    makerApplicationUserId: assignment.makerApplicationUserId,
-    supervisorApplicationUserId: assignment.supervisorApplicationUserId,
+    makerApplicationUserId: assignment.assignment.makerApplicationUserId,
+    supervisorApplicationUserId:
+      assignment.assignment.supervisorApplicationUserId,
   };
+}
+
+async function loadActiveSupplyingStoreSetup(storeId: string): Promise<{
+  store: StoreRow;
+  branch: BranchRow;
+  makerApplicationUserId: string;
+  supervisorApplicationUserId: string;
+}> {
+  const loaded = await loadStoreWithBranch(storeId);
+  if (!loaded || !loaded.store.isActive || !loaded.branch.isActive) {
+    throw new AppError(INACTIVE_DESTINATION_MESSAGE, 400);
+  }
+  if (!storeIsEligibleSupplying(loaded.store, loaded.branch)) {
+    throw new AppError(INELIGIBLE_DESTINATION_MESSAGE, 400);
+  }
+
+  return requireStoreMakerCheckerAssignment(loaded.store.id);
 }
 
 async function loadActiveCorporateStoreSetup(): Promise<{
@@ -1113,7 +1206,7 @@ async function attachAvailableStockToListItems(
 
   const itemIdsByStore = new Map<string, string[]>();
   for (const item of listItems) {
-    const storeId = item.sourceStore?.id;
+    const storeId = item.destinationStore?.id ?? item.corporateStore?.id;
     const lines = linesByRequest.get(item.id);
     if (!storeId || !lines || lines.length === 0) {
       continue;
@@ -1143,7 +1236,7 @@ async function attachAvailableStockToListItems(
   );
 
   return listItems.map((item) => {
-    const storeId = item.sourceStore?.id;
+    const storeId = item.destinationStore?.id ?? item.corporateStore?.id;
     const lines = linesByRequest.get(item.id);
     if (!storeId || !lines || lines.length !== 1) {
       return item;
@@ -1177,11 +1270,11 @@ function toListItem(
     row.corporateCheckerEmployee,
   );
   const supplyingStoreId = row.request.corporateStoreId;
-  const destinationStore = toStoreSummary(
+  const requestingStore = toStoreSummary(
     row.requestingStore,
     row.requestingBranch,
   );
-  const sourceStore =
+  const destinationStore =
     row.corporateStore && row.corporateBranch
       ? toStoreSummary(row.corporateStore, row.corporateBranch)
       : null;
@@ -1227,9 +1320,9 @@ function toListItem(
     availableStockQuantity: null,
     createdAt: row.request.createdAt.toISOString(),
     updatedAt: row.request.updatedAt.toISOString(),
-    requestingStore: destinationStore,
-    corporateStore: sourceStore,
-    sourceStore,
+    requestingStore,
+    corporateStore: destinationStore,
+    sourceStore: requestingStore,
     destinationStore,
     requestedBy: toRequestedByEmployeeSummary(
       row.requestedByEmployee,
@@ -1244,6 +1337,7 @@ function toListItem(
       corporateChecker,
     }),
     canEdit: canEditRequest(row.request, actor),
+    canDelete: isAdminUser(actor),
     canCreateIssue,
     allowedActions: computeAllowedActions(row.request, actor),
   };
@@ -1294,15 +1388,32 @@ export async function getItemRequestContext(
   const assignment = isAdminUser(actor)
     ? undefined
     : await getActiveMakerAssignment(actor.id);
-  const destinationStore = assignment
+  const requestFromStore = assignment
     ? toStoreSummary(assignment.store, assignment.branch)
     : null;
-  const [destinationStores, sourceStores] = await Promise.all([
+  const corporateResolved = await resolveCorporateStore();
+  const requestToStore =
+    corporateResolved.status === "OK"
+      ? toStoreSummary(corporateResolved.store, corporateResolved.branch)
+      : null;
+  const [requestFromStores, supplyingStores] = await Promise.all([
     isAdminUser(actor)
       ? listActiveStoreSummaries()
-      : Promise.resolve(destinationStore ? [destinationStore] : []),
-    listActiveStoreSummaries({ supplyingOnly: true }),
+      : Promise.resolve(requestFromStore ? [requestFromStore] : []),
+    isAdminUser(actor)
+      ? listActiveStoreSummaries({ supplyingOnly: true })
+      : Promise.resolve(requestToStore ? [requestToStore] : []),
   ]);
+
+  const destinationStores = requestToStore
+    ? [
+        requestToStore,
+        ...supplyingStores.filter((store) => store.id !== requestToStore.id),
+      ]
+    : supplyingStores;
+  const sourceStores = requestToStore
+    ? requestFromStores.filter((store) => store.id !== requestToStore.id)
+    : requestFromStores;
 
   const canCreate = isAdminUser(actor) || Boolean(assignment);
   const requestedByEmployee = await loadRequestedBySummaryById(
@@ -1311,15 +1422,18 @@ export async function getItemRequestContext(
 
   return {
     canCreate,
+    canSelectRequestFromStore: isAdminUser(actor),
+    canSelectRequestToStore: isAdminUser(actor),
     canSelectDestinationStore: isAdminUser(actor),
     canSelectRequestedByEmployee: canSelectRequestedByEmployee(actor),
     requestedByEmployee:
       requestedByEmployee?.isActive === true ? requestedByEmployee : null,
-    destinationStore,
-    requestingStore: destinationStore,
-    sourceStores: destinationStore
-      ? sourceStores.filter((store) => store.id !== destinationStore.id)
-      : sourceStores,
+    destinationStore: requestFromStore,
+    requestFromStore,
+    requestingStore: requestFromStore,
+    requestToStore,
+    corporateStore: requestToStore,
+    sourceStores,
     destinationStores,
   };
 }
@@ -1333,13 +1447,16 @@ export async function listEligibleItemRequestSourceStores(
     throw new AppError("Forbidden", 403);
   }
 
-  const conditions: SQL[] = [supplyingStoreEligibilityCondition()];
+  const conditions: SQL[] = [
+    eq(stores.isActive, true),
+    eq(branches.isActive, true),
+  ];
   const excludeIds = new Set<string>();
   if (query.excludeStoreId) {
     excludeIds.add(query.excludeStoreId);
   }
-  if (context.destinationStore) {
-    excludeIds.add(context.destinationStore.id);
+  if (context.requestToStore) {
+    excludeIds.add(context.requestToStore.id);
   }
   if (excludeIds.size === 1) {
     const [excludeId] = excludeIds;
@@ -1410,14 +1527,24 @@ export async function listEligibleItemRequestItems(
     throw new AppError("Forbidden", 403);
   }
 
-  if (query.sourceStoreId) {
-    const destinationId = context.destinationStore?.id;
-    if (destinationId && query.sourceStoreId === destinationId) {
+  if (query.destinationStoreId) {
+    const sourceId = context.requestFromStore?.id;
+    if (sourceId && query.destinationStoreId === sourceId) {
       throw new AppError(SAME_STORE_MESSAGE, 400);
     }
-    const source = await loadStoreWithBranch(query.sourceStoreId);
-    if (!source || !storeIsEligibleSupplying(source.store, source.branch)) {
-      throw new AppError(INELIGIBLE_SOURCE_MESSAGE, 400);
+    const destination = await loadStoreWithBranch(query.destinationStoreId);
+    if (
+      !destination ||
+      !storeIsEligibleSupplying(destination.store, destination.branch)
+    ) {
+      throw new AppError(INELIGIBLE_DESTINATION_MESSAGE, 400);
+    }
+    if (
+      !isAdminUser(actor) &&
+      context.requestToStore &&
+      query.destinationStoreId !== context.requestToStore.id
+    ) {
+      throw new AppError(REQUEST_TO_MUST_BE_CORPORATE_MESSAGE, 400);
     }
   }
 
@@ -1467,9 +1594,9 @@ export async function listEligibleItemRequestItems(
       .offset(offset);
 
     const stockByItemUnit = new Map<string, string>();
-    if (query.sourceStoreId && rows.length > 0) {
+    if (query.destinationStoreId && rows.length > 0) {
       const stockRows = await getOperationalAvailableQuantities({
-        storeId: query.sourceStoreId,
+        storeId: query.destinationStoreId,
         itemIds: rows.map((row) => row.id),
       });
       for (const stock of stockRows) {
@@ -1488,9 +1615,9 @@ export async function listEligibleItemRequestItems(
         id: row.unitId,
         unitName: row.unitName,
       },
-      availableStockQuantity: query.sourceStoreId
+      availableStockQuantity: query.destinationStoreId
         ? (stockByItemUnit.get(
-            operationalStockKey(query.sourceStoreId, row.id, row.unitId),
+            operationalStockKey(query.destinationStoreId, row.id, row.unitId),
           ) ?? "0")
         : "0",
     }));
@@ -1638,11 +1765,11 @@ export async function getItemRequestById(
       .orderBy(asc(items.itemName), asc(items.itemCode), asc(itemRequestLines.id));
 
     const issuedTotals = await loadSubmittedIssueTotalsByRequestLine(id);
-    const sourceStoreId = header.request.corporateStoreId;
+    const destinationStoreId = header.request.corporateStoreId;
     const stockByItemUnit = new Map<string, string>();
-    if (sourceStoreId && lineRows.length > 0) {
+    if (destinationStoreId && lineRows.length > 0) {
       const stockRows = await getOperationalAvailableQuantities({
-        storeId: sourceStoreId,
+        storeId: destinationStoreId,
         itemIds: lineRows.map((row) => row.item.id),
       });
       for (const stock of stockRows) {
@@ -1678,8 +1805,8 @@ export async function getItemRequestById(
       const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
       const issued = issuedTotals.get(row.line.id) ?? 0n;
       const remaining = requested - issued;
-      const stockKey = sourceStoreId
-        ? operationalStockKey(sourceStoreId, row.item.id, row.unitId)
+      const stockKey = destinationStoreId
+        ? operationalStockKey(destinationStoreId, row.item.id, row.unitId)
         : null;
       return {
         id: row.line.id,
@@ -1712,8 +1839,8 @@ export async function getItemRequestById(
         lines.length === 1 ? lines[0]!.availableStockQuantity : null,
       requestingStoreId: header.request.requestingStoreId,
       corporateStoreId: header.request.corporateStoreId ?? null,
-      sourceStoreId: header.request.corporateStoreId ?? null,
-      destinationStoreId: header.request.requestingStoreId,
+      sourceStoreId: header.request.requestingStoreId,
+      destinationStoreId: header.request.corporateStoreId ?? null,
       requestedByEmployeeId: header.request.requestedByEmployeeId ?? null,
       createdByApplicationUserId: header.request.createdByApplicationUserId,
       branchCheckerApplicationUserId:
@@ -1768,6 +1895,10 @@ export async function createItemRequest(
     actor,
     input.requestedByEmployeeId,
   );
+  await assertRequestedByMatchesFromStore({
+    requestedByEmployeeId,
+    requestingStoreId: storePair.sourceStoreId,
+  });
 
   if (!isAdminUser(actor)) {
     await assertActiveParticipant(actor.id, "Maker");
@@ -1785,8 +1916,8 @@ export async function createItemRequest(
           .insert(itemRequests)
           .values({
             requestNumber,
-            requestingStoreId: storePair.destinationStoreId,
-            corporateStoreId: storePair.sourceStoreId,
+            requestingStoreId: storePair.sourceStoreId,
+            corporateStoreId: storePair.destinationStoreId,
             requestedByEmployeeId,
             createdByApplicationUserId: actor.id,
             status: "DRAFT",
@@ -1837,21 +1968,24 @@ export async function updateItemRequest(
   }
 
   const nextSourceStoreId =
-    input.sourceStoreId ?? existing.request.corporateStoreId;
+    input.sourceStoreId ?? existing.request.requestingStoreId;
   const nextDestinationStoreId = isAdminUser(actor)
-    ? (input.destinationStoreId ?? existing.request.requestingStoreId)
-    : existing.request.requestingStoreId;
+    ? (input.destinationStoreId ?? existing.request.corporateStoreId)
+    : existing.request.corporateStoreId;
 
   if (!nextSourceStoreId) {
     throw new AppError(SOURCE_REQUIRED_MESSAGE, 400);
   }
+  if (!nextDestinationStoreId) {
+    throw new AppError(DESTINATION_REQUIRED_MESSAGE, 400);
+  }
 
   if (
     !isAdminUser(actor) &&
-    input.destinationStoreId &&
-    input.destinationStoreId !== existing.request.requestingStoreId
+    input.sourceStoreId &&
+    input.sourceStoreId !== existing.request.requestingStoreId
   ) {
-    throw new AppError(UNAUTHORIZED_DESTINATION_MESSAGE, 403);
+    throw new AppError(UNAUTHORIZED_SOURCE_MESSAGE, 403);
   }
 
   await resolveCreateStorePair(actor, {
@@ -1870,6 +2004,14 @@ export async function updateItemRequest(
           undefined,
       );
 
+  if (!nextRequestedByEmployeeId) {
+    throw new AppError(REQUESTED_BY_REQUIRED_MESSAGE, 400);
+  }
+  await assertRequestedByMatchesFromStore({
+    requestedByEmployeeId: nextRequestedByEmployeeId,
+    requestingStoreId: nextSourceStoreId,
+  });
+
   if (input.lines) {
     await assertRequestLinesEligible(input.lines);
   }
@@ -1880,8 +2022,8 @@ export async function updateItemRequest(
         .update(itemRequests)
         .set({
           ...(input.remarks !== undefined ? { remarks: input.remarks } : {}),
-          requestingStoreId: nextDestinationStoreId,
-          corporateStoreId: nextSourceStoreId,
+          requestingStoreId: nextSourceStoreId,
+          corporateStoreId: nextDestinationStoreId,
           requestedByEmployeeId: nextRequestedByEmployeeId,
           version: existing.request.version + 1,
           updatedAt: sql`now()`,
@@ -1979,45 +2121,35 @@ export async function performItemRequestAction(
       };
 
       if (input.action === "SUBMIT" || input.action === "RESUBMIT") {
-        const destinationAssignment = isAdminUser(actor)
-          ? await getActiveStoreAssignmentByStoreId(request.requestingStoreId)
-          : await getActiveMakerAssignment(actor.id);
-
-        if (
-          !destinationAssignment ||
-          destinationAssignment.store.id !== request.requestingStoreId
-        ) {
-          throw new AppError(
-            isAdminUser(actor)
-              ? DESTINATION_SETUP_MESSAGE
-              : "You are not assigned as the active maker of this store.",
-            isAdminUser(actor) ? 400 : 403,
-          );
+        if (!isAdminUser(actor)) {
+          const makerAssignment = await getActiveMakerAssignment(actor.id);
+          if (
+            !makerAssignment ||
+            makerAssignment.store.id !== request.requestingStoreId
+          ) {
+            throw new AppError(
+              "You are not assigned as the active maker of this store.",
+              403,
+            );
+          }
         }
 
+        const requestingAssignment = await requireStoreMakerCheckerAssignment(
+          request.requestingStoreId,
+        );
+
         if (!request.corporateStoreId) {
-          throw new AppError(SOURCE_REQUIRED_MESSAGE, 400);
+          throw new AppError(DESTINATION_REQUIRED_MESSAGE, 400);
         }
 
         await assertStorePairForRequest({
-          sourceStoreId: request.corporateStoreId,
-          destinationStoreId: request.requestingStoreId,
+          sourceStoreId: request.requestingStoreId,
+          destinationStoreId: request.corporateStoreId,
         });
-
-        const checker = await assertActiveParticipant(
-          destinationAssignment.assignment.supervisorApplicationUserId,
-          "Branch checker",
-        );
-        if (!checker.roles.includes("CHECKER")) {
-          throw new AppError(
-            "The assigned store supervisor must have role CHECKER.",
-            400,
-          );
-        }
 
         await assertExistingLinesEligibleForSubmit(request.id);
         nextValues.branchCheckerApplicationUserId =
-          destinationAssignment.assignment.supervisorApplicationUserId;
+          requestingAssignment.supervisorApplicationUserId;
         nextValues.submittedAt = new Date();
       }
 
@@ -2038,8 +2170,8 @@ export async function performItemRequestAction(
             corporate.supervisorApplicationUserId;
         } else {
           await assertStorePairForRequest({
-            sourceStoreId: request.corporateStoreId,
-            destinationStoreId: request.requestingStoreId,
+            sourceStoreId: request.requestingStoreId,
+            destinationStoreId: request.corporateStoreId,
           });
           const supplying = await loadActiveSupplyingStoreSetup(
             request.corporateStoreId,
@@ -2054,17 +2186,17 @@ export async function performItemRequestAction(
 
       if (input.action === "FORWARD") {
         if (!request.corporateStoreId) {
-          throw new AppError(INACTIVE_SOURCE_MESSAGE, 400);
+          throw new AppError(INACTIVE_DESTINATION_MESSAGE, 400);
         }
 
-        const sourceRows = await tx
+        const destinationRows = await tx
           .select({ isActive: stores.isActive })
           .from(stores)
           .where(eq(stores.id, request.corporateStoreId))
           .limit(1);
 
-        if (!sourceRows[0]?.isActive) {
-          throw new AppError(INACTIVE_SOURCE_MESSAGE, 400);
+        if (!destinationRows[0]?.isActive) {
+          throw new AppError(INACTIVE_DESTINATION_MESSAGE, 400);
         }
 
         nextValues.forwardedAt = new Date();
@@ -2105,6 +2237,70 @@ export async function performItemRequestAction(
     });
 
     return getItemRequestById(id, actor);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    mapItemRequestDatabaseError(error);
+  }
+}
+
+export async function deleteItemRequest(
+  id: string,
+  actor: AuthenticatedUser,
+  expectedVersion: number,
+): Promise<void> {
+  if (!isAdminUser(actor)) {
+    throw new AppError("You cannot delete an item request", 403);
+  }
+
+  try {
+    await getDb().transaction(async (tx) => {
+      const existingRows = await tx
+        .select({ id: itemRequests.id, version: itemRequests.version })
+        .from(itemRequests)
+        .where(eq(itemRequests.id, id))
+        .limit(1);
+      const existing = existingRows[0];
+      if (!existing) {
+        throw new AppError("Item request not found", 404);
+      }
+      if (existing.version !== expectedVersion) {
+        throw new AppError(STALE_REQUEST_MESSAGE, 409);
+      }
+
+      const issueRows = await tx
+        .select({ id: itemIssues.id })
+        .from(itemIssues)
+        .where(eq(itemIssues.requestId, id))
+        .limit(1);
+      if (issueRows[0]) {
+        throw new AppError(
+          "This item request cannot be deleted because it has item issue records.",
+          409,
+        );
+      }
+
+      await tx
+        .delete(itemRequestActions)
+        .where(eq(itemRequestActions.itemRequestId, id));
+      await tx
+        .delete(itemRequestLines)
+        .where(eq(itemRequestLines.itemRequestId, id));
+      const deleted = await tx
+        .delete(itemRequests)
+        .where(
+          and(
+            eq(itemRequests.id, id),
+            eq(itemRequests.version, expectedVersion),
+          ),
+        )
+        .returning({ id: itemRequests.id });
+
+      if (!deleted[0]) {
+        throw new AppError(STALE_REQUEST_MESSAGE, 409);
+      }
+    });
   } catch (error) {
     if (error instanceof AppError) {
       throw error;

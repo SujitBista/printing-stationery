@@ -1,5 +1,6 @@
 import {
   createItemRequestInputSchema,
+  deleteItemRequestInputSchema,
   eligibleItemRequestItemListQuerySchema,
   eligibleItemRequestStoreListQuerySchema,
   itemRequestActionInputSchema,
@@ -12,6 +13,7 @@ import {
   paginatedItemRequestResponseSchema,
   updateItemRequestInputSchema,
   type CreateItemRequestInput,
+  type DeleteItemRequestInput,
   type EligibleItemRequestItemListQuery,
   type EligibleItemRequestStoreListQuery,
   type ItemRequest,
@@ -54,8 +56,8 @@ function buildEligibleQueryString(
   if (query.search) {
     params.set("search", query.search);
   }
-  if (query.sourceStoreId) {
-    params.set("sourceStoreId", query.sourceStoreId);
+  if (query.destinationStoreId) {
+    params.set("destinationStoreId", query.destinationStoreId);
   }
   return params.toString();
 }
@@ -178,7 +180,7 @@ export async function fetchEligibleItemRequestSourceStores(
       }
       return { success: true, data: parsed.data };
     },
-    "Failed to load supplying stores",
+    "Failed to load Request From stores",
   );
 }
 
@@ -316,5 +318,35 @@ export async function performItemRequestAction(
       return { success: true, data: parsed.data };
     },
     "Failed to update item request status",
+  );
+}
+
+export async function deleteItemRequest(
+  id: string,
+  input: DeleteItemRequestInput,
+): Promise<ApiResult<void>> {
+  const parsedId = itemRequestIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    return { ok: false, error: "Invalid item request id", status: 400 };
+  }
+
+  const parsedInput = deleteItemRequestInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    const issue = parsedInput.error.issues[0];
+    return {
+      ok: false,
+      error: issue?.message ?? "Invalid item request delete",
+      status: 400,
+    };
+  }
+
+  return requestJson(
+    `/api/item-requests/${parsedId.data}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify(parsedInput.data),
+    },
+    () => ({ success: true, data: undefined }),
+    "Failed to delete item request",
   );
 }

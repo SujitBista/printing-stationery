@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, inArray, like, or } from "drizzle-orm";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import type { AuthenticatedUser } from "@printing-stationery/shared";
+import { preferCorporateControlStore } from "@printing-stationery/shared";
 import { createApp } from "../app.js";
 import { loadEnv, type Env } from "../config/env.js";
 import { closePool, createDb, getDb } from "../db/client.js";
@@ -33,10 +34,22 @@ import { generateSessionToken, hashPassword, hashSessionToken } from "../utils/p
 
 const REQUEST_NUMBER_PREFIX = "IR-TIA-";
 const UNRELATED_STORE_CODE = "TIAUTH-S1";
+const UNRELATED_BRANCH_CODE = "TIAUTH-B1";
 const UNRELATED_MAKER_CODE = "TIAUTH-M1";
 const UNRELATED_CHECKER_CODE = "TIAUTH-C1";
 const UNRELATED_MAKER_USERNAME = "tiauth_maker";
 const UNRELATED_CHECKER_USERNAME = "tiauth_checker";
+const CORP_MAKER_CODE = "TIAUTH-CM";
+const CORP_CHECKER_CODE = "TIAUTH-CC";
+const CORP_MAKER_USERNAME = "tiauth_corp_maker";
+const CORP_CHECKER_USERNAME = "tiauth_corp_checker";
+
+let originalCorporateAssignment: {
+  id: string;
+  makerApplicationUserId: string;
+  supervisorApplicationUserId: string;
+  isActive: boolean;
+} | null = null;
 
 type StoreAssignment = {
   storeId: string;
@@ -97,6 +110,21 @@ function isAppError(
       .where(like(itemRequests.requestNumber, `${REQUEST_NUMBER_PREFIX}%`));
     await deleteRequests(leftoverRequests.map((row) => row.id));
 
+    if (originalCorporateAssignment) {
+      await db
+        .update(storeUsers)
+        .set({
+          makerApplicationUserId:
+            originalCorporateAssignment.makerApplicationUserId,
+          supervisorApplicationUserId:
+            originalCorporateAssignment.supervisorApplicationUserId,
+          isActive: originalCorporateAssignment.isActive,
+          updatedAt: new Date(),
+        })
+        .where(eq(storeUsers.id, originalCorporateAssignment.id));
+      originalCorporateAssignment = null;
+    }
+
     const leftoverStore = await db
       .select({ id: stores.id })
       .from(stores)
@@ -106,6 +134,9 @@ function isAppError(
       await db.delete(storeUsers).where(eq(storeUsers.storeId, leftoverStore[0].id));
       await db.delete(stores).where(eq(stores.id, leftoverStore[0].id));
     }
+    await db
+      .delete(branches)
+      .where(eq(branches.branchCode, UNRELATED_BRANCH_CODE));
 
     const leftoverUsers = await db
       .select({ id: applicationUsers.id })
@@ -114,8 +145,21 @@ function isAppError(
         inArray(applicationUsers.username, [
           UNRELATED_MAKER_USERNAME,
           UNRELATED_CHECKER_USERNAME,
+          CORP_MAKER_USERNAME,
+          CORP_CHECKER_USERNAME,
         ]),
       );
+    const leftoverUserIds = leftoverUsers.map((user) => user.id);
+    if (leftoverUserIds.length > 0) {
+      await db
+        .delete(storeUsers)
+        .where(
+          or(
+            inArray(storeUsers.makerApplicationUserId, leftoverUserIds),
+            inArray(storeUsers.supervisorApplicationUserId, leftoverUserIds),
+          ),
+        );
+    }
     for (const user of leftoverUsers) {
       await db.delete(authSessions).where(eq(authSessions.userId, user.id));
       await db.delete(userRoles).where(eq(userRoles.userId, user.id));
@@ -128,6 +172,8 @@ function isAppError(
         inArray(employees.employeeCode, [
           UNRELATED_MAKER_CODE,
           UNRELATED_CHECKER_CODE,
+          CORP_MAKER_CODE,
+          CORP_CHECKER_CODE,
         ]),
       );
   }
@@ -313,19 +359,119 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       .select({ store: stores, branch: branches })
       .from(stores)
       .innerJoin(branches, eq(stores.branchId, branches.id))
-      .where(eq(branches.branchType, "HEAD_OFFICE"));
-    const corporateRow = corporateRows.find((row) => row.store.underStoreId === null);
+      .where(eq(stores.isActive, true));
+    const preferredCorporate = preferCorporateControlStore(
+      corporateRows.map((row) => ({
+        id: row.store.id,
+        storeCode: row.store.storeCode,
+        storeName: row.store.storeName,
+        underStoreId: row.store.underStoreId,
+        branchType: row.branch.branchType,
+      })),
+    );
+    const corporateRow =
+      corporateRows.find((row) => row.store.id === preferredCorporate?.id) ??
+      corporateRows.find(
+        (row) =>
+          row.branch.branchType === "HEAD_OFFICE" &&
+          row.store.underStoreId === null,
+      );
     if (!corporateRow) {
       throw new Error("Corporate supplying store is not configured");
     }
+
+    const existingCorporateAssignment = await getDb()
+      .select()
+      .from(storeUsers)
+      .where(eq(storeUsers.storeId, corporateRow.store.id))
+      .limit(1);
+    if (!existingCorporateAssignment[0]?.isActive) {
+      const passwordHash = await hashPassword("TestIssueAuth!1a");
+      const makerEmployee = await getDb()
+        .insert(employees)
+        .values({
+          employeeCode: CORP_MAKER_CODE,
+          employeeName: "Issue Auth Corporate Maker",
+          branchId: corporateRow.branch.id,
+          isActive: true,
+        })
+        .returning({ id: employees.id });
+      const checkerEmployee = await getDb()
+        .insert(employees)
+        .values({
+          employeeCode: CORP_CHECKER_CODE,
+          employeeName: "Issue Auth Corporate Checker",
+          branchId: corporateRow.branch.id,
+          isActive: true,
+        })
+        .returning({ id: employees.id });
+      const makerUser = await getDb()
+        .insert(applicationUsers)
+        .values({
+          employeeId: makerEmployee[0]!.id,
+          username: CORP_MAKER_USERNAME,
+          passwordHash,
+          mustChangePassword: false,
+          isActive: true,
+        })
+        .returning({ id: applicationUsers.id });
+      const checkerUser = await getDb()
+        .insert(applicationUsers)
+        .values({
+          employeeId: checkerEmployee[0]!.id,
+          username: CORP_CHECKER_USERNAME,
+          passwordHash,
+          mustChangePassword: false,
+          isActive: true,
+        })
+        .returning({ id: applicationUsers.id });
+      await getDb().insert(userRoles).values([
+        { userId: makerUser[0]!.id, role: "MAKER" },
+        { userId: checkerUser[0]!.id, role: "CHECKER" },
+      ]);
+      if (existingCorporateAssignment[0]) {
+        originalCorporateAssignment = {
+          id: existingCorporateAssignment[0].id,
+          makerApplicationUserId:
+            existingCorporateAssignment[0].makerApplicationUserId,
+          supervisorApplicationUserId:
+            existingCorporateAssignment[0].supervisorApplicationUserId,
+          isActive: existingCorporateAssignment[0].isActive,
+        };
+        await getDb()
+          .update(storeUsers)
+          .set({
+            makerApplicationUserId: makerUser[0]!.id,
+            supervisorApplicationUserId: checkerUser[0]!.id,
+            isActive: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(storeUsers.id, existingCorporateAssignment[0].id));
+      } else {
+        await getDb().insert(storeUsers).values({
+          storeId: corporateRow.store.id,
+          makerApplicationUserId: makerUser[0]!.id,
+          supervisorApplicationUserId: checkerUser[0]!.id,
+          isActive: true,
+        });
+      }
+    }
     corporate = await loadAssignment(corporateRow.store.id);
 
+    const assignmentRows = await getDb()
+      .select({ storeId: storeUsers.storeId })
+      .from(storeUsers)
+      .where(eq(storeUsers.isActive, true));
+    const assignedIds = new Set(assignmentRows.map((row) => row.storeId));
     const branchRows = await getDb()
       .select({ store: stores, branch: branches })
       .from(stores)
       .innerJoin(branches, eq(stores.branchId, branches.id))
       .where(eq(branches.branchType, "BRANCH"));
-    const branchRow = branchRows[0];
+    const branchRow = branchRows.find(
+      (row) =>
+        assignedIds.has(row.store.id) && row.store.id !== corporate.storeId,
+    );
     if (!branchRow) {
       throw new Error("A requesting branch store is required for item issue tests");
     }
@@ -401,12 +547,25 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       { userId: checkerUserId, role: "CHECKER" },
     ]);
 
+    const unrelatedBranch = await getDb()
+      .insert(branches)
+      .values({
+        branchCode: UNRELATED_BRANCH_CODE,
+        branchName: "Issue Auth Unrelated Branch",
+        branchType: "BRANCH",
+        isActive: true,
+      })
+      .returning({ id: branches.id });
+    const unrelatedBranchId = unrelatedBranch[0]?.id;
+    if (!unrelatedBranchId) {
+      throw new Error("Failed to insert unrelated branch");
+    }
     const unrelatedStore = await getDb()
       .insert(stores)
       .values({
         storeCode: UNRELATED_STORE_CODE,
         storeName: "Issue Auth Unrelated Store",
-        branchId: branchRow.branch.id,
+        branchId: unrelatedBranchId,
         underStoreId: corporate.storeId,
         isActive: true,
       })

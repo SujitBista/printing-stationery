@@ -27,6 +27,7 @@ function toOption(employee: Employee): RequestedByEmployeeOption {
 
 export function ItemRequestEmployeeSelect(props: {
   value: RequestedByEmployeeOption | null;
+  branchId?: string;
   disabled?: boolean;
   onChange: (employee: RequestedByEmployeeOption | null) => void;
 }) {
@@ -41,6 +42,7 @@ export function ItemRequestEmployeeSelect(props: {
       pageSize: SEARCH_PAGE_SIZE,
       status: "ACTIVE",
       search: search.trim() || undefined,
+      branchId: props.branchId,
     });
     setLoading(false);
     if (!result.ok) {
@@ -48,7 +50,7 @@ export function ItemRequestEmployeeSelect(props: {
       return;
     }
     setResults(result.data.items.map(toOption));
-  }, []);
+  }, [props.branchId]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
