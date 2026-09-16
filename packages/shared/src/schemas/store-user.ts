@@ -55,14 +55,14 @@ export const storeUserPersonSummarySchema = z.object({
 export const storeUserSchema = z.object({
   id: z.string().uuid(),
   storeId: z.string().uuid(),
-  makerApplicationUserId: z.string().uuid(),
-  supervisorApplicationUserId: z.string().uuid(),
+  makerApplicationUserId: z.string().uuid().nullable(),
+  supervisorApplicationUserId: z.string().uuid().nullable(),
   isActive: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
   store: storeUserStoreSummarySchema,
-  maker: storeUserPersonSummarySchema,
-  supervisor: storeUserPersonSummarySchema,
+  maker: storeUserPersonSummarySchema.nullable(),
+  supervisor: storeUserPersonSummarySchema.nullable(),
 });
 
 function distinctMakerAndSupervisor(

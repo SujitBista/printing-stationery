@@ -298,11 +298,18 @@ export const itemIssueLineAvailabilitySchema = z.object({
   stockBalanceKnown: z.boolean(),
 });
 
+export const itemIssueActiveSummarySchema = z.object({
+  id: z.string().uuid(),
+  issueNumber: z.string().min(1),
+  status: itemIssueStatusSchema,
+});
+
 export const itemIssueEligibilitySchema = z.object({
   canCreate: z.boolean(),
   reason: z.string().nullable(),
   request: itemIssueRequestSummarySchema.nullable(),
   draftIssueId: z.string().uuid().nullable(),
+  activeIssue: itemIssueActiveSummarySchema.nullable(),
   lines: z.array(itemIssueLineAvailabilitySchema),
 });
 

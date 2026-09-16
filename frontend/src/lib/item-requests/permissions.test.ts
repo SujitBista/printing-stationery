@@ -4,6 +4,7 @@ import {
   canCreateItemRequests,
   canSelectRequestedByEmployee,
   defaultRequestedByEmployeeId,
+  shouldShowItemRequestCorporateMakerCreateNote,
   shouldShowItemRequestCreateAction,
   shouldShowItemRequestCreateAssignmentWarning,
 } from "./permissions.js";
@@ -147,6 +148,54 @@ describe("item request create role visibility", () => {
         canCreate: false,
         isAdmin: false,
         user: maker,
+      }),
+      false,
+    );
+  });
+
+  it("hides New Request and the assignment warning from Corporate Maker", () => {
+    const maker = userWithRoles(["MAKER"]);
+
+    assert.equal(canCreateItemRequests(maker, ["CORPORATE_MAKER"]), false);
+    assert.equal(
+      shouldShowItemRequestCreateAction({
+        queueShowsCreate: true,
+        canCreate: false,
+        user: maker,
+        workflowRoles: ["CORPORATE_MAKER"],
+      }),
+      false,
+    );
+    assert.equal(
+      shouldShowItemRequestCreateAction({
+        queueShowsCreate: true,
+        canCreate: true,
+        user: maker,
+        workflowRoles: ["CORPORATE_MAKER"],
+      }),
+      false,
+    );
+    assert.equal(
+      shouldShowItemRequestCreateAssignmentWarning({
+        queueShowsCreate: true,
+        canCreate: false,
+        isAdmin: false,
+        user: maker,
+        workflowRoles: ["CORPORATE_MAKER"],
+      }),
+      false,
+    );
+    assert.equal(
+      shouldShowItemRequestCorporateMakerCreateNote({
+        queue: "request-list",
+        workflowRoles: ["CORPORATE_MAKER"],
+      }),
+      true,
+    );
+    assert.equal(
+      shouldShowItemRequestCorporateMakerCreateNote({
+        queue: "review",
+        workflowRoles: ["CORPORATE_MAKER"],
       }),
       false,
     );

@@ -24,14 +24,18 @@ describe("employee transfer input schema", () => {
     }
   });
 
-  it("requires store and supervisor together", () => {
+  it("accepts a store without a supervisor", () => {
     const parsed = transferEmployeeInputSchema.safeParse({
       toBranchId: BRANCH_B,
       effectiveDate: "2026-09-02",
       reason: "Moved to cover a vacancy at the destination branch.",
       toStoreId: STORE_B,
     });
-    assert.equal(parsed.success, false);
+    assert.equal(parsed.success, true);
+    if (parsed.success) {
+      assert.equal(parsed.data.toStoreId, STORE_B);
+      assert.equal(parsed.data.toSupervisorApplicationUserId, null);
+    }
   });
 
   it("rejects the same-day invalid date", () => {

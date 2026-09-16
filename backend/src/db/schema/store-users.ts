@@ -17,10 +17,10 @@ export const storeUsers = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     storeId: uuid("store_id").notNull(),
-    makerApplicationUserId: uuid("maker_application_user_id").notNull(),
+    makerApplicationUserId: uuid("maker_application_user_id"),
     supervisorApplicationUserId: uuid(
       "supervisor_application_user_id",
-    ).notNull(),
+    ),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -64,7 +64,11 @@ export const storeUsers = pgTable(
       .onUpdate("restrict"),
     check(
       "store_users_maker_ne_supervisor",
-      sql`${table.makerApplicationUserId} <> ${table.supervisorApplicationUserId}`,
+      sql`${table.makerApplicationUserId} IS NULL OR ${table.supervisorApplicationUserId} IS NULL OR ${table.makerApplicationUserId} <> ${table.supervisorApplicationUserId}`,
+    ),
+    check(
+      "store_users_maker_or_supervisor",
+      sql`${table.makerApplicationUserId} IS NOT NULL OR ${table.supervisorApplicationUserId} IS NOT NULL`,
     ),
   ],
 );

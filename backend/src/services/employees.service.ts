@@ -15,6 +15,7 @@ import type {
   UpdateEmployeeInput,
   UpdateEmployeeStatusInput,
 } from "@printing-stationery/shared";
+import { isStoreManagingRole } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
 import { applicationUsers, userRoles } from "../db/schema/auth.js";
 import { branches } from "../db/schema/branches.js";
@@ -24,6 +25,11 @@ import { stores } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
 import { AppError } from "../utils/errors.js";
 import { mapEmployeeDatabaseError } from "../utils/db-errors.js";
+import {
+  removeUserFromStoreAssignments,
+  setStoreAssignmentSupervisor,
+  syncApplicationUserStoreAssignment,
+} from "./store-users.assignment.js";
 
 const fromBranches = alias(branches, "transfer_from_branches");
 const toBranches = alias(branches, "transfer_to_branches");
@@ -349,7 +355,7 @@ async function loadActiveAssignments(applicationUserId: string) {
     })
     .from(storeUsers)
     .innerJoin(stores, eq(storeUsers.storeId, stores.id))
-    .innerJoin(
+    .leftJoin(
       assignmentSupervisors,
       eq(storeUsers.supervisorApplicationUserId, assignmentSupervisors.id),
     )
@@ -387,12 +393,14 @@ function toCurrentAssignment(
         ? "MAKER"
         : "SUPERVISOR",
     store: toTransferStore(preferred.store),
-    supervisor: toTransferPerson({
-      id: preferred.supervisor.id,
-      username: preferred.supervisor.username,
-      employeeName: preferred.supervisorEmployee?.employeeName,
-      employeeCode: preferred.supervisorEmployee?.employeeCode,
-    }),
+    supervisor: preferred.supervisor
+      ? toTransferPerson({
+          id: preferred.supervisor.id,
+          username: preferred.supervisor.username,
+          employeeName: preferred.supervisorEmployee?.employeeName,
+          employeeCode: preferred.supervisorEmployee?.employeeCode,
+        })
+      : null,
   };
 }
 
@@ -682,40 +690,31 @@ export async function transferEmployee(
   const toStoreId = input.toStoreId ?? null;
   const toSupervisorApplicationUserId =
     input.toSupervisorApplicationUserId ?? null;
-  if ((toStoreId == null) !== (toSupervisorApplicationUserId == null)) {
-    throw new AppError(
-      "New store and new supervisor must be provided together.",
-      400,
-    );
-  }
 
-  if (toStoreId && toSupervisorApplicationUserId) {
-    if (!context.applicationUser) {
-      throw new AppError(
-        "This employee has no application account, so a new store assignment cannot be created.",
-        400,
-      );
-    }
-    if (!context.applicationUser.roles.includes("MAKER")) {
-      throw new AppError(
-        "Only an employee with the MAKER role can be assigned to a new store during transfer.",
-        400,
-      );
-    }
-    if (
-      context.applicationUser.roles.includes("ADMIN") ||
-      context.applicationUser.roles.includes("HR")
-    ) {
-      throw new AppError(
-        "ADMIN and HR accounts cannot be assigned as a store maker.",
-        400,
-      );
-    }
-
+  if (toStoreId) {
     await assertDestinationStore({
       storeId: toStoreId,
       toBranchId: input.toBranchId,
     });
+  }
+
+  const managingRole = context.applicationUser?.roles.find((role) =>
+    isStoreManagingRole(role),
+  );
+  const canManageStores = Boolean(
+    context.applicationUser &&
+      managingRole &&
+      !context.applicationUser.roles.includes("ADMIN") &&
+      !context.applicationUser.roles.includes("HR"),
+  );
+
+  if (toSupervisorApplicationUserId) {
+    if (!context.applicationUser || !canManageStores) {
+      throw new AppError(
+        "This employee has no store-managing application account, so a new supervisor cannot be assigned.",
+        400,
+      );
+    }
     await assertDestinationSupervisor({
       supervisorApplicationUserId: toSupervisorApplicationUserId,
       toBranchId: input.toBranchId,
@@ -763,31 +762,7 @@ export async function transferEmployee(
 
       const fromStoreId = context.currentAssignment?.store.id ?? null;
       const fromSupervisorApplicationUserId =
-        context.currentAssignment?.supervisor.id ?? null;
-
-      if (context.applicationUser) {
-        await tx
-          .update(storeUsers)
-          .set({
-            isActive: false,
-            updatedAt: sql`now()`,
-          })
-          .where(
-            and(
-              eq(storeUsers.isActive, true),
-              or(
-                eq(
-                  storeUsers.makerApplicationUserId,
-                  context.applicationUser.id,
-                ),
-                eq(
-                  storeUsers.supervisorApplicationUserId,
-                  context.applicationUser.id,
-                ),
-              ),
-            ),
-          );
-      }
+        context.currentAssignment?.supervisor?.id ?? null;
 
       const updated = await tx
         .update(employees)
@@ -802,46 +777,41 @@ export async function transferEmployee(
         throw new AppError("Employee not found", 404);
       }
 
-      if (
-        toStoreId &&
-        toSupervisorApplicationUserId &&
-        context.applicationUser
-      ) {
-        const existingAssignment = await tx
-          .select()
-          .from(storeUsers)
-          .where(eq(storeUsers.storeId, toStoreId))
-          .limit(1);
-        const existing = existingAssignment[0];
+      let resolvedToStoreId = toStoreId;
+      let resolvedToSupervisorApplicationUserId =
+        toSupervisorApplicationUserId;
 
-        if (existing) {
-          if (
-            existing.isActive &&
-            existing.makerApplicationUserId !== context.applicationUser.id
-          ) {
-            throw new AppError(
-              "This store already has an active user configuration. Deactivate or reassign it before transferring this employee onto it.",
-              409,
-            );
-          }
+      if (context.applicationUser && canManageStores && managingRole) {
+        const syncResult = await syncApplicationUserStoreAssignment({
+          applicationUserId: context.applicationUser.id,
+          role: managingRole,
+          selectedStoreId: toStoreId,
+          mode: "transfer",
+          db: tx,
+        });
+        resolvedToStoreId = syncResult.assignedStore?.id ?? null;
 
-          await tx
-            .update(storeUsers)
-            .set({
-              makerApplicationUserId: context.applicationUser.id,
-              supervisorApplicationUserId: toSupervisorApplicationUserId,
-              isActive: true,
-              updatedAt: sql`now()`,
-            })
-            .where(eq(storeUsers.id, existing.id));
-        } else {
-          await tx.insert(storeUsers).values({
-            storeId: toStoreId,
-            makerApplicationUserId: context.applicationUser.id,
+        if (
+          toSupervisorApplicationUserId &&
+          resolvedToStoreId &&
+          managingRole === "MAKER"
+        ) {
+          await setStoreAssignmentSupervisor({
+            storeId: resolvedToStoreId,
             supervisorApplicationUserId: toSupervisorApplicationUserId,
-            isActive: true,
+            makerApplicationUserId: context.applicationUser.id,
+            db: tx,
           });
+          resolvedToSupervisorApplicationUserId =
+            toSupervisorApplicationUserId;
         }
+      } else if (context.applicationUser) {
+        await removeUserFromStoreAssignments({
+          applicationUserId: context.applicationUser.id,
+          db: tx,
+        });
+        resolvedToStoreId = null;
+        resolvedToSupervisorApplicationUserId = null;
       }
 
       await tx.insert(employeeTransfers).values({
@@ -852,9 +822,9 @@ export async function transferEmployee(
         reason: input.reason,
         transferredByApplicationUserId,
         fromStoreId,
-        toStoreId,
+        toStoreId: resolvedToStoreId,
         fromSupervisorApplicationUserId,
-        toSupervisorApplicationUserId,
+        toSupervisorApplicationUserId: resolvedToSupervisorApplicationUserId,
       });
     });
 

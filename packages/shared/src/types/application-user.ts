@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type {
   applicationUserSchema,
+  applicationUserAssignedStoreSchema,
   applicationUserEmployeeSchema,
   createApplicationUserInputSchema,
   updateApplicationUserInputSchema,
@@ -14,6 +15,9 @@ import type {
 } from "../schemas/application-user.js";
 
 export type ApplicationUser = z.infer<typeof applicationUserSchema>;
+export type ApplicationUserAssignedStore = z.infer<
+  typeof applicationUserAssignedStoreSchema
+>;
 export type ApplicationUserEmployee = z.infer<
   typeof applicationUserEmployeeSchema
 >;

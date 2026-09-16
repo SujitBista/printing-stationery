@@ -189,11 +189,13 @@ export function ItemIssueListPage({ queue }: ItemIssueListPageProps) {
                         href={`/requests/item-issues/${issue.id}`}
                         className="font-medium text-accent hover:underline"
                       >
-                        {issue.canVerify
-                          ? "Verify"
-                          : issue.canEdit
-                            ? "Continue"
-                            : "View"}
+                        {issue.status === "RETURNED" && issue.canEdit
+                          ? "Correct and Resubmit"
+                          : issue.canVerify
+                            ? "Verify"
+                            : issue.canEdit
+                              ? "Continue Draft"
+                              : "View"}
                       </Link>
                     </td>
                   </tr>

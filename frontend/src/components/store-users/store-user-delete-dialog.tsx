@@ -12,6 +12,9 @@ type StoreUserDeleteDialogProps = {
 };
 
 function personLabel(person: StoreUser["maker"]): string {
+  if (!person) {
+    return "—";
+  }
   return `${person.employee.employeeName} (${person.employee.employeeCode})`;
 }
 

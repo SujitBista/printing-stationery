@@ -18,6 +18,16 @@ const optionalUuidFilterSchema = z.preprocess(
   z.string().uuid().optional(),
 );
 
+const optionalNullableUuidSchema = z.preprocess(
+  (value) => {
+    if (value === "" || value === undefined || value === null) {
+      return null;
+    }
+    return value;
+  },
+  z.string().uuid("Invalid store id").nullable(),
+);
+
 const optionalRoleFilterSchema = z.preprocess(
   (value) => {
     if (value === "" || value === null || value === undefined) {
@@ -37,6 +47,13 @@ export const applicationUserEmployeeSchema = z.object({
   branch: employeeBranchSummarySchema,
 });
 
+export const applicationUserAssignedStoreSchema = z.object({
+  id: z.string().uuid(),
+  storeCode: z.string(),
+  storeName: z.string(),
+  isActive: z.boolean(),
+});
+
 export const applicationUserSchema = z.object({
   id: z.string().uuid(),
   employeeId: z.string().uuid(),
@@ -47,6 +64,7 @@ export const applicationUserSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   employee: applicationUserEmployeeSchema,
+  assignedStore: applicationUserAssignedStoreSchema.nullable(),
 });
 
 function confirmTemporaryPassword(
@@ -72,6 +90,7 @@ export const createApplicationUserInputSchema = z
       required_error: "Confirm temporary password is required",
       invalid_type_error: "Confirm temporary password must be a string",
     }),
+    storeId: optionalNullableUuidSchema.optional().default(null),
   })
   .strict()
   .superRefine(confirmTemporaryPassword);
@@ -80,6 +99,7 @@ export const updateApplicationUserInputSchema = z
   .object({
     username: usernameSchema,
     role: appRoleSchema,
+    storeId: optionalNullableUuidSchema.optional().default(null),
   })
   .strict();
 

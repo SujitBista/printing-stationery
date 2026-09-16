@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, useTransition } from "react";
-import type {
-  Branch,
-  ItemRequestActionType,
-  ItemRequestListItem,
-  ItemRequestQueue,
-  Store,
+import {
+  ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+  ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+  type Branch,
+  type ItemRequestActionType,
+  type ItemRequestListItem,
+  type ItemRequestQueue,
+  type Store,
 } from "@printing-stationery/shared";
 import { fetchBranches } from "@/lib/api/branches";
 import {
@@ -19,10 +21,12 @@ import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
+  shouldShowItemRequestCorporateMakerCreateNote,
   shouldShowItemRequestCreateAction,
   shouldShowItemRequestCreateAssignmentWarning,
 } from "@/lib/item-requests/permissions";
 import {
+  getItemRequestListEmptyState,
   getItemRequestListRowActions,
   getItemRequestQueue,
 } from "@/lib/item-requests/queues";
@@ -55,6 +59,7 @@ export function ItemRequestListPage({
     canViewFulfilment,
     readyToIssueCount,
     canCreate,
+    loaded: navLoaded,
     setReadyToIssueCount,
   } = useItemRequestNavContext();
   const queueMeta = getItemRequestQueue(queue, workflowRoles);
@@ -269,14 +274,29 @@ export function ItemRequestListPage({
     queueShowsCreate: Boolean(queueMeta.showCreate),
     canCreate,
     user,
+    workflowRoles,
   });
   const showCreateAssignmentWarning =
+    navLoaded &&
     shouldShowItemRequestCreateAssignmentWarning({
       queueShowsCreate: Boolean(queueMeta.showCreate),
       canCreate,
       isAdmin,
       user,
+      workflowRoles,
     });
+  const showCorporateMakerCreateNote =
+    navLoaded &&
+    shouldShowItemRequestCorporateMakerCreateNote({
+      queue,
+      workflowRoles,
+    });
+  const emptyState = getItemRequestListEmptyState({
+    queue,
+    workflowRoles,
+    hasFilters: Boolean(search || requestingStoreId || branchId),
+    canCreate: showCreate,
+  });
 
   return (
     <section className="w-full max-w-7xl">
@@ -296,6 +316,10 @@ export function ItemRequestListPage({
           >
             New Request
           </Link>
+        ) : showCorporateMakerCreateNote ? (
+          <p className="max-w-xs text-sm text-ink-muted">
+            {ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE}
+          </p>
         ) : null}
       </div>
 
@@ -322,8 +346,7 @@ export function ItemRequestListPage({
         <div className="mt-4 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm text-ink">
           <p className="font-semibold text-warning">Cannot create requests yet</p>
           <p className="mt-1 text-ink-muted">
-            You need an active Store User assignment as the maker of a store.
-            Ask an admin to set this up in Store User Setup, then refresh this page.
+            {ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE}
           </p>
         </div>
       ) : null}
@@ -405,14 +428,8 @@ export function ItemRequestListPage({
           </div>
         ) : requests.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
-            <p className="font-medium text-ink">No item requests found</p>
-            <p className="mt-1 text-sm text-ink-muted">
-              {search || requestingStoreId || branchId
-                ? "Try adjusting search or filters."
-                : showCreate
-                  ? "Create a request to get started."
-                  : "No requests are in this queue for you right now."}
-            </p>
+            <p className="font-medium text-ink">{emptyState.title}</p>
+            <p className="mt-1 text-sm text-ink-muted">{emptyState.message}</p>
           </div>
         ) : (
           <>
@@ -511,12 +528,12 @@ export function ItemRequestListPage({
                             >
                               View
                             </Link>
-                            {rowActions.showCreateIssue ? (
+                            {rowActions.issueAction && rowActions.issueHref ? (
                               <Link
-                                href={`/requests/item-requests/${request.id}/issue`}
+                                href={rowActions.issueHref}
                                 className="font-medium text-accent hover:text-accent-dark hover:underline"
                               >
-                                Create Issue
+                                {rowActions.issueActionLabel}
                               </Link>
                             ) : null}
                             {rowActions.workflowActions.map((action) => (

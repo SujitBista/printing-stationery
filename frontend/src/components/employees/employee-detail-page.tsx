@@ -239,7 +239,7 @@ export function EmployeeDetailPage({ employeeId }: EmployeeDetailPageProps) {
             Current supervisor
           </dt>
           <dd className="mt-1 text-sm font-medium">
-            {currentAssignment
+            {currentAssignment?.supervisor
               ? personLabel(currentAssignment.supervisor)
               : "—"}
           </dd>

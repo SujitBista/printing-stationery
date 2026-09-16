@@ -84,8 +84,8 @@ export const itemRequestQueueSchema = z.enum(ITEM_REQUEST_QUEUES);
 
 /**
  * Statuses shown in each queue. Ready-to-issue / partial-pending also require
- * remaining approved quantity, applied in the backend. Actor-specific
- * pending-with filters are applied in the backend.
+ * remaining posted quantity and no submitted/returned issue, applied in the
+ * backend. Actor-specific pending-with filters are applied in the backend.
  */
 export const ITEM_REQUEST_QUEUE_STATUSES = {
   "request-list": "ALL",
@@ -104,7 +104,7 @@ export const ITEM_REQUEST_QUEUE_STATUSES = {
   forwarded: ["PENDING_CORPORATE_CHECKER"],
   approve: ["PENDING_CORPORATE_CHECKER"],
   approved: ["APPROVED", "PARTIALLY_ISSUED", "ISSUED"],
-  "ready-to-issue": ["APPROVED", "PARTIALLY_ISSUED"],
+  "ready-to-issue": ["APPROVED"],
   returned: ["RETURNED_TO_BRANCH_MAKER", "RETURNED_TO_CORPORATE_MAKER"],
   "partial-pending": ["PARTIALLY_ISSUED"],
   issued: ["ISSUED"],
@@ -462,6 +462,19 @@ export const itemRequestListItemSchema = z.object({
   canDelete: z.boolean(),
   allowedActions: z.array(itemRequestActionTypeSchema),
   canCreateIssue: z.boolean(),
+  activeIssue: z
+    .object({
+      id: z.string().uuid(),
+      issueNumber: z.string().min(1),
+      status: z.enum([
+        "DRAFT",
+        "PENDING_VERIFICATION",
+        "RETURNED",
+        "REJECTED",
+        "POSTED",
+      ]),
+    })
+    .nullable(),
 });
 
 export const itemRequestSchema = itemRequestListItemSchema.extend({

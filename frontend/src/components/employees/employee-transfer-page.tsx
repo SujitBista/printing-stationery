@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   transferEmployeeInputSchema,
+  isStoreManagingRole,
+  NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE,
+  resolveStoreAssignment,
+  STORE_SELECTION_REQUIRED_MESSAGE,
   type Branch,
   type EligibleStoreApplicationUser,
   type EmployeeTransferContext,
@@ -192,9 +196,18 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
         return;
       }
 
-      setStores(storesResult.ok ? storesResult.data.items : []);
+      const branchStores = storesResult.ok
+        ? storesResult.data.items.filter(
+            (store) => store.isActive && store.branchId === toBranchId,
+          )
+        : [];
+      setStores(branchStores);
       setSupervisors(supervisorsResult.ok ? supervisorsResult.data.items : []);
-      setToStoreId("");
+      if (branchStores.length === 1) {
+        setToStoreId(branchStores[0]!.id);
+      } else {
+        setToStoreId("");
+      }
       setToSupervisorApplicationUserId("");
       setDestinationLoading(false);
     }
@@ -206,7 +219,8 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
   }, [toBranchId]);
 
   const canAssignStore = Boolean(
-    context?.applicationUser?.roles.includes("MAKER") &&
+    context?.applicationUser &&
+      context.applicationUser.roles.some((role) => isStoreManagingRole(role)) &&
       !context.applicationUser.roles.includes("ADMIN") &&
       !context.applicationUser.roles.includes("HR"),
   );
@@ -262,6 +276,18 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
       setFieldErrors(nextErrors);
       setFormError("Please complete every required transfer field.");
       return;
+    }
+
+    if (canAssignStore && toBranchId && !destinationLoading) {
+      const resolution = resolveStoreAssignment({
+        activeStores: stores,
+        selectedStoreId: toStoreId,
+      });
+      if (resolution.status === "SELECTION_REQUIRED") {
+        setFieldErrors({ toStoreId: STORE_SELECTION_REQUIRED_MESSAGE });
+        setFormError(STORE_SELECTION_REQUIRED_MESSAGE);
+        return;
+      }
     }
 
     setStep("confirm");
@@ -446,12 +472,21 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
 
             <Field
               label="New store"
+              required={
+                canAssignStore && !destinationLoading && stores.length > 1
+              }
               error={fieldErrors.toStoreId}
               htmlFor="employee-transfer-store"
               hint={
-                canAssignStore
-                  ? "Optional. Only active stores in the new branch can be selected."
-                  : "A new store assignment is only available when this employee has a MAKER account."
+                !canAssignStore
+                  ? "A new store assignment is only available when this employee has a MAKER or CHECKER account."
+                  : destinationLoading
+                    ? "Loading stores…"
+                    : stores.length === 0
+                      ? NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE
+                      : stores.length === 1
+                        ? "Assigned automatically because this branch has one active store."
+                        : "Required. Select one of the active stores in the new branch."
               }
             >
               <SearchableSelect
@@ -467,7 +502,13 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
                   !context?.canTransfer
                 }
                 placeholder={
-                  destinationLoading ? "Loading stores…" : "No store change"
+                  destinationLoading
+                    ? "Loading stores…"
+                    : stores.length === 0
+                      ? "No active store in this branch"
+                      : stores.length === 1
+                        ? storeLabel(stores[0]!)
+                        : "Select a store"
                 }
                 searchPlaceholder="Search stores…"
                 emptyMessage="No active store in this branch"
@@ -567,7 +608,7 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
                 Previous supervisor
               </dt>
               <dd className="mt-1">
-                {context?.currentAssignment
+                {context?.currentAssignment?.supervisor
                   ? personLabel(context.currentAssignment.supervisor)
                   : "None"}
               </dd>

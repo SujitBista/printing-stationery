@@ -12,9 +12,12 @@ import {
   fetchItemRequest,
   performItemRequestAction,
 } from "@/lib/api/item-requests";
-import { fetchItemIssueEligibility } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
-import { shouldShowCreateItemIssueButton } from "@/lib/item-issues/permissions";
+import {
+  getItemRequestIssueActionHref,
+  getItemRequestIssueActionLabel,
+  resolveVisibleItemRequestIssueAction,
+} from "@/lib/item-issues/permissions";
 import { Badge } from "@/components/ui/badge";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import {
@@ -74,7 +77,6 @@ export function ItemRequestDetailPage() {
     useState<ItemRequestActionType | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [canCreateIssue, setCanCreateIssue] = useState(false);
 
   const loadRequest = useCallback(async () => {
     if (!params.id) {
@@ -94,19 +96,6 @@ export function ItemRequestDetailPage() {
     }
 
     setRequest(result.data);
-    setCanCreateIssue(false);
-    if (result.data.canCreateIssue) {
-      const eligibility = await fetchItemIssueEligibility(result.data.id);
-      setCanCreateIssue(
-        shouldShowCreateItemIssueButton({
-          requestCanCreateIssue: result.data.canCreateIssue,
-          eligibilityOk: eligibility.ok,
-          eligibilityCanCreate: eligibility.ok
-            ? eligibility.data.canCreate
-            : false,
-        }),
-      );
-    }
     setLoading(false);
   }, [params.id]);
 
@@ -186,6 +175,14 @@ export function ItemRequestDetailPage() {
     );
   }
 
+  const issueAction = request
+    ? resolveVisibleItemRequestIssueAction({
+        canCreateNewIssue: request.canCreateIssue,
+        requestStatus: request.status,
+        activeIssue: request.activeIssue,
+      })
+    : null;
+
   return (
     <section className="w-full max-w-5xl">
       <Link
@@ -226,12 +223,16 @@ export function ItemRequestDetailPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {canCreateIssue ? (
+              {issueAction ? (
                 <Link
-                  href={`/requests/item-requests/${request.id}/issue`}
+                  href={getItemRequestIssueActionHref({
+                    requestId: request.id,
+                    action: issueAction,
+                    activeIssueId: request.activeIssue?.id,
+                  })}
                   className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
                 >
-                  Create Issue
+                  {getItemRequestIssueActionLabel(issueAction)}
                 </Link>
               ) : null}
               {request.canEdit ? (

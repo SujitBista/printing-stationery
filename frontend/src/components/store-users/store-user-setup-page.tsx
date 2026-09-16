@@ -22,10 +22,13 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 
 const PAGE_SIZE = 20;
 
-function employeeDisplayName(employee: {
+function optionalEmployeeDisplayName(employee: {
   employeeName: string;
   employeeCode: string;
-}): string {
+} | null | undefined): string {
+  if (!employee) {
+    return "—";
+  }
   return `${employee.employeeName} (${employee.employeeCode})`;
 }
 
@@ -160,7 +163,7 @@ export function StoreUserSetupPage() {
   async function handleToggleStatus(assignment: StoreUser) {
     if (assignment.isActive) {
       const confirmed = window.confirm(
-        `Deactivate assignment for ${employeeDisplayName(assignment.maker.employee)} at ${assignment.store.storeName}? The record remains in history.`,
+        `Deactivate assignment for ${optionalEmployeeDisplayName(assignment.maker?.employee)} at ${assignment.store.storeName}? The record remains in history.`,
       );
       if (!confirmed) {
         return;
@@ -472,16 +475,18 @@ export function StoreUserSetupPage() {
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-3">
-                          {assignment.maker.employee.employeeCode}
+                          {assignment.maker?.employee.employeeCode ?? "—"}
                         </td>
                         <td className="min-w-[12rem] px-3 py-3 font-medium">
-                          {employeeDisplayName(assignment.maker.employee)}
+                          {optionalEmployeeDisplayName(assignment.maker?.employee)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3">
-                          {assignment.supervisor.employee.employeeCode}
+                          {assignment.supervisor?.employee.employeeCode ?? "—"}
                         </td>
                         <td className="min-w-[12rem] px-3 py-3">
-                          {employeeDisplayName(assignment.supervisor.employee)}
+                          {optionalEmployeeDisplayName(
+                            assignment.supervisor?.employee,
+                          )}
                         </td>
                         <td
                           className="whitespace-nowrap px-3 py-3"
@@ -490,10 +495,10 @@ export function StoreUserSetupPage() {
                           E
                         </td>
                         <td className="whitespace-nowrap px-3 py-3">
-                          {assignment.maker.username}
+                          {assignment.maker?.username ?? "—"}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3">
-                          {assignment.supervisor.username}
+                          {assignment.supervisor?.username ?? "—"}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3">
                           <span

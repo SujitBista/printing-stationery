@@ -8,8 +8,12 @@ import {
   getItemRequestNavQueues,
   inferItemRequestActorWorkflowRole,
   isCorporateControlStore,
+  ITEM_REQUEST_QUEUE_STATUSES,
   itemRequestActionInputSchema,
+  itemRequestWorkflowCanCreate,
+  itemRequestWorkflowIsCorporateMaker,
   preferCorporateControlStore,
+  resolveItemRequestIssueAction,
 } from "@printing-stationery/shared";
 
 const SOURCE = "11111111-1111-4111-8111-111111111111";
@@ -264,5 +268,68 @@ describe("item request workflow remarks and history", () => {
     assert.ok(nav.workflowQueues.includes("review"));
     assert.ok(nav.workflowQueues.includes("ready-to-issue"));
     assert.equal(nav.workflowQueues.includes("approve"), false);
+  });
+
+  it("lets only admins and Branch Makers create item requests", () => {
+    assert.equal(itemRequestWorkflowCanCreate(["ADMIN"]), true);
+    assert.equal(itemRequestWorkflowCanCreate(["BRANCH_MAKER"]), true);
+    assert.equal(itemRequestWorkflowCanCreate(["CORPORATE_MAKER"]), false);
+    assert.equal(itemRequestWorkflowCanCreate(["CORPORATE_CHECKER"]), false);
+    assert.equal(itemRequestWorkflowCanCreate(["BRANCH_CHECKER"]), false);
+    assert.equal(itemRequestWorkflowIsCorporateMaker(["CORPORATE_MAKER"]), true);
+    assert.equal(
+      itemRequestWorkflowIsCorporateMaker(["CORPORATE_MAKER", "BRANCH_MAKER"]),
+      false,
+    );
+  });
+
+  it("keeps Ready to Issue as unposted approved requests", () => {
+    assert.deepEqual(ITEM_REQUEST_QUEUE_STATUSES["ready-to-issue"], ["APPROVED"]);
+    assert.deepEqual(ITEM_REQUEST_QUEUE_STATUSES["partial-pending"], [
+      "PARTIALLY_ISSUED",
+    ]);
+  });
+
+  it("resolves issue actions from the active issue instead of always creating", () => {
+    assert.equal(
+      resolveItemRequestIssueAction({
+        canCreateNewIssue: true,
+        requestStatus: "APPROVED",
+        activeIssue: null,
+      }),
+      "CREATE",
+    );
+    assert.equal(
+      resolveItemRequestIssueAction({
+        canCreateNewIssue: false,
+        requestStatus: "APPROVED",
+        activeIssue: { status: "DRAFT" },
+      }),
+      "CONTINUE_DRAFT",
+    );
+    assert.equal(
+      resolveItemRequestIssueAction({
+        canCreateNewIssue: false,
+        requestStatus: "APPROVED",
+        activeIssue: { status: "PENDING_VERIFICATION" },
+      }),
+      "VIEW_SUBMITTED",
+    );
+    assert.equal(
+      resolveItemRequestIssueAction({
+        canCreateNewIssue: false,
+        requestStatus: "APPROVED",
+        activeIssue: { status: "RETURNED" },
+      }),
+      "CORRECT_AND_RESUBMIT",
+    );
+    assert.equal(
+      resolveItemRequestIssueAction({
+        canCreateNewIssue: true,
+        requestStatus: "PARTIALLY_ISSUED",
+        activeIssue: null,
+      }),
+      "CREATE_REMAINING",
+    );
   });
 });

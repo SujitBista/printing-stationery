@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { and, eq, inArray, like, or } from "drizzle-orm";
-import type { AuthenticatedUser } from "@printing-stationery/shared";
+import {
+  ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+  ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+  type AuthenticatedUser,
+} from "@printing-stationery/shared";
 import { loadEnv } from "../config/env.js";
 import { closePool, createDb, getDb } from "../db/client.js";
 import {
@@ -78,8 +82,8 @@ describe("store-to-store item requests", { concurrency: false }, () => {
   let corporateChecker: AuthenticatedUser | null = null;
   let originalCorporateAssignment: {
     id: string;
-    makerApplicationUserId: string;
-    supervisorApplicationUserId: string;
+    makerApplicationUserId: string | null;
+    supervisorApplicationUserId: string | null;
     isActive: boolean;
   } | null = null;
   let inactiveStoreId = "";
@@ -677,7 +681,11 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       .from(storeUsers)
       .where(eq(storeUsers.storeId, corporateStoreId))
       .limit(1);
-    if (existingCorporateAssignment[0]?.isActive) {
+    if (
+      existingCorporateAssignment[0]?.isActive &&
+      existingCorporateAssignment[0].makerApplicationUserId &&
+      existingCorporateAssignment[0].supervisorApplicationUserId
+    ) {
       corporateMaker = await loadActor(
         existingCorporateAssignment[0].makerApplicationUserId,
       );
@@ -1005,7 +1013,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         isAppError(
           error,
           403,
-          "You can create a request only for your assigned store.",
+          ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
         ),
     );
   });
@@ -1026,9 +1034,104 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         isAppError(
           error,
           403,
-          "You can create a request only when you are an active maker of a store.",
+          ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
         ),
     );
+  });
+
+  it("hides requests until the requesting store maker has an assigned checker", async () => {
+    const assignmentRows = await getDb()
+      .select()
+      .from(storeUsers)
+      .where(eq(storeUsers.storeId, destinationStoreId))
+      .limit(1);
+    const assignment = assignmentRows[0];
+    assert.ok(assignment);
+    const originalSupervisorId = assignment.supervisorApplicationUserId;
+    assert.ok(originalSupervisorId);
+
+    await getDb()
+      .update(storeUsers)
+      .set({
+        supervisorApplicationUserId: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(storeUsers.id, assignment.id));
+
+    try {
+      const makerContext = await getItemRequestContext(destinationMaker);
+      assert.equal(makerContext.canCreate, false);
+      assert.equal(
+        makerContext.workflowRoles.includes("BRANCH_MAKER"),
+        false,
+      );
+      await assert.rejects(
+        () =>
+          createItemRequest(destinationMaker, {
+            sourceStoreId: destinationStoreId,
+            destinationStoreId: corporateStoreId,
+            requestedByEmployeeId: destinationMaker.employee!.id,
+            remarks: null,
+            lines: [{ itemId, requestedQuantity: "1" }],
+          }),
+        (error: unknown) =>
+          isAppError(
+            error,
+            403,
+            ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+          ),
+      );
+
+      const created = await trackRequest(
+        await createItemRequest(admin, {
+          sourceStoreId: destinationStoreId,
+          destinationStoreId: sourceStoreId,
+          requestedByEmployeeId: defaultRequestedById,
+          remarks: null,
+          lines: [{ itemId, requestedQuantity: "1" }],
+        }),
+      );
+
+      const hidden = await listItemRequests(admin, {
+        page: 1,
+        pageSize: 50,
+        status: "ALL",
+      });
+      assert.equal(
+        hidden.items.some((item) => item.id === created.id),
+        false,
+      );
+
+      await getDb()
+        .update(storeUsers)
+        .set({
+          supervisorApplicationUserId: originalSupervisorId,
+          updatedAt: new Date(),
+        })
+        .where(eq(storeUsers.id, assignment.id));
+
+      const visible = await listItemRequests(admin, {
+        page: 1,
+        pageSize: 50,
+        status: "ALL",
+      });
+      assert.equal(
+        visible.items.some((item) => item.id === created.id),
+        true,
+      );
+
+      const restoredContext = await getItemRequestContext(destinationMaker);
+      assert.equal(restoredContext.canCreate, true);
+      assert.ok(restoredContext.workflowRoles.includes("BRANCH_MAKER"));
+    } finally {
+      await getDb()
+        .update(storeUsers)
+        .set({
+          supervisorApplicationUserId: originalSupervisorId,
+          updatedAt: new Date(),
+        })
+        .where(eq(storeUsers.id, assignment.id));
+    }
   });
 
   it("rejects same-store requests", async () => {
@@ -1570,6 +1673,70 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     });
   }
 
+  it("does not let the Corporate Maker create branch requests", async () => {
+    assert.ok(corporateMaker);
+
+    const context = await getItemRequestContext(corporateMaker);
+    assert.ok(context.workflowRoles.includes("CORPORATE_MAKER"));
+    assert.equal(context.canCreate, false);
+
+    const emptyReview = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 20,
+      status: "ALL",
+      queue: "review",
+    });
+    assert.equal(Array.isArray(emptyReview.items), true);
+
+    await assert.rejects(
+      () =>
+        createItemRequest(corporateMaker, {
+          sourceStoreId: corporateStoreId,
+          destinationStoreId: corporateStoreId,
+          requestedByEmployeeId: corporateMaker.employee!.id,
+          remarks: null,
+          lines: [{ itemId, requestedQuantity: "1" }],
+        }),
+      (error: unknown) =>
+        isAppError(
+          error,
+          403,
+          ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+        ),
+    );
+
+    await assert.rejects(
+      () =>
+        createItemRequest(corporateMaker, {
+          sourceStoreId: birtamodStoreId,
+          destinationStoreId: corporateStoreId,
+          requestedByEmployeeId: corporateMaker.employee!.id,
+          remarks: null,
+          lines: [{ itemId, requestedQuantity: "1" }],
+        }),
+      (error: unknown) =>
+        isAppError(
+          error,
+          403,
+          ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+        ),
+    );
+
+    await assert.rejects(
+      () =>
+        listEligibleItemRequestSourceStores(corporateMaker, {
+          page: 1,
+          pageSize: 20,
+        }),
+      (error: unknown) =>
+        isAppError(
+          error,
+          403,
+          ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+        ),
+    );
+  });
+
   it("exposes Corporate Checker queues and pending-approval filtering", async () => {
     assert.ok(corporateMaker);
     assert.ok(corporateChecker);
@@ -1586,6 +1753,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
 
     const corporateMakerContext = await getItemRequestContext(corporateMaker);
     assert.ok(corporateMakerContext.workflowRoles.includes("CORPORATE_MAKER"));
+    assert.equal(corporateMakerContext.canCreate, false);
 
     const created = await trackRequest(
       await createItemRequest(birtamodMaker, {

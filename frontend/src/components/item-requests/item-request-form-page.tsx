@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   createItemRequestInputSchema,
+  ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+  ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+  itemRequestWorkflowIsCorporateMaker,
   type EligibleItemRequestItem,
   type ItemRequest,
   type ItemRequestContext,
@@ -80,6 +83,9 @@ export function ItemRequestFormPage({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [createBlockedMessage, setCreateBlockedMessage] = useState<
+    string | null
+  >(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
 
@@ -87,6 +93,7 @@ export function ItemRequestFormPage({
     async function load() {
       setLoading(true);
       setLoadError(null);
+      setCreateBlockedMessage(null);
 
       const [contextResult, existingResult] = await Promise.all([
         fetchItemRequestContext(),
@@ -130,11 +137,19 @@ export function ItemRequestFormPage({
           })),
         );
       } else if (!contextResult.data.canCreate) {
-        setLoadError(
-          isAdmin
-            ? "You cannot create a request right now."
-            : "You can create a request only when you have an active store assignment as maker.",
-        );
+        if (
+          itemRequestWorkflowIsCorporateMaker(
+            contextResult.data.workflowRoles,
+          )
+        ) {
+          setCreateBlockedMessage(ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE);
+        } else {
+          setLoadError(
+            isAdmin
+              ? "You cannot create a request right now."
+              : ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+          );
+        }
       } else {
         const requestedBy = contextResult.data.requestedByEmployee;
         setRequestedByEmployee(requestedBy);
@@ -412,6 +427,13 @@ export function ItemRequestFormPage({
         <p className="border-l-2 border-danger pl-3 text-sm text-danger">
           {loadError}
         </p>
+      ) : createBlockedMessage ? (
+        <div className="rounded-xl border border-dashed border-border bg-accent-soft/50 px-4 py-10 text-center">
+          <p className="font-medium text-ink">{createBlockedMessage}</p>
+          <p className="mt-1 text-sm text-ink-muted">
+            You can still review branch requests from the request lists.
+          </p>
+        </div>
       ) : (
         <form onSubmit={(event) => void handleSaveDraft(event)} className="flex flex-col gap-5">
           {formError ? (

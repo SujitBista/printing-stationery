@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ItemRequestActionType } from "@printing-stationery/shared";
 import {
+  getItemRequestListEmptyState,
   getItemRequestListRowActions,
   getItemRequestQueue,
   getItemRequestTabQueues,
@@ -19,68 +20,166 @@ const ALL_WORKFLOW_ACTIONS: ItemRequestActionType[] = [
   "CANCEL",
 ];
 
+const REQUEST_ID = "11111111-1111-4111-8111-111111111111";
+const ISSUE_ID = "22222222-2222-4222-8222-222222222222";
+
+function requestForActions(
+  overrides: Partial<{
+    canCreateIssue: boolean;
+    status: "APPROVED" | "PARTIALLY_ISSUED" | "ISSUED";
+    activeIssue: {
+      id: string;
+      issueNumber: string;
+      status: "DRAFT" | "PENDING_VERIFICATION" | "RETURNED";
+    } | null;
+    allowedActions: ItemRequestActionType[];
+  }> = {},
+) {
+  return {
+    id: REQUEST_ID,
+    status: overrides.status ?? "APPROVED",
+    canCreateIssue: overrides.canCreateIssue ?? false,
+    activeIssue: overrides.activeIssue ?? null,
+    allowedActions: overrides.allowedActions ?? ALL_WORKFLOW_ACTIONS,
+  };
+}
+
 describe("item request list row actions", () => {
   it("keeps Request List as overview-only View", () => {
-    const actions = getItemRequestListRowActions("request-list", {
-      canCreateIssue: true,
-      allowedActions: ALL_WORKFLOW_ACTIONS,
-    });
+    const actions = getItemRequestListRowActions(
+      "request-list",
+      requestForActions({ canCreateIssue: true }),
+    );
 
     assert.deepEqual(actions.workflowActions, []);
-    assert.equal(actions.showCreateIssue, false);
+    assert.equal(actions.issueAction, null);
   });
 
   it("shows Recommend and Return only when the backend allows them", () => {
-    const assigned = getItemRequestListRowActions("recommend", {
-      canCreateIssue: false,
-      allowedActions: ["RECOMMEND", "RETURN"],
-    });
-    const unauthorized = getItemRequestListRowActions("recommend", {
-      canCreateIssue: false,
-      allowedActions: [],
-    });
+    const assigned = getItemRequestListRowActions(
+      "recommend",
+      requestForActions({
+        canCreateIssue: false,
+        allowedActions: ["RECOMMEND", "RETURN"],
+      }),
+    );
+    const unauthorized = getItemRequestListRowActions(
+      "recommend",
+      requestForActions({ canCreateIssue: false, allowedActions: [] }),
+    );
 
     assert.deepEqual(assigned.workflowActions, ["RECOMMEND", "RETURN"]);
     assert.deepEqual(unauthorized.workflowActions, []);
   });
 
   it("keeps Review actions on the Review tab", () => {
-    const actions = getItemRequestListRowActions("review", {
-      canCreateIssue: false,
-      allowedActions: ALL_WORKFLOW_ACTIONS,
-    });
+    const actions = getItemRequestListRowActions(
+      "review",
+      requestForActions({ canCreateIssue: false }),
+    );
 
     assert.deepEqual(actions.workflowActions, ["FORWARD", "RETURN"]);
   });
 
   it("keeps Approve, Reject, and Return on the Approve tab", () => {
-    const actions = getItemRequestListRowActions("approve", {
-      canCreateIssue: false,
-      allowedActions: ALL_WORKFLOW_ACTIONS,
-    });
+    const actions = getItemRequestListRowActions(
+      "approve",
+      requestForActions({ canCreateIssue: false }),
+    );
 
     assert.deepEqual(actions.workflowActions, ["APPROVE", "REJECT", "RETURN"]);
   });
 
   it("does not surface workflow decisions on approved or rejected lists", () => {
-    for (const queue of ["approved", "issued", "partial-pending", "rejected"] as const) {
-      const actions = getItemRequestListRowActions(queue, {
-        canCreateIssue: queue !== "rejected",
-        allowedActions: ALL_WORKFLOW_ACTIONS,
-      });
+    for (const queue of ["approved", "issued", "rejected"] as const) {
+      const actions = getItemRequestListRowActions(
+        queue,
+        requestForActions({ canCreateIssue: queue !== "rejected" }),
+      );
 
       assert.deepEqual(actions.workflowActions, []);
-      assert.equal(actions.showCreateIssue, false);
+      assert.equal(actions.issueAction, null);
     }
   });
 
-  it("shows Create Issue only on Ready to Issue", () => {
-    const ready = getItemRequestListRowActions("ready-to-issue", {
-      canCreateIssue: true,
-      allowedActions: ALL_WORKFLOW_ACTIONS,
-    });
-    assert.equal(ready.showCreateIssue, true);
+  it("shows Create Issue only on Ready to Issue when no issue exists", () => {
+    const ready = getItemRequestListRowActions(
+      "ready-to-issue",
+      requestForActions({ canCreateIssue: true }),
+    );
+    assert.equal(ready.issueAction, "CREATE");
+    assert.equal(ready.issueActionLabel, "Create Issue");
+    assert.equal(ready.issueHref, `/requests/item-requests/${REQUEST_ID}/issue`);
     assert.deepEqual(ready.workflowActions, []);
+  });
+
+  it("replaces Create Issue with Continue Draft when a draft exists", () => {
+    const ready = getItemRequestListRowActions(
+      "ready-to-issue",
+      requestForActions({
+        canCreateIssue: false,
+        activeIssue: {
+          id: ISSUE_ID,
+          issueNumber: "II-1",
+          status: "DRAFT",
+        },
+      }),
+    );
+    assert.equal(ready.issueAction, "CONTINUE_DRAFT");
+    assert.equal(ready.issueActionLabel, "Continue Draft");
+    assert.equal(ready.issueHref, `/requests/item-issues/${ISSUE_ID}`);
+  });
+
+  it("links a submitted issue instead of creating another one", () => {
+    const ready = getItemRequestListRowActions(
+      "ready-to-issue",
+      requestForActions({
+        canCreateIssue: false,
+        activeIssue: {
+          id: ISSUE_ID,
+          issueNumber: "II-1",
+          status: "PENDING_VERIFICATION",
+        },
+      }),
+    );
+    assert.equal(ready.issueAction, "VIEW_SUBMITTED");
+    assert.equal(ready.issueActionLabel, "View Submitted Issue");
+    assert.equal(ready.issueHref, `/requests/item-issues/${ISSUE_ID}`);
+  });
+
+  it("offers Correct and Resubmit for a returned issue", () => {
+    const ready = getItemRequestListRowActions(
+      "ready-to-issue",
+      requestForActions({
+        canCreateIssue: false,
+        activeIssue: {
+          id: ISSUE_ID,
+          issueNumber: "II-1",
+          status: "RETURNED",
+        },
+      }),
+    );
+    assert.equal(ready.issueAction, "CORRECT_AND_RESUBMIT");
+    assert.equal(ready.issueActionLabel, "Correct and Resubmit");
+  });
+
+  it("shows Create Issue for Remaining Quantity on Partial Pending", () => {
+    const partial = getItemRequestListRowActions(
+      "partial-pending",
+      requestForActions({
+        canCreateIssue: true,
+        status: "PARTIALLY_ISSUED",
+      }),
+    );
+    assert.equal(partial.issueAction, "CREATE_REMAINING");
+    assert.equal(
+      partial.issueActionLabel,
+      "Create Issue for Remaining Quantity",
+    );
+    assert.equal(
+      partial.issueHref,
+      `/requests/item-requests/${REQUEST_ID}/issue`,
+    );
   });
 });
 
@@ -168,5 +267,39 @@ describe("item request role queues", () => {
       "rejected",
       "request-list",
     ]);
+  });
+
+  it("renames the Corporate Maker review page heading", () => {
+    const queue = getItemRequestQueue("review", ["CORPORATE_MAKER"]);
+    assert.equal(queue.title, "Branch Requests for Review");
+    assert.equal(queue.showCreate, false);
+  });
+
+  it("hides New Request on Corporate Maker request lists", () => {
+    const requestList = getItemRequestQueue("request-list", ["CORPORATE_MAKER"]);
+    assert.equal(requestList.showCreate, false);
+  });
+
+  it("shows a waiting empty state on the Corporate Maker review queue", () => {
+    const empty = getItemRequestListEmptyState({
+      queue: "review",
+      workflowRoles: ["CORPORATE_MAKER"],
+      hasFilters: false,
+      canCreate: false,
+    });
+    assert.equal(empty.title, "No branch requests yet");
+    assert.equal(
+      empty.message,
+      "Once a Branch Maker submits a request and the Branch Checker recommends it, the request will appear here for your review.",
+    );
+
+    const filtered = getItemRequestListEmptyState({
+      queue: "review",
+      workflowRoles: ["CORPORATE_MAKER"],
+      hasFilters: true,
+      canCreate: false,
+    });
+    assert.equal(filtered.title, "No item requests found");
+    assert.equal(filtered.message, "Try adjusting search or filters.");
   });
 });

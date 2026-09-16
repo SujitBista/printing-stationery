@@ -302,6 +302,7 @@ export type {
 
 export {
   applicationUserStatusFilterSchema,
+  applicationUserAssignedStoreSchema,
   applicationUserEmployeeSchema,
   applicationUserSchema,
   createApplicationUserInputSchema,
@@ -316,6 +317,7 @@ export {
 } from "./schemas/application-user.js";
 export type {
   ApplicationUser,
+  ApplicationUserAssignedStore,
   ApplicationUserEmployee,
   ApplicationUserStatusFilter,
   CreateApplicationUserInput,
@@ -327,6 +329,20 @@ export type {
   EligibleEmployeeListQuery,
   PaginatedEligibleEmployeeResponse,
 } from "./types/application-user.js";
+
+export {
+  STORE_MANAGING_ROLES,
+  NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE,
+  STORE_SELECTION_REQUIRED_MESSAGE,
+  STORE_MUST_MATCH_EMPLOYEE_BRANCH_MESSAGE,
+  isStoreManagingRole,
+  resolveStoreAssignment,
+} from "./store-assignment.js";
+export type {
+  StoreManagingRole,
+  BranchStoreOption,
+  StoreAssignmentResolution,
+} from "./store-assignment.js";
 
 export {
   storeUserStatusFilterSchema,
@@ -442,10 +458,16 @@ export type {
 } from "./types/item-request.js";
 
 export {
+  ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+  ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+  ITEM_REQUEST_REVIEW_EMPTY_TITLE,
+  ITEM_REQUEST_REVIEW_EMPTY_MESSAGE,
   ITEM_REQUEST_ROLE_WORKFLOW_QUEUES,
   ITEM_REQUEST_FULFILMENT_QUEUES,
   getItemRequestNavQueues,
   itemRequestQueueIsFulfilment,
+  itemRequestWorkflowCanCreate,
+  itemRequestWorkflowIsCorporateMaker,
   itemRequestPendingAssignee,
   inferItemRequestActorWorkflowRole,
 } from "./item-request-workflow.js";
@@ -505,6 +527,7 @@ export {
   itemIssueActionSchema,
   itemIssueRequestSummarySchema,
   itemIssueLineAvailabilitySchema,
+  itemIssueActiveSummarySchema,
   itemIssueEligibilitySchema,
   itemIssueListItemSchema,
   itemIssueSchema,
@@ -518,6 +541,7 @@ export type {
   ItemIssueListQuery,
   ItemIssueRequestSummary,
   ItemIssueLineAvailability,
+  ItemIssueActiveSummary,
   ItemIssueEligibility,
   ItemIssueLineInput,
   CreateItemIssueInput,
@@ -536,13 +560,24 @@ export type {
 export {
   ITEM_ISSUE_POSTED_STATUS,
   ITEM_ISSUE_OPEN_STATUSES,
+  ITEM_ISSUE_QUEUE_BLOCKING_STATUSES,
   ITEM_ISSUE_EDITABLE_STATUSES,
+  ITEM_ISSUE_ACTIVE_CONFLICT_CODE,
+  ITEM_REQUEST_ISSUE_ACTION_KINDS,
+  ITEM_REQUEST_ISSUE_ACTION_LABELS,
   ITEM_ISSUE_ROLE_QUEUES,
   getItemIssueNavQueues,
   itemIssueStatusIsPosted,
   itemIssueStatusIsOpen,
   itemIssueStatusIsEditable,
+  itemIssueStatusBlocksRequestIssueQueue,
   requestStatusAllowsItemIssue,
+  resolveItemRequestIssueAction,
+  itemRequestIssueActionHref,
+} from "./item-issue-workflow.js";
+export type {
+  ItemRequestIssueActionKind,
+  ItemRequestActiveIssueSummary,
 } from "./item-issue-workflow.js";
 
 export {

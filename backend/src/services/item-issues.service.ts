@@ -21,6 +21,7 @@ import type {
   ItemIssueListItem,
   ItemIssueListQuery,
   ItemIssueRequestSummary,
+  ItemIssueStatus,
   ItemRequestWorkflowRole,
   PaginatedItemIssueResponse,
   RejectItemIssueInput,
@@ -29,6 +30,8 @@ import type {
   VerifyItemIssueInput,
 } from "@printing-stationery/shared";
 import {
+  ITEM_ISSUE_ACTIVE_CONFLICT_CODE,
+  ITEM_ISSUE_OPEN_STATUSES,
   ITEM_ISSUE_QUEUE_STATUSES,
   itemIssueStatusIsEditable,
   multiplyDecimalStrings,
@@ -38,6 +41,7 @@ import {
 import { AppError } from "../utils/errors.js";
 import {
   isItemIssueNumberUniqueViolation,
+  isItemIssueOpenDuplicateViolation,
   mapItemIssueDatabaseError,
 } from "../utils/db-errors.js";
 import {
@@ -124,8 +128,8 @@ type StoreAssignmentContext = {
   assignment: {
     id: string;
     storeId: string;
-    makerApplicationUserId: string;
-    supervisorApplicationUserId: string;
+    makerApplicationUserId: string | null;
+    supervisorApplicationUserId: string | null;
     isActive: boolean;
   };
   store: StoreRow;
@@ -601,6 +605,54 @@ export function canCreateIssueFromAvailability(
   );
 }
 
+export type ActiveItemIssueSummary = {
+  id: string;
+  issueNumber: string;
+  status: ItemIssueStatus;
+};
+
+function activeItemIssueConflict(issue: ActiveItemIssueSummary): AppError {
+  return new AppError(
+    "An open item issue already exists for this request.",
+    409,
+    {
+      details: {
+        code: ITEM_ISSUE_ACTIVE_CONFLICT_CODE,
+        issueId: issue.id,
+        issueNumber: issue.issueNumber,
+        status: issue.status,
+      },
+    },
+  );
+}
+
+async function loadActiveIssueForRequest(
+  requestId: string,
+  executor: Pick<ReturnType<typeof getDb>, "select"> = getDb(),
+): Promise<ActiveItemIssueSummary | null> {
+  const rows = await executor
+    .select({
+      id: itemIssues.id,
+      issueNumber: itemIssues.issueNumber,
+      status: itemIssues.status,
+    })
+    .from(itemIssues)
+    .where(
+      and(
+        eq(itemIssues.requestId, requestId),
+        inArray(itemIssues.status, [...ITEM_ISSUE_OPEN_STATUSES]),
+      ),
+    )
+    .orderBy(
+      desc(itemIssues.updatedAt),
+      desc(itemIssues.createdAt),
+      desc(itemIssues.id),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export function validateIssueLinesAgainstAvailability(params: {
   lines: Array<{ requestLineId: string; issueQuantity: string }>;
   availability: ItemIssueLineAvailability[];
@@ -669,6 +721,20 @@ async function createDraftWithRetry(
     const issueNumber = generateIssueNumber();
     try {
       const createdId = await getDb().transaction(async (tx) => {
+        const lockedRequest = await tx
+          .select({ id: itemRequests.id })
+          .from(itemRequests)
+          .where(eq(itemRequests.id, values.requestId))
+          .for("update");
+        if (!lockedRequest[0]) {
+          throw new AppError("Item request not found", 404);
+        }
+
+        const existing = await loadActiveIssueForRequest(values.requestId, tx);
+        if (existing) {
+          throw activeItemIssueConflict(existing);
+        }
+
         const inserted = await tx
           .insert(itemIssues)
           .values({
@@ -712,6 +778,12 @@ async function createDraftWithRetry(
       if (isItemIssueNumberUniqueViolation(error)) {
         lastError = error;
         continue;
+      }
+      if (isItemIssueOpenDuplicateViolation(error)) {
+        const existing = await loadActiveIssueForRequest(values.requestId);
+        if (existing) {
+          throw activeItemIssueConflict(existing);
+        }
       }
       mapItemIssueDatabaseError(error);
     }
@@ -1035,19 +1107,7 @@ export async function getItemIssueEligibility(
     request.corporateStore.id,
   );
 
-  const openRows = await getDb()
-    .select({ id: itemIssues.id, status: itemIssues.status })
-    .from(itemIssues)
-    .where(
-      and(
-        eq(itemIssues.requestId, requestId),
-        inArray(itemIssues.status, ["DRAFT", "PENDING_VERIFICATION", "RETURNED"]),
-      ),
-    )
-    .orderBy(desc(itemIssues.updatedAt), desc(itemIssues.createdAt), desc(itemIssues.id))
-    .limit(1);
-
-  const openIssue = openRows[0];
+  const openIssue = await loadActiveIssueForRequest(requestId);
   const remainingOk = canCreateIssueFromAvailability(availability);
   const statusOk = requestStatusAllowsItemIssue(request.request.status);
   let canCreate = statusOk && remainingOk && !openIssue;
@@ -1060,13 +1120,17 @@ export async function getItemIssueEligibility(
     canCreate = false;
   } else if (openIssue?.status === "PENDING_VERIFICATION") {
     reason = "An item issue for this request is already pending verification.";
-  } else if (openIssue) {
-    reason = null;
+  } else if (openIssue?.status === "RETURNED") {
+    reason =
+      "A returned item issue already exists for this request. Correct and resubmit it instead of creating a new one.";
+  } else if (openIssue?.status === "DRAFT") {
+    reason = "A draft item issue already exists for this request.";
   }
 
   return {
     canCreate,
     reason,
+    activeIssue: openIssue,
     draftIssueId:
       openIssue && openIssue.status !== "PENDING_VERIFICATION"
         ? openIssue.id
@@ -1115,6 +1179,9 @@ export async function createItemIssueFromRequest(
   input: CreateItemIssueInput,
 ): Promise<ItemIssue> {
   const eligibility = await getItemIssueEligibility(requestId, actor);
+  if (eligibility.activeIssue) {
+    throw activeItemIssueConflict(eligibility.activeIssue);
+  }
   if (!eligibility.canCreate || !eligibility.request) {
     throw new AppError(
       eligibility.reason ?? "This request is not eligible for a new issue.",

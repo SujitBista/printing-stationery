@@ -5,7 +5,7 @@ import { and, eq, inArray, like, or } from "drizzle-orm";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import type { AuthenticatedUser } from "@printing-stationery/shared";
-import { preferCorporateControlStore } from "@printing-stationery/shared";
+import { ITEM_ISSUE_ACTIVE_CONFLICT_CODE, preferCorporateControlStore } from "@printing-stationery/shared";
 import { createApp } from "../app.js";
 import { loadEnv, type Env } from "../config/env.js";
 import { closePool, createDb, getDb } from "../db/client.js";
@@ -34,8 +34,10 @@ import {
 } from "./item-issue-authorization.js";
 import {
   createItemIssueFromRequest,
+  countItemIssuesForQueue,
   getItemIssueById,
   getItemIssueEligibility,
+  listItemIssues,
   rejectItemIssue,
   returnItemIssue,
   submitItemIssue,
@@ -43,7 +45,11 @@ import {
   verifyAndPostItemIssue,
 } from "./item-issues.service.js";
 import { getOperationalAvailableQuantities } from "./opening-stocks.service.js";
-import { getItemRequestById } from "./item-requests.service.js";
+import {
+  getItemRequestById,
+  getItemRequestContext,
+  listItemRequests,
+} from "./item-requests.service.js";
 import { listNotifications } from "./notifications.service.js";
 import { AppError } from "../utils/errors.js";
 import { generateSessionToken, hashPassword, hashSessionToken } from "../utils/password.js";
@@ -62,8 +68,8 @@ const CORP_CHECKER_USERNAME = "tiauth_corp_checker";
 
 let originalCorporateAssignment: {
   id: string;
-  makerApplicationUserId: string;
-  supervisorApplicationUserId: string;
+  makerApplicationUserId: string | null;
+  supervisorApplicationUserId: string | null;
   isActive: boolean;
 } | null = null;
 let seededLedgerIds: string[] = [];
@@ -303,6 +309,9 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     const row = rows[0];
     if (!row) {
       throw new Error(`No store user assignment for store ${storeId}`);
+    }
+    if (!row.assignment.makerApplicationUserId || !row.assignment.supervisorApplicationUserId) {
+      throw new Error(`Incomplete store user assignment for store ${storeId}`);
     }
     return {
       storeId: row.store.id,
@@ -854,6 +863,20 @@ describe("item issue authorization integration", { concurrency: false }, () => {
   });
 
   it("lets the supplying-store maker create an item issue draft", async () => {
+    const beforeCreate = await getItemRequestById(approvedRequestId, corporateMaker);
+    assert.equal(beforeCreate.canCreateIssue, true);
+    assert.equal(beforeCreate.activeIssue, null);
+    const readyBefore = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "ready-to-issue",
+    });
+    assert.equal(
+      readyBefore.items.some((item) => item.id === approvedRequestId),
+      true,
+    );
+
     const issue = await createItemIssueFromRequest(
       approvedRequestId,
       corporateMaker,
@@ -888,7 +911,11 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       (error: unknown) =>
         error instanceof AppError &&
         error.statusCode === 409 &&
-        /already exists|pending verification|eligible/i.test(error.message),
+        error.details?.code === ITEM_ISSUE_ACTIVE_CONFLICT_CODE &&
+        error.details?.issueId === createdIssueId &&
+        typeof error.details?.issueNumber === "string" &&
+        error.details?.status === "DRAFT" &&
+        /already exists/i.test(error.message),
     );
   });
 
@@ -925,8 +952,34 @@ describe("item issue authorization integration", { concurrency: false }, () => {
   it("shows create-issue eligibility on the request for the maker and not the checker", async () => {
     const checkerView = await getItemRequestById(approvedRequestId, corporateChecker);
     const makerView = await getItemRequestById(approvedRequestId, corporateMaker);
-    assert.equal(makerView.canCreateIssue, true);
+    assert.equal(makerView.canCreateIssue, false);
+    assert.equal(makerView.activeIssue?.id, createdIssueId);
+    assert.equal(makerView.activeIssue?.status, "DRAFT");
     assert.equal(checkerView.canCreateIssue, false);
+    assert.equal(checkerView.activeIssue?.id, createdIssueId);
+
+    const eligibility = await getItemIssueEligibility(
+      approvedRequestId,
+      corporateMaker,
+    );
+    assert.equal(eligibility.canCreate, false);
+    assert.equal(eligibility.activeIssue?.id, createdIssueId);
+    assert.equal(eligibility.activeIssue?.status, "DRAFT");
+    assert.equal(eligibility.draftIssueId, createdIssueId);
+
+    const ready = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "ready-to-issue",
+    });
+    assert.equal(
+      ready.items.some((item) => item.id === approvedRequestId),
+      true,
+    );
+    const draftRow = ready.items.find((item) => item.id === approvedRequestId);
+    assert.equal(draftRow?.canCreateIssue, false);
+    assert.equal(draftRow?.activeIssue?.status, "DRAFT");
   });
 
   it("does not reduce stock when the maker submits for verification", async () => {
@@ -956,6 +1009,83 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     );
     assert.ok(submittedNote);
     assert.equal(submittedNote.isRead, false);
+  });
+
+  it("removes a submitted issue from Ready to Issue and keeps issued quantity at zero", async () => {
+    const request = await getItemRequestById(approvedRequestId, corporateMaker);
+    assert.equal(request.status, "APPROVED");
+    assert.equal(request.totalIssuedQuantity, "0");
+    assert.equal(request.canCreateIssue, false);
+    assert.equal(request.activeIssue?.id, createdIssueId);
+    assert.equal(request.activeIssue?.status, "PENDING_VERIFICATION");
+
+    const eligibility = await getItemIssueEligibility(
+      approvedRequestId,
+      corporateMaker,
+    );
+    assert.equal(eligibility.canCreate, false);
+    assert.equal(eligibility.draftIssueId, null);
+    assert.equal(eligibility.activeIssue?.id, createdIssueId);
+    assert.equal(eligibility.activeIssue?.status, "PENDING_VERIFICATION");
+
+    const ready = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "ready-to-issue",
+    });
+    assert.equal(
+      ready.items.some((item) => item.id === approvedRequestId),
+      false,
+    );
+
+    const context = await getItemRequestContext(corporateMaker);
+    assert.equal(context.readyToIssueCount, ready.totalItems);
+
+    const pending = await listItemIssues(corporateChecker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "pending-verification",
+    });
+    assert.equal(
+      pending.items.some((item) => item.id === createdIssueId),
+      true,
+    );
+    const pendingCount = await countItemIssuesForQueue(
+      corporateChecker,
+      "pending-verification",
+    );
+    assert.equal(pendingCount, pending.totalItems);
+    assert.equal(context.pendingIssueVerificationCount, pendingCount);
+  });
+
+  it("returns a conflict payload with the existing submitted issue", async () => {
+    const result = await api(
+      `/api/item-requests/${approvedRequestId}/item-issues`,
+      {
+        method: "POST",
+        token: corporateMakerSession,
+        origin: env.FRONTEND_ORIGIN,
+        body: {
+          remarks: null,
+          lines: [{ requestLineId, issueQuantity: "1" }],
+        },
+      },
+    );
+    assert.equal(result.status, 409);
+    assert.deepEqual(result.json, {
+      error: {
+        message: "An open item issue already exists for this request.",
+        details: {
+          code: ITEM_ISSUE_ACTIVE_CONFLICT_CODE,
+          issueId: createdIssueId,
+          issueNumber: (await getItemIssueById(createdIssueId!, corporateMaker))
+            .issueNumber,
+          status: "PENDING_VERIFICATION",
+        },
+      },
+    });
   });
 
   it("does not let the Corporate Maker verify their own issue", async () => {
@@ -1018,6 +1148,30 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.equal(request.status, "PARTIALLY_ISSUED");
     assert.equal(request.lines[0]?.issuedQuantity, "4");
     assert.equal(request.lines[0]?.remainingQuantity, "6");
+    assert.equal(request.canCreateIssue, true);
+    assert.equal(request.activeIssue, null);
+
+    const ready = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "ready-to-issue",
+    });
+    assert.equal(
+      ready.items.some((item) => item.id === approvedRequestId),
+      false,
+    );
+
+    const partial = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "partial-pending",
+    });
+    assert.equal(
+      partial.items.some((item) => item.id === approvedRequestId),
+      true,
+    );
 
     const branchNotes = await listNotifications(requestingMaker.id, {
       page: 1,
@@ -1068,6 +1222,38 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.equal(request.status, "ISSUED");
     assert.equal(request.lines[0]?.remainingQuantity, "0");
     assert.equal(request.canCreateIssue, false);
+    assert.equal(request.activeIssue, null);
+
+    const ready = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "ready-to-issue",
+    });
+    assert.equal(
+      ready.items.some((item) => item.id === approvedRequestId),
+      false,
+    );
+    const partial = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "partial-pending",
+    });
+    assert.equal(
+      partial.items.some((item) => item.id === approvedRequestId),
+      false,
+    );
+    const issued = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "issued",
+    });
+    assert.equal(
+      issued.items.some((item) => item.id === approvedRequestId),
+      true,
+    );
   });
 
   it("does not change stock when an issue is returned or rejected", async () => {
@@ -1103,6 +1289,56 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.deepEqual(afterReturn, before);
     const stillApproved = await getItemRequestById(returnRequestId, corporateMaker);
     assert.equal(stillApproved.status, "APPROVED");
+    assert.equal(stillApproved.totalIssuedQuantity, "0");
+    assert.equal(stillApproved.canCreateIssue, false);
+    assert.equal(stillApproved.activeIssue?.id, draft.id);
+    assert.equal(stillApproved.activeIssue?.status, "RETURNED");
+
+    const returnedQueue = await listItemIssues(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "returned",
+    });
+    assert.equal(
+      returnedQueue.items.some((item) => item.id === draft.id),
+      true,
+    );
+    const returnedCount = await countItemIssuesForQueue(corporateMaker, "returned");
+    assert.equal(returnedCount, returnedQueue.totalItems);
+
+    const readyAfterReturn = await listItemRequests(corporateMaker, {
+      page: 1,
+      pageSize: 100,
+      status: "ALL",
+      queue: "ready-to-issue",
+    });
+    assert.equal(
+      readyAfterReturn.items.some((item) => item.id === returnRequestId),
+      false,
+    );
+
+    const returnEligibility = await getItemIssueEligibility(
+      returnRequestId,
+      corporateMaker,
+    );
+    assert.equal(returnEligibility.canCreate, false);
+    assert.equal(returnEligibility.draftIssueId, draft.id);
+    assert.equal(returnEligibility.activeIssue?.status, "RETURNED");
+
+    await assert.rejects(
+      () =>
+        createItemIssueFromRequest(returnRequestId, corporateMaker, {
+          remarks: null,
+          lines: [{ requestLineId: returnLineId, issueQuantity: "1" }],
+        }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.statusCode === 409 &&
+        error.details?.code === ITEM_ISSUE_ACTIVE_CONFLICT_CODE &&
+        error.details?.issueId === draft.id &&
+        error.details?.status === "RETURNED",
+    );
 
     const makerNotes = await listNotifications(corporateMaker.id, {
       page: 1,
@@ -1189,5 +1425,55 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       .from(stockLedger)
       .where(eq(stockLedger.referenceId, draft.id));
     assert.equal(ledgerRows.length, 1);
+  });
+
+  it("prevents concurrent creation of two open issues for the same request", async () => {
+    const concurrentRequestId = await insertRequest("APPROVED");
+    const concurrentLine = await getDb()
+      .select({ id: itemRequestLines.id })
+      .from(itemRequestLines)
+      .where(eq(itemRequestLines.itemRequestId, concurrentRequestId))
+      .limit(1);
+    const concurrentLineId = concurrentLine[0]?.id;
+    assert.ok(concurrentLineId);
+
+    const results = await Promise.allSettled([
+      createItemIssueFromRequest(concurrentRequestId, corporateMaker, {
+        remarks: null,
+        lines: [{ requestLineId: concurrentLineId, issueQuantity: "2" }],
+      }),
+      createItemIssueFromRequest(concurrentRequestId, corporateMaker, {
+        remarks: null,
+        lines: [{ requestLineId: concurrentLineId, issueQuantity: "3" }],
+      }),
+    ]);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+
+    const rejectedError =
+      rejected[0]?.status === "rejected" ? rejected[0].reason : null;
+    assert.equal(rejectedError instanceof AppError, true);
+    if (rejectedError instanceof AppError) {
+      assert.equal(rejectedError.statusCode, 409);
+      assert.equal(rejectedError.details?.code, ITEM_ISSUE_ACTIVE_CONFLICT_CODE);
+      assert.equal(typeof rejectedError.details?.issueId, "string");
+      assert.equal(typeof rejectedError.details?.issueNumber, "string");
+      assert.equal(rejectedError.details?.status, "DRAFT");
+    }
+
+    const created =
+      fulfilled[0]?.status === "fulfilled" ? fulfilled[0].value : null;
+    assert.ok(created);
+    const openRows = await getDb()
+      .select({ id: itemIssues.id, status: itemIssues.status })
+      .from(itemIssues)
+      .where(eq(itemIssues.requestId, concurrentRequestId));
+    const open = openRows.filter((row) =>
+      ["DRAFT", "PENDING_VERIFICATION", "RETURNED"].includes(row.status),
+    );
+    assert.equal(open.length, 1);
+    assert.equal(open[0]?.id, created.id);
   });
 });

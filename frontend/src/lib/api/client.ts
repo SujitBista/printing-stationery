@@ -1,6 +1,6 @@
 export type ApiResult<T> =
   | { ok: true; data: T }
-  | { ok: false; error: string; status?: number };
+  | { ok: false; error: string; status?: number; details?: Record<string, unknown> };
 
 export function getApiBaseUrl(): string | null {
   return process.env.NEXT_PUBLIC_API_URL ?? null;
@@ -9,28 +9,45 @@ export function getApiBaseUrl(): string | null {
 export const SESSION_COOKIE_NAME =
   process.env.NEXT_PUBLIC_SESSION_COOKIE_NAME ?? "ps_session";
 
+function readErrorPayload(json: unknown): {
+  message?: string;
+  details?: Record<string, unknown>;
+} {
+  if (
+    !json ||
+    typeof json !== "object" ||
+    !("error" in json) ||
+    !json.error ||
+    typeof json.error !== "object"
+  ) {
+    return {};
+  }
+
+  const error = json.error as Record<string, unknown>;
+  return {
+    message: typeof error.message === "string" ? error.message : undefined,
+    details:
+      error.details && typeof error.details === "object"
+        ? (error.details as Record<string, unknown>)
+        : undefined,
+  };
+}
+
 export async function parseErrorMessage(
   response: Response,
   fallback: string,
-): Promise<string> {
+): Promise<{ message: string; details?: Record<string, unknown> }> {
   try {
     const json: unknown = await response.json();
-    if (
-      json &&
-      typeof json === "object" &&
-      "error" in json &&
-      json.error &&
-      typeof json.error === "object" &&
-      "message" in json.error &&
-      typeof json.error.message === "string"
-    ) {
-      return json.error.message;
+    const parsed = readErrorPayload(json);
+    if (parsed.message) {
+      return { message: parsed.message, details: parsed.details };
     }
   } catch {
     // Ignore JSON parse failures and use the fallback message.
   }
 
-  return fallback;
+  return { message: fallback };
 }
 
 export async function requestJson<T>(
@@ -64,7 +81,12 @@ export async function requestJson<T>(
 
     if (!response.ok) {
       const error = await parseErrorMessage(response, fallbackError);
-      return { ok: false, error, status: response.status };
+      return {
+        ok: false,
+        error: error.message,
+        status: response.status,
+        details: error.details,
+      };
     }
 
     if (response.status === 204) {

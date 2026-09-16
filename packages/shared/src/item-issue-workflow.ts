@@ -9,10 +9,37 @@ export const ITEM_ISSUE_OPEN_STATUSES = [
   "RETURNED",
 ] as const satisfies readonly ItemIssueStatus[];
 
+/** Open issues that should leave Ready to Issue / Partial Pending. */
+export const ITEM_ISSUE_QUEUE_BLOCKING_STATUSES = [
+  "PENDING_VERIFICATION",
+  "RETURNED",
+] as const satisfies readonly ItemIssueStatus[];
+
 export const ITEM_ISSUE_EDITABLE_STATUSES = [
   "DRAFT",
   "RETURNED",
 ] as const satisfies readonly ItemIssueStatus[];
+
+export const ITEM_ISSUE_ACTIVE_CONFLICT_CODE = "ITEM_ISSUE_ACTIVE_EXISTS";
+
+export const ITEM_REQUEST_ISSUE_ACTION_KINDS = [
+  "CREATE",
+  "CONTINUE_DRAFT",
+  "VIEW_SUBMITTED",
+  "CORRECT_AND_RESUBMIT",
+  "CREATE_REMAINING",
+] as const;
+
+export type ItemRequestIssueActionKind =
+  (typeof ITEM_REQUEST_ISSUE_ACTION_KINDS)[number];
+
+export const ITEM_REQUEST_ISSUE_ACTION_LABELS = {
+  CREATE: "Create Issue",
+  CONTINUE_DRAFT: "Continue Draft",
+  VIEW_SUBMITTED: "View Submitted Issue",
+  CORRECT_AND_RESUBMIT: "Correct and Resubmit",
+  CREATE_REMAINING: "Create Issue for Remaining Quantity",
+} as const satisfies Record<ItemRequestIssueActionKind, string>;
 
 export const ITEM_REQUEST_ISSUE_ELIGIBLE_STATUSES = [
   "APPROVED",
@@ -68,4 +95,63 @@ export function requestStatusAllowsItemIssue(
   return (ITEM_REQUEST_ISSUE_ELIGIBLE_STATUSES as readonly string[]).includes(
     status,
   );
+}
+
+export function itemIssueStatusBlocksRequestIssueQueue(
+  status: ItemIssueStatus,
+): boolean {
+  return (ITEM_ISSUE_QUEUE_BLOCKING_STATUSES as readonly string[]).includes(
+    status,
+  );
+}
+
+export type ItemRequestActiveIssueSummary = {
+  id: string;
+  issueNumber: string;
+  status: ItemIssueStatus;
+};
+
+/**
+ * Shared source of truth for request-list and request-detail issue actions.
+ * Active DRAFT / PENDING_VERIFICATION / RETURNED issues take precedence over
+ * creating a new issue.
+ */
+export function resolveItemRequestIssueAction(params: {
+  canCreateNewIssue: boolean;
+  requestStatus: ItemRequestStatus;
+  activeIssue: Pick<ItemRequestActiveIssueSummary, "status"> | null;
+}): ItemRequestIssueActionKind | null {
+  if (params.activeIssue?.status === "DRAFT") {
+    return "CONTINUE_DRAFT";
+  }
+  if (params.activeIssue?.status === "PENDING_VERIFICATION") {
+    return "VIEW_SUBMITTED";
+  }
+  if (params.activeIssue?.status === "RETURNED") {
+    return "CORRECT_AND_RESUBMIT";
+  }
+  if (!params.canCreateNewIssue) {
+    return null;
+  }
+  if (params.requestStatus === "PARTIALLY_ISSUED") {
+    return "CREATE_REMAINING";
+  }
+  return "CREATE";
+}
+
+export function itemRequestIssueActionHref(params: {
+  requestId: string;
+  action: ItemRequestIssueActionKind;
+  activeIssueId?: string | null;
+}): string {
+  if (
+    params.action === "CONTINUE_DRAFT" ||
+    params.action === "VIEW_SUBMITTED" ||
+    params.action === "CORRECT_AND_RESUBMIT"
+  ) {
+    if (params.activeIssueId) {
+      return `/requests/item-issues/${params.activeIssueId}`;
+    }
+  }
+  return `/requests/item-requests/${params.requestId}/issue`;
 }

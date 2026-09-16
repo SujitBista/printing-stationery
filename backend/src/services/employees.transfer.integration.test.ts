@@ -469,7 +469,8 @@ describe("employee transfer", () => {
       .from(storeUsers)
       .where(eq(storeUsers.storeId, fromStoreId))
       .limit(1);
-    assert.equal(fromAssignment[0]?.isActive, false);
+    assert.equal(fromAssignment[0]?.isActive, true);
+    assert.notEqual(fromAssignment[0]?.makerApplicationUserId, makerUserId);
 
     const toAssignment = await getDb()
       .select()

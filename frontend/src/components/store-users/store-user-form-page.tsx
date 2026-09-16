@@ -153,8 +153,9 @@ export function StoreUserFormPage({
         setForm({
           storeId: result.data.storeId,
           userSource: USER_SOURCE,
-          makerApplicationUserId: result.data.makerApplicationUserId,
-          supervisorApplicationUserId: result.data.supervisorApplicationUserId,
+          makerApplicationUserId: result.data.makerApplicationUserId ?? "",
+          supervisorApplicationUserId:
+            result.data.supervisorApplicationUserId ?? "",
         });
         setPageLoading(false);
         return;
@@ -236,7 +237,7 @@ export function StoreUserFormPage({
         stores.find((store) => store.id === form.storeId)?.branch.id ??
         assignment?.store.branch.id;
       const currentSupervisor =
-        assignment &&
+        assignment?.supervisor &&
         assignment.supervisor.employee.branch.id === storeBranchId
           ? assignment.supervisor
           : undefined;
@@ -302,7 +303,9 @@ export function StoreUserFormPage({
         return;
       }
 
-      setEligibleMakers(ensureCurrentUser(makersResult.data, assignment?.maker));
+      setEligibleMakers(
+        ensureCurrentUser(makersResult.data, assignment?.maker ?? undefined),
+      );
       setMakersLoading(false);
     }
 

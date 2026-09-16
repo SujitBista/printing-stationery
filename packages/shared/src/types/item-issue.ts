@@ -3,6 +3,7 @@ import type {
   createItemIssueInputSchema,
   itemIssueActionSchema,
   itemIssueActionTypeSchema,
+  itemIssueActiveSummarySchema,
   itemIssueEligibilitySchema,
   itemIssueIdSchema,
   itemIssueLineAvailabilitySchema,
@@ -33,6 +34,7 @@ export type ItemIssueRequestSummary = z.infer<
 export type ItemIssueLineAvailability = z.infer<
   typeof itemIssueLineAvailabilitySchema
 >;
+export type ItemIssueActiveSummary = z.infer<typeof itemIssueActiveSummarySchema>;
 export type ItemIssueEligibility = z.infer<typeof itemIssueEligibilitySchema>;
 export type ItemIssueLineInput = z.infer<typeof itemIssueLineInputSchema>;
 export type CreateItemIssueInput = z.infer<typeof createItemIssueInputSchema>;

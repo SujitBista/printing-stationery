@@ -105,20 +105,7 @@ export const transferEmployeeInputSchema = z
       .optional()
       .default(null),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    const hasStore = value.toStoreId != null;
-    const hasSupervisor = value.toSupervisorApplicationUserId != null;
-    if (hasStore === hasSupervisor) {
-      return;
-    }
-
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: hasStore ? ["toSupervisorApplicationUserId"] : ["toStoreId"],
-      message: "New store and new supervisor must be provided together.",
-    });
-  });
+  .strict();
 
 export const employeeTransferStoreSummarySchema = z.object({
   id: z.string().uuid(),
@@ -142,7 +129,7 @@ export const employeeTransferAssignmentRoleSchema = z.enum([
 export const employeeTransferAssignmentSchema = z.object({
   role: employeeTransferAssignmentRoleSchema,
   store: employeeTransferStoreSummarySchema,
-  supervisor: employeeTransferPersonSummarySchema,
+  supervisor: employeeTransferPersonSummarySchema.nullable(),
 });
 
 export const employeeTransferApplicationUserSchema = z.object({

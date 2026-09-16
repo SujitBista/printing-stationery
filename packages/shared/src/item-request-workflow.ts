@@ -5,6 +5,17 @@ import type {
   ItemRequestWorkflowRole,
 } from "./types/item-request.js";
 
+export const ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE =
+  "You are not assigned as a maker for this store, or the store has no checker. Please contact the administrator.";
+
+export const ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE =
+  "Branch requests are created by Branch Makers.";
+
+export const ITEM_REQUEST_REVIEW_EMPTY_TITLE = "No branch requests yet";
+
+export const ITEM_REQUEST_REVIEW_EMPTY_MESSAGE =
+  "Once a Branch Maker submits a request and the Branch Checker recommends it, the request will appear here for your review.";
+
 /** Approval-stage queues shown to each workflow persona. */
 export const ITEM_REQUEST_ROLE_WORKFLOW_QUEUES = {
   ADMIN: [
@@ -106,6 +117,26 @@ export function getItemRequestNavQueues(
 
 export function itemRequestQueueIsFulfilment(queue: ItemRequestQueue): boolean {
   return (ITEM_REQUEST_FULFILMENT_QUEUES as readonly string[]).includes(queue);
+}
+
+/** Branch Makers (and admins) create requests. Corporate Maker only reviews. */
+export function itemRequestWorkflowCanCreate(
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): boolean {
+  return (
+    workflowRoles.includes("ADMIN") ||
+    workflowRoles.includes("BRANCH_MAKER")
+  );
+}
+
+export function itemRequestWorkflowIsCorporateMaker(
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): boolean {
+  return (
+    workflowRoles.includes("CORPORATE_MAKER") &&
+    !workflowRoles.includes("BRANCH_MAKER") &&
+    !workflowRoles.includes("ADMIN")
+  );
 }
 
 /** Who the request is pending with, matching the stored assignee columns. */

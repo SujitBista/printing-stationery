@@ -27,6 +27,8 @@ const STORE_USER_ACTIVE_MAKER_UNIQUE_INDEX =
   "store_users_active_maker_application_user_id_uidx";
 const STORE_USER_MAKER_NE_SUPERVISOR_CHECK =
   "store_users_maker_ne_supervisor";
+const STORE_USER_MAKER_OR_SUPERVISOR_CHECK =
+  "store_users_maker_or_supervisor";
 const ITEM_REQUEST_NUMBER_UNIQUE_INDEX = "item_requests_request_number_uidx";
 const ITEM_REQUEST_LINE_ITEM_UNIQUE_INDEX =
   "item_request_lines_request_item_uidx";
@@ -424,6 +426,18 @@ export function isStoreUserMakerSupervisorCheckViolation(
   return constraint === STORE_USER_MAKER_NE_SUPERVISOR_CHECK;
 }
 
+export function isStoreUserMakerOrSupervisorCheckViolation(
+  error: unknown,
+): boolean {
+  const code = readErrorProperty(error, "code");
+  if (code !== "23514") {
+    return false;
+  }
+
+  const constraint = readErrorProperty(error, "constraint");
+  return constraint === STORE_USER_MAKER_OR_SUPERVISOR_CHECK;
+}
+
 export function mapStoreUserDatabaseError(error: unknown): never {
   if (isStoreUserStoreUniqueViolation(error)) {
     throw new AppError("This store already has a user configuration.", 409, {
@@ -442,6 +456,14 @@ export function mapStoreUserDatabaseError(error: unknown): never {
   if (isStoreUserMakerSupervisorCheckViolation(error)) {
     throw new AppError(
       "Maker and Supervisor must be different accounts.",
+      400,
+      { cause: error },
+    );
+  }
+
+  if (isStoreUserMakerOrSupervisorCheckViolation(error)) {
+    throw new AppError(
+      "A store assignment must include a maker or a supervisor.",
       400,
       { cause: error },
     );

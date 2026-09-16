@@ -128,8 +128,19 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
           return;
         }
 
-        if (result.data.draftIssueId) {
-          router.replace(`/requests/item-issues/${result.data.draftIssueId}`);
+        const existingIssueId =
+          result.data.activeIssue?.id ?? result.data.draftIssueId;
+        if (existingIssueId) {
+          router.replace(`/requests/item-issues/${existingIssueId}`);
+          return;
+        }
+
+        if (!result.data.canCreate) {
+          setLoadError(
+            result.data.reason ??
+              "This request is not eligible for a new item issue.",
+          );
+          setLoading(false);
           return;
         }
 
@@ -192,6 +203,14 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
       if (props.mode === "create") {
         const result = await createItemIssueFromRequest(request.id, payload);
         if (!result.ok) {
+          const existingIssueId =
+            typeof result.details?.issueId === "string"
+              ? result.details.issueId
+              : null;
+          if (existingIssueId) {
+            router.replace(`/requests/item-issues/${existingIssueId}`);
+            return;
+          }
           throw new Error(result.error);
         }
         router.push(`/requests/item-issues/${result.data.id}`);

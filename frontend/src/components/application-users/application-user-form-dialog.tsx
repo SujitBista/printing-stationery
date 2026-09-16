@@ -11,6 +11,10 @@ import {
 import {
   APP_ROLES,
   createApplicationUserInputSchema,
+  isStoreManagingRole,
+  NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE,
+  resolveStoreAssignment,
+  STORE_SELECTION_REQUIRED_MESSAGE,
   updateApplicationUserInputSchema,
   type ApplicationUser,
   type CreateApplicationUserInput,
@@ -18,6 +22,7 @@ import {
   type UpdateApplicationUserInput,
 } from "@printing-stationery/shared";
 import { fetchEligibleEmployees } from "@/lib/api/application-users";
+import { fetchStores } from "@/lib/api/stores";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 
@@ -37,6 +42,7 @@ type FormState = {
   role: string;
   temporaryPassword: string;
   confirmTemporaryPassword: string;
+  storeId: string;
 };
 
 type FieldErrors = Partial<
@@ -45,7 +51,8 @@ type FieldErrors = Partial<
     | "username"
     | "role"
     | "temporaryPassword"
-    | "confirmTemporaryPassword",
+    | "confirmTemporaryPassword"
+    | "storeId",
     string
   >
 >;
@@ -56,6 +63,7 @@ const EMPTY_FORM: FormState = {
   role: "",
   temporaryPassword: "",
   confirmTemporaryPassword: "",
+  storeId: "",
 };
 
 export function ApplicationUserFormDialog({
@@ -75,6 +83,16 @@ export function ApplicationUserFormDialog({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [branchStores, setBranchStores] = useState<
+    Array<{
+      id: string;
+      storeCode: string;
+      storeName: string;
+      isActive: boolean;
+    }>
+  >([]);
+  const [storesLoading, setStoresLoading] = useState(false);
+  const [storesError, setStoresError] = useState<string | null>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -101,6 +119,7 @@ export function ApplicationUserFormDialog({
         role: initialUser.role,
         temporaryPassword: "",
         confirmTemporaryPassword: "",
+        storeId: initialUser.assignedStore?.id ?? "",
       });
     } else {
       setForm(EMPTY_FORM);
@@ -157,6 +176,87 @@ export function ApplicationUserFormDialog({
       ? initialUser.employee
       : employees.find((employee) => employee.id === form.employeeId);
 
+  const managesStores = isStoreManagingRole(form.role);
+  const storeResolution = managesStores
+    ? resolveStoreAssignment({
+        activeStores: branchStores,
+        selectedStoreId: form.storeId,
+      })
+    : null;
+
+  useEffect(() => {
+    if (!open || !managesStores || !selectedEmployee) {
+      setBranchStores([]);
+      setStoresError(null);
+      setStoresLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadStores() {
+      setStoresLoading(true);
+      setStoresError(null);
+
+      const result = await loadAllPaginatedOptions(
+        (query) =>
+          fetchStores({
+            page: query.page,
+            pageSize: query.pageSize,
+            status: "ACTIVE",
+            branchId: selectedEmployee!.branchId,
+            hierarchy: "ALL",
+          }),
+        "ACTIVE",
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!result.ok) {
+        setBranchStores([]);
+        setStoresError(result.error);
+        setStoresLoading(false);
+        return;
+      }
+
+      setBranchStores(
+        result.data
+          .filter(
+            (store) =>
+              store.isActive && store.branchId === selectedEmployee!.branchId,
+          )
+          .map((store) => ({
+            id: store.id,
+            storeCode: store.storeCode,
+            storeName: store.storeName,
+            isActive: store.isActive,
+          })),
+      );
+      setStoresLoading(false);
+    }
+
+    void loadStores();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, managesStores, selectedEmployee]);
+
+  useEffect(() => {
+    if (!managesStores) {
+      if (form.storeId) {
+        updateField("storeId", "");
+      }
+      return;
+    }
+
+    if (branchStores.length === 1 && form.storeId !== branchStores[0]!.id) {
+      updateField("storeId", branchStores[0]!.id);
+    }
+  }, [managesStores, branchStores, form.storeId]);
+
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
     setFieldErrors((current) => {
@@ -178,6 +278,30 @@ export function ApplicationUserFormDialog({
     setFormError(null);
     setFieldErrors({});
 
+    if (managesStores) {
+      if (storesError) {
+        setFormError(storesError);
+        return;
+      }
+      if (!storesLoading && storeResolution?.status === "NONE") {
+        setFieldErrors({ storeId: NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE });
+        setFormError(NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE);
+        return;
+      }
+      if (
+        !storesLoading &&
+        storeResolution?.status === "SELECTION_REQUIRED"
+      ) {
+        setFieldErrors({ storeId: STORE_SELECTION_REQUIRED_MESSAGE });
+        setFormError(STORE_SELECTION_REQUIRED_MESSAGE);
+        return;
+      }
+    }
+
+    const assignedStoreId = managesStores
+      ? form.storeId || null
+      : null;
+
     if (mode === "create") {
       const parsed = createApplicationUserInputSchema.safeParse({
         employeeId: form.employeeId,
@@ -185,6 +309,7 @@ export function ApplicationUserFormDialog({
         role: form.role,
         temporaryPassword: form.temporaryPassword,
         confirmTemporaryPassword: form.confirmTemporaryPassword,
+        storeId: assignedStoreId,
       });
 
       if (!parsed.success) {
@@ -196,7 +321,8 @@ export function ApplicationUserFormDialog({
             key === "username" ||
             key === "role" ||
             key === "temporaryPassword" ||
-            key === "confirmTemporaryPassword"
+            key === "confirmTemporaryPassword" ||
+            key === "storeId"
           ) {
             nextErrors[key] ??= issue.message;
           }
@@ -221,13 +347,14 @@ export function ApplicationUserFormDialog({
     const parsed = updateApplicationUserInputSchema.safeParse({
       username: form.username,
       role: form.role,
+      storeId: assignedStoreId,
     });
 
     if (!parsed.success) {
       const nextErrors: FieldErrors = {};
       for (const issue of parsed.error.issues) {
         const key = issue.path[0];
-        if (key === "username" || key === "role") {
+        if (key === "username" || key === "role" || key === "storeId") {
           nextErrors[key] ??= issue.message;
         }
       }
@@ -383,6 +510,51 @@ export function ApplicationUserFormDialog({
             </select>
           </Field>
 
+          {managesStores && selectedEmployee ? (
+            <Field
+              label="Assigned Store"
+              required={storeResolution?.status === "SELECTION_REQUIRED"}
+              error={
+                fieldErrors.storeId ??
+                (storesError ??
+                  (!storesLoading && storeResolution?.status === "NONE"
+                    ? NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE
+                    : undefined))
+              }
+              htmlFor="application-user-store"
+            >
+              {storesLoading ? (
+                <p className="text-sm text-ink-muted">Loading stores…</p>
+              ) : storeResolution?.status === "SINGLE" ? (
+                <p className="rounded-md border border-border bg-paper px-3 py-2 text-sm text-ink">
+                  {branchStores[0]
+                    ? `${branchStores[0].storeCode} — ${branchStores[0].storeName}`
+                    : "—"}
+                </p>
+              ) : storeResolution?.status === "NONE" ? (
+                <p className="text-sm text-ink-muted">
+                  {NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE}
+                </p>
+              ) : (
+                <SearchableSelect
+                  id="application-user-store"
+                  name="storeId"
+                  value={form.storeId}
+                  onChange={(nextValue) => updateField("storeId", nextValue)}
+                  disabled={saving || storesLoading}
+                  required
+                  placeholder="Select a store"
+                  searchPlaceholder="Search stores…"
+                  emptyMessage="No active store in this branch"
+                  options={branchStores.map((store) => ({
+                    value: store.id,
+                    label: `${store.storeCode} — ${store.storeName}`,
+                  }))}
+                />
+              )}
+            </Field>
+          ) : null}
+
           {mode === "create" ? (
             <>
               <Field
@@ -455,7 +627,12 @@ export function ApplicationUserFormDialog({
             disabled={
               saving ||
               (mode === "create" &&
-                (optionsLoading || Boolean(optionsError)))
+                (optionsLoading || Boolean(optionsError))) ||
+              (managesStores &&
+                (storesLoading ||
+                  Boolean(storesError) ||
+                  storeResolution?.status === "NONE" ||
+                  storeResolution?.status === "SELECTION_REQUIRED"))
             }
             className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
           >

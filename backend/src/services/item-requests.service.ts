@@ -9,6 +9,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  not,
   notInArray,
   or,
   sql,
@@ -21,6 +22,7 @@ import type {
   EligibleItemRequestItem,
   EligibleItemRequestItemListQuery,
   EligibleItemRequestStoreListQuery,
+  ItemIssueStatus,
   ItemRequest,
   ItemRequestActionInput,
   ItemRequestActionType,
@@ -41,10 +43,16 @@ import type {
 } from "@printing-stationery/shared";
 import {
   CORPORATE_STORE_CODE,
+  ITEM_ISSUE_OPEN_STATUSES,
+  ITEM_ISSUE_QUEUE_BLOCKING_STATUSES,
+  ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
+  ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
   ITEM_REQUEST_QUEUE_STATUSES,
   inferItemRequestActorWorkflowRole,
   isCorporateControlStore,
   itemRequestPendingAssignee,
+  itemRequestWorkflowCanCreate,
+  itemRequestWorkflowIsCorporateMaker,
   preferCorporateControlStore,
   userHasRole,
 } from "@printing-stationery/shared";
@@ -109,10 +117,8 @@ const INACTIVE_SOURCE_MESSAGE = "The Request From Store is inactive.";
 const INACTIVE_DESTINATION_MESSAGE = "The Request To Store is inactive.";
 const INELIGIBLE_DESTINATION_MESSAGE =
   "The Request To Store is not allowed to transfer or issue stock.";
-const NO_ASSIGNMENT_MESSAGE =
-  "You can create a request only when you are an active maker of a store.";
-const UNAUTHORIZED_SOURCE_MESSAGE =
-  "You can create a request only for your assigned store.";
+const NO_ASSIGNMENT_MESSAGE = ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE;
+const UNAUTHORIZED_SOURCE_MESSAGE = ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE;
 const SOURCE_REQUIRED_MESSAGE = "Request From Store is required.";
 const DESTINATION_REQUIRED_MESSAGE = "Request To Store is required.";
 const REQUEST_TO_MUST_BE_CORPORATE_MESSAGE =
@@ -250,8 +256,8 @@ type StoreAssignmentContext = {
   assignment: {
     id: string;
     storeId: string;
-    makerApplicationUserId: string;
-    supervisorApplicationUserId: string;
+    makerApplicationUserId: string | null;
+    supervisorApplicationUserId: string | null;
     isActive: boolean;
   };
   store: StoreRow;
@@ -264,6 +270,36 @@ function escapeIlikePattern(value: string): string {
 
 function isAdminUser(actor: AuthenticatedUser): boolean {
   return userHasRole(actor.roles, "ADMIN");
+}
+
+function assignmentHasChecker(
+  assignment: StoreAssignmentContext | undefined,
+): boolean {
+  return Boolean(assignment?.assignment.supervisorApplicationUserId);
+}
+
+function createForbiddenMessage(
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): string {
+  return itemRequestWorkflowIsCorporateMaker(workflowRoles)
+    ? ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE
+    : "Forbidden";
+}
+
+function requestingStoreHasAssignedMakerAndChecker(): SQL {
+  return exists(
+    getDb()
+      .select({ id: storeUsers.id })
+      .from(storeUsers)
+      .where(
+        and(
+          eq(storeUsers.storeId, itemRequests.requestingStoreId),
+          eq(storeUsers.isActive, true),
+          isNotNull(storeUsers.makerApplicationUserId),
+          isNotNull(storeUsers.supervisorApplicationUserId),
+        ),
+      ),
+  );
 }
 
 function generateRequestNumber(): string {
@@ -612,11 +648,15 @@ async function resolveItemRequestWorkflowRoles(
   const roles: ItemRequestWorkflowRole[] = [];
   const makerAssignment = await getActiveMakerAssignment(actor.id);
   if (makerAssignment) {
-    roles.push(
-      storeIsCorporateControl(makerAssignment.store, makerAssignment.branch)
-        ? "CORPORATE_MAKER"
-        : "BRANCH_MAKER",
+    const isCorporate = storeIsCorporateControl(
+      makerAssignment.store,
+      makerAssignment.branch,
     );
+    // Corporate Maker reviews branch requests even when no Branch Maker exists
+    // yet. Branch Maker still needs an assigned checker before creating.
+    if (isCorporate || assignmentHasChecker(makerAssignment)) {
+      roles.push(isCorporate ? "CORPORATE_MAKER" : "BRANCH_MAKER");
+    }
   }
 
   const supervised = await listSupervisedStores(actor.id);
@@ -643,6 +683,7 @@ async function actorCanViewFulfilment(actor: AuthenticatedUser): Promise<boolean
   const makerAssignment = await getActiveMakerAssignment(actor.id);
   if (
     makerAssignment &&
+    assignmentHasChecker(makerAssignment) &&
     storeIsEligibleSupplying(makerAssignment.store, makerAssignment.branch)
   ) {
     return true;
@@ -791,6 +832,12 @@ async function resolveCreateStorePair(
   if (!assignment) {
     throw new AppError(NO_ASSIGNMENT_MESSAGE, 403);
   }
+  if (storeIsCorporateControl(assignment.store, assignment.branch)) {
+    throw new AppError(ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE, 403);
+  }
+  if (!assignmentHasChecker(assignment)) {
+    throw new AppError(ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE, 403);
+  }
 
   if (input.sourceStoreId !== assignment.store.id) {
     throw new AppError(UNAUTHORIZED_SOURCE_MESSAGE, 403);
@@ -917,8 +964,11 @@ async function requireStoreMakerCheckerAssignment(storeId: string): Promise<{
 
   const storeName = loaded.store.storeName;
   const assignment = await getActiveStoreAssignmentByStoreId(loaded.store.id);
-  if (!assignment) {
+  if (!assignment?.assignment.makerApplicationUserId) {
     throw new AppError(missingAssignmentMessage(storeName, "Maker"), 400);
+  }
+  if (!assignment.assignment.supervisorApplicationUserId) {
+    throw new AppError(missingAssignmentMessage(storeName, "Checker"), 400);
   }
 
   try {
@@ -1131,6 +1181,36 @@ function buildQueueActorCondition(
   }
 }
 
+function remainingPostedQuantityCondition(): SQL {
+  return sql`(
+    select coalesce(sum(${itemRequestLines.requestedQuantity}), 0)
+    from ${itemRequestLines}
+    where ${itemRequestLines.itemRequestId} = ${itemRequests.id}
+  ) > (
+    select coalesce(sum(${itemIssueLines.issueQuantity}), 0)
+    from ${itemIssueLines}
+    inner join ${itemIssues} on ${itemIssues.id} = ${itemIssueLines.itemIssueId}
+    where ${itemIssues.requestId} = ${itemRequests.id}
+      and ${itemIssues.status} = 'POSTED'
+  )`;
+}
+
+function noBlockingOpenIssueCondition(): SQL {
+  return not(
+    exists(
+      getDb()
+        .select({ id: itemIssues.id })
+        .from(itemIssues)
+        .where(
+          and(
+            eq(itemIssues.requestId, itemRequests.id),
+            inArray(itemIssues.status, [...ITEM_ISSUE_QUEUE_BLOCKING_STATUSES]),
+          ),
+        ),
+    ),
+  );
+}
+
 function buildListFilters(
   query: ItemRequestListQuery,
   actor: AuthenticatedUser,
@@ -1141,6 +1221,8 @@ function buildListFilters(
   if (visibility) {
     conditions.push(visibility);
   }
+
+  conditions.push(requestingStoreHasAssignedMakerAndChecker());
 
   if (query.queue) {
     const queueStatuses = ITEM_REQUEST_QUEUE_STATUSES[query.queue];
@@ -1156,18 +1238,9 @@ function buildListFilters(
     if (actorCondition) {
       conditions.push(actorCondition);
     }
-    if (query.queue === "ready-to-issue") {
-      conditions.push(sql`(
-        select coalesce(sum(${itemRequestLines.requestedQuantity}), 0)
-        from ${itemRequestLines}
-        where ${itemRequestLines.itemRequestId} = ${itemRequests.id}
-      ) > (
-        select coalesce(sum(${itemIssueLines.issueQuantity}), 0)
-        from ${itemIssueLines}
-        inner join ${itemIssues} on ${itemIssues.id} = ${itemIssueLines.itemIssueId}
-        where ${itemIssues.requestId} = ${itemRequests.id}
-          and ${itemIssues.status} = 'POSTED'
-      )`);
+    if (query.queue === "ready-to-issue" || query.queue === "partial-pending") {
+      conditions.push(remainingPostedQuantityCondition());
+      conditions.push(noBlockingOpenIssueCondition());
     }
   } else if (query.status !== "ALL") {
     conditions.push(eq(itemRequests.status, query.status));
@@ -1266,6 +1339,22 @@ const headerSelect = {
     where ${itemIssues.requestId} = ${itemRequests.id}
       and ${itemIssues.status} = 'POSTED'
   )`,
+  activeIssue: sql<{
+    id: string;
+    issueNumber: string;
+    status: ItemIssueStatus;
+  } | null>`(
+    select json_build_object(
+      'id', open_issues.id,
+      'issueNumber', open_issues.issue_number,
+      'status', open_issues.status
+    )
+    from ${itemIssues} as open_issues
+    where open_issues.request_id = ${itemRequests.id}
+      and open_issues.status in ('DRAFT', 'PENDING_VERIFICATION', 'RETURNED')
+    order by open_issues.updated_at desc, open_issues.created_at desc, open_issues.id desc
+    limit 1
+  )`,
 };
 
 function itemRequestHeaderJoins() {
@@ -1352,6 +1441,11 @@ type HeaderJoinedRow = {
   itemCount: number;
   totalRequestedQuantity: string;
   totalIssuedQuantity: string;
+  activeIssue: {
+    id: string;
+    issueNumber: string;
+    status: ItemIssueStatus;
+  } | null;
 };
 
 async function attachAvailableStockToListItems(
@@ -1430,6 +1524,39 @@ async function attachAvailableStockToListItems(
   });
 }
 
+function parseActiveIssue(
+  value: unknown,
+): {
+  id: string;
+  issueNumber: string;
+  status: ItemIssueStatus;
+} | null {
+  const raw =
+    typeof value === "string"
+      ? (JSON.parse(value) as unknown)
+      : value;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const id = record.id;
+  const issueNumber = record.issueNumber;
+  const status = record.status;
+  if (
+    typeof id !== "string" ||
+    typeof issueNumber !== "string" ||
+    typeof status !== "string" ||
+    !(ITEM_ISSUE_OPEN_STATUSES as readonly string[]).includes(status)
+  ) {
+    return null;
+  }
+  return {
+    id,
+    issueNumber,
+    status: status as ItemIssueStatus,
+  };
+}
+
 function toListItem(
   row: HeaderJoinedRow,
   actor: AuthenticatedUser,
@@ -1465,7 +1592,10 @@ function toListItem(
     String(row.totalIssuedQuantity ?? "0"),
   );
   const remaining = totalRequested - totalIssued;
+  const activeIssue = parseActiveIssue(row.activeIssue);
   const canCreateIssue =
+    remaining > 0n &&
+    !activeIssue &&
     requestAllowsItemIssueCreation({
       requestStatus: row.request.status,
       supplyingStoreId,
@@ -1519,6 +1649,7 @@ function toListItem(
     canEdit: canEditRequest(row.request, actor),
     canDelete: isAdminUser(actor),
     canCreateIssue,
+    activeIssue,
     allowedActions: computeAllowedActions(row.request, actor),
   };
 }
@@ -1595,13 +1726,13 @@ export async function getItemRequestContext(
     ? requestFromStores.filter((store) => store.id !== requestToStore.id)
     : requestFromStores;
 
-  const canCreate = isAdminUser(actor) || Boolean(assignment);
   const [requestedByEmployee, workflowRoles, canViewFulfilment] =
     await Promise.all([
       loadRequestedBySummaryById(actor.employee?.id),
       resolveItemRequestWorkflowRoles(actor),
       actorCanViewFulfilment(actor),
     ]);
+  const canCreate = itemRequestWorkflowCanCreate(workflowRoles);
 
   const [readyToIssue, pendingIssues, returnedIssues] = await Promise.all([
     listItemRequests(actor, {
@@ -1643,7 +1774,7 @@ export async function listEligibleItemRequestSourceStores(
 ): Promise<PaginatedEligibleItemRequestStoreResponse> {
   const context = await getItemRequestContext(actor);
   if (!context.canCreate) {
-    throw new AppError("Forbidden", 403);
+    throw new AppError(createForbiddenMessage(context.workflowRoles), 403);
   }
 
   const conditions: SQL[] = [
@@ -1723,7 +1854,7 @@ export async function listEligibleItemRequestItems(
 ): Promise<PaginatedEligibleItemRequestItemResponse> {
   const context = await getItemRequestContext(actor);
   if (!context.canCreate) {
-    throw new AppError("Forbidden", 403);
+    throw new AppError(createForbiddenMessage(context.workflowRoles), 403);
   }
 
   if (query.destinationStoreId) {
@@ -2333,10 +2464,11 @@ export async function performItemRequestAction(
           const makerAssignment = await getActiveMakerAssignment(actor.id);
           if (
             !makerAssignment ||
-            makerAssignment.store.id !== request.requestingStoreId
+            makerAssignment.store.id !== request.requestingStoreId ||
+            !assignmentHasChecker(makerAssignment)
           ) {
             throw new AppError(
-              "You are not assigned as the active maker of this store.",
+              ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
               403,
             );
           }

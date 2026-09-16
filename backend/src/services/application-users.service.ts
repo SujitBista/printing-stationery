@@ -2,6 +2,7 @@ import { and, asc, count, eq, isNotNull, isNull, or, sql, type SQL } from "drizz
 import type {
   AppRole,
   ApplicationUser,
+  ApplicationUserAssignedStore,
   ApplicationUserListQuery,
   CreateApplicationUserInput,
   EligibleEmployeeListQuery,
@@ -24,6 +25,10 @@ import { employees, type EmployeeRow } from "../db/schema/employees.js";
 import { AppError } from "../utils/errors.js";
 import { mapApplicationUserDatabaseError } from "../utils/db-errors.js";
 import { hashPassword } from "../utils/password.js";
+import {
+  getAssignedStoresByUserIds,
+  syncApplicationUserStoreAssignment,
+} from "./store-users.assignment.js";
 
 type ApplicationUserJoinedRow = {
   user: ApplicationUserRow;
@@ -43,7 +48,10 @@ type EmployeeJoinedRow = {
   branchIsActive: boolean;
 };
 
-function toApplicationUser(row: ApplicationUserJoinedRow): ApplicationUser {
+function toApplicationUser(
+  row: ApplicationUserJoinedRow,
+  assignedStore: ApplicationUserAssignedStore | null,
+): ApplicationUser {
   if (!row.user.employeeId) {
     throw new AppError("Application user is not linked to an employee", 500);
   }
@@ -70,6 +78,7 @@ function toApplicationUser(row: ApplicationUserJoinedRow): ApplicationUser {
         isActive: row.branchIsActive,
       },
     },
+    assignedStore,
   };
 }
 
@@ -234,9 +243,17 @@ export async function listApplicationUsers(
       .offset(offset);
 
     const rows = where ? await listBase.where(where) : await listBase;
+    const assignedStores = await getAssignedStoresByUserIds(
+      rows.map((row) => ({
+        id: row.user.id,
+        branchId: row.employee.branchId,
+      })),
+    );
 
     return {
-      items: rows.map(toApplicationUser),
+      items: rows.map((row) =>
+        toApplicationUser(row, assignedStores.get(row.user.id) ?? null),
+      ),
       page: query.page,
       pageSize: query.pageSize,
       totalItems,
@@ -256,7 +273,14 @@ export async function getApplicationUserById(
       throw new AppError("Application user not found", 404);
     }
 
-    return toApplicationUser(row);
+    const assignedStores = await getAssignedStoresByUserIds([
+      { id: row.user.id, branchId: row.employee.branchId },
+    ]);
+
+    return toApplicationUser(
+      row,
+      assignedStores.get(row.user.id) ?? null,
+    );
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
@@ -392,6 +416,13 @@ export async function createApplicationUser(
         role: input.role,
       });
 
+      await syncApplicationUserStoreAssignment({
+        applicationUserId: created.id,
+        role: input.role,
+        selectedStoreId: input.storeId,
+        db: tx,
+      });
+
       return created.id;
     });
 
@@ -447,6 +478,13 @@ export async function updateApplicationUser(
       await tx.insert(userRoles).values({
         userId: id,
         role: input.role,
+      });
+
+      await syncApplicationUserStoreAssignment({
+        applicationUserId: id,
+        role: input.role,
+        selectedStoreId: input.storeId,
+        db: tx,
       });
     });
 

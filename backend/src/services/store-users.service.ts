@@ -29,7 +29,7 @@ import type {
   UpdateStoreUserInput,
   UpdateStoreUserStatusInput,
 } from "@printing-stationery/shared";
-import { getDb } from "../db/client.js";
+import { getDb, type DbExecutor } from "../db/client.js";
 import {
   applicationUsers,
   userRoles,
@@ -62,14 +62,14 @@ type StoreUserJoinedRow = {
   assignment: StoreUserRow;
   store: StoreRow;
   storeBranch: BranchRow;
-  maker: ApplicationUserRow;
-  makerRole: AppRole;
-  makerEmployee: EmployeeRow;
-  makerBranch: BranchRow;
-  supervisor: ApplicationUserRow;
-  supervisorRole: AppRole;
-  supervisorEmployee: EmployeeRow;
-  supervisorBranch: BranchRow;
+  maker: ApplicationUserRow | null;
+  makerRole: AppRole | null;
+  makerEmployee: EmployeeRow | null;
+  makerBranch: BranchRow | null;
+  supervisor: ApplicationUserRow | null;
+  supervisorRole: AppRole | null;
+  supervisorEmployee: EmployeeRow | null;
+  supervisorBranch: BranchRow | null;
 };
 
 type EligibleJoinedRow = {
@@ -122,6 +122,24 @@ function toStoreSummary(store: StoreRow, branch: BranchRow): StoreUserStoreSumma
   };
 }
 
+function toPersonSummaryOrNull(params: {
+  user: ApplicationUserRow | null;
+  role: AppRole | null;
+  employee: EmployeeRow | null;
+  branch: BranchRow | null;
+}): StoreUserPersonSummary | null {
+  if (!params.user || !params.role || !params.employee || !params.branch) {
+    return null;
+  }
+
+  return toPersonSummary({
+    user: params.user,
+    role: params.role,
+    employee: params.employee,
+    branch: params.branch,
+  });
+}
+
 function toStoreUser(row: StoreUserJoinedRow): StoreUser {
   return {
     id: row.assignment.id,
@@ -132,13 +150,13 @@ function toStoreUser(row: StoreUserJoinedRow): StoreUser {
     createdAt: row.assignment.createdAt.toISOString(),
     updatedAt: row.assignment.updatedAt.toISOString(),
     store: toStoreSummary(row.store, row.storeBranch),
-    maker: toPersonSummary({
+    maker: toPersonSummaryOrNull({
       user: row.maker,
       role: row.makerRole,
       employee: row.makerEmployee,
       branch: row.makerBranch,
     }),
-    supervisor: toPersonSummary({
+    supervisor: toPersonSummaryOrNull({
       user: row.supervisor,
       role: row.supervisorRole,
       employee: row.supervisorEmployee,
@@ -226,26 +244,30 @@ const eligibleSelect = {
   branch: branches,
 };
 
-function storeUserJoins(where?: SQL) {
-  const query = getDb()
+function useDb(db?: DbExecutor): DbExecutor {
+  return db ?? getDb();
+}
+
+function storeUserJoins(db: DbExecutor, where?: SQL) {
+  const query = db
     .select(storeUserSelect)
     .from(storeUsers)
     .innerJoin(stores, eq(storeUsers.storeId, stores.id))
     .innerJoin(branches, eq(stores.branchId, branches.id))
-    .innerJoin(makerUsers, eq(storeUsers.makerApplicationUserId, makerUsers.id))
-    .innerJoin(makerRoles, eq(makerRoles.userId, makerUsers.id))
-    .innerJoin(makerEmployees, eq(makerUsers.employeeId, makerEmployees.id))
-    .innerJoin(makerBranches, eq(makerEmployees.branchId, makerBranches.id))
-    .innerJoin(
+    .leftJoin(makerUsers, eq(storeUsers.makerApplicationUserId, makerUsers.id))
+    .leftJoin(makerRoles, eq(makerRoles.userId, makerUsers.id))
+    .leftJoin(makerEmployees, eq(makerUsers.employeeId, makerEmployees.id))
+    .leftJoin(makerBranches, eq(makerEmployees.branchId, makerBranches.id))
+    .leftJoin(
       supervisorUsers,
       eq(storeUsers.supervisorApplicationUserId, supervisorUsers.id),
     )
-    .innerJoin(supervisorRoles, eq(supervisorRoles.userId, supervisorUsers.id))
-    .innerJoin(
+    .leftJoin(supervisorRoles, eq(supervisorRoles.userId, supervisorUsers.id))
+    .leftJoin(
       supervisorEmployees,
       eq(supervisorUsers.employeeId, supervisorEmployees.id),
     )
-    .innerJoin(
+    .leftJoin(
       supervisorBranches,
       eq(supervisorEmployees.branchId, supervisorBranches.id),
     );
@@ -255,16 +277,18 @@ function storeUserJoins(where?: SQL) {
 
 async function getJoinedStoreUserById(
   id: string,
+  db?: DbExecutor,
 ): Promise<StoreUserJoinedRow | undefined> {
-  const rows = await storeUserJoins(eq(storeUsers.id, id)).limit(1);
+  const rows = await storeUserJoins(useDb(db), eq(storeUsers.id, id)).limit(1);
   return rows[0] as StoreUserJoinedRow | undefined;
 }
 
-async function assertUsableStore(
+export async function assertUsableStore(
   storeId: string,
-  options?: { requireNoExistingConfig?: boolean },
+  options?: { requireNoExistingConfig?: boolean; db?: DbExecutor },
 ): Promise<{ store: StoreRow; branch: BranchRow }> {
-  const rows = await getDb()
+  const db = useDb(options?.db);
+  const rows = await db
     .select({
       store: stores,
       branch: branches,
@@ -288,7 +312,7 @@ async function assertUsableStore(
   }
 
   if (options?.requireNoExistingConfig) {
-    const existing = await getDb()
+    const existing = await db
       .select({ id: storeUsers.id })
       .from(storeUsers)
       .where(eq(storeUsers.storeId, storeId))
@@ -302,12 +326,16 @@ async function assertUsableStore(
   return row;
 }
 
-async function loadApplicationUserContext(applicationUserId: string): Promise<{
+async function loadApplicationUserContext(
+  applicationUserId: string,
+  db?: DbExecutor,
+): Promise<{
   applicationUser: ApplicationUserRow;
   roles: AppRole[];
   employee: EmployeeRow;
 }> {
-  const rows = await getDb()
+  const conn = useDb(db);
+  const rows = await conn
     .select({
       applicationUser: applicationUsers,
       employee: employees,
@@ -327,7 +355,7 @@ async function loadApplicationUserContext(applicationUserId: string): Promise<{
     throw new AppError("Selected application user was not found.", 400);
   }
 
-  const roleRows = await getDb()
+  const roleRows = await conn
     .select({ role: userRoles.role })
     .from(userRoles)
     .where(eq(userRoles.userId, applicationUserId));
@@ -339,11 +367,12 @@ async function loadApplicationUserContext(applicationUserId: string): Promise<{
   };
 }
 
-async function assertAssignablePerson(params: {
+export async function assertAssignablePerson(params: {
   applicationUserId: string;
   requiredRole: StoreUserAssignableRole;
   storeBranchId: string;
   fieldLabel: "maker" | "supervisor";
+  db?: DbExecutor;
 }): Promise<{
   applicationUser: ApplicationUserRow;
   role: StoreUserAssignableRole;
@@ -363,7 +392,10 @@ async function assertAssignablePerson(params: {
   };
 
   try {
-    context = await loadApplicationUserContext(params.applicationUserId);
+    context = await loadApplicationUserContext(
+      params.applicationUserId,
+      params.db,
+    );
   } catch (error) {
     if (error instanceof AppError && error.statusCode === 400) {
       throw new AppError(`Selected ${label} was not found.`, 400);
@@ -417,9 +449,10 @@ async function assertAssignablePerson(params: {
   };
 }
 
-async function assertMakerAvailable(params: {
+export async function assertMakerAvailable(params: {
   makerApplicationUserId: string;
   excludeAssignmentId?: string;
+  db?: DbExecutor;
 }): Promise<void> {
   const conditions: SQL[] = [
     eq(storeUsers.makerApplicationUserId, params.makerApplicationUserId),
@@ -430,7 +463,7 @@ async function assertMakerAvailable(params: {
     conditions.push(ne(storeUsers.id, params.excludeAssignmentId));
   }
 
-  const existing = await getDb()
+  const existing = await useDb(params.db)
     .select({ id: storeUsers.id })
     .from(storeUsers)
     .where(and(...conditions))
@@ -446,10 +479,13 @@ async function assertMakerAvailable(params: {
 
 async function assertReactivationEligibility(
   row: StoreUserJoinedRow,
+  db?: DbExecutor,
 ): Promise<void> {
   if (
+    row.assignment.makerApplicationUserId &&
+    row.assignment.supervisorApplicationUserId &&
     row.assignment.makerApplicationUserId ===
-    row.assignment.supervisorApplicationUserId
+      row.assignment.supervisorApplicationUserId
   ) {
     throw new AppError(
       "Cannot reactivate a configuration whose maker and supervisor are the same account.",
@@ -457,24 +493,41 @@ async function assertReactivationEligibility(
     );
   }
 
-  const { store } = await assertUsableStore(row.assignment.storeId);
+  if (
+    !row.assignment.makerApplicationUserId &&
+    !row.assignment.supervisorApplicationUserId
+  ) {
+    throw new AppError(
+      "Cannot reactivate a configuration that has no maker or supervisor.",
+      400,
+    );
+  }
 
-  await assertAssignablePerson({
-    applicationUserId: row.assignment.makerApplicationUserId,
-    requiredRole: "MAKER",
-    storeBranchId: store.branchId,
-    fieldLabel: "maker",
-  });
-  await assertMakerAvailable({
-    makerApplicationUserId: row.assignment.makerApplicationUserId,
-    excludeAssignmentId: row.assignment.id,
-  });
-  await assertAssignablePerson({
-    applicationUserId: row.assignment.supervisorApplicationUserId,
-    requiredRole: "CHECKER",
-    storeBranchId: store.branchId,
-    fieldLabel: "supervisor",
-  });
+  const { store } = await assertUsableStore(row.assignment.storeId, { db });
+
+  if (row.assignment.makerApplicationUserId) {
+    await assertAssignablePerson({
+      applicationUserId: row.assignment.makerApplicationUserId,
+      requiredRole: "MAKER",
+      storeBranchId: store.branchId,
+      fieldLabel: "maker",
+      db,
+    });
+    await assertMakerAvailable({
+      makerApplicationUserId: row.assignment.makerApplicationUserId,
+      excludeAssignmentId: row.assignment.id,
+      db,
+    });
+  }
+  if (row.assignment.supervisorApplicationUserId) {
+    await assertAssignablePerson({
+      applicationUserId: row.assignment.supervisorApplicationUserId,
+      requiredRole: "CHECKER",
+      storeBranchId: store.branchId,
+      fieldLabel: "supervisor",
+      db,
+    });
+  }
 }
 
 export async function listStoreUsers(
@@ -488,20 +541,20 @@ export async function listStoreUsers(
       .from(storeUsers)
       .innerJoin(stores, eq(storeUsers.storeId, stores.id))
       .innerJoin(branches, eq(stores.branchId, branches.id))
-      .innerJoin(makerUsers, eq(storeUsers.makerApplicationUserId, makerUsers.id))
-      .innerJoin(makerRoles, eq(makerRoles.userId, makerUsers.id))
-      .innerJoin(makerEmployees, eq(makerUsers.employeeId, makerEmployees.id))
-      .innerJoin(makerBranches, eq(makerEmployees.branchId, makerBranches.id))
-      .innerJoin(
+      .leftJoin(makerUsers, eq(storeUsers.makerApplicationUserId, makerUsers.id))
+      .leftJoin(makerRoles, eq(makerRoles.userId, makerUsers.id))
+      .leftJoin(makerEmployees, eq(makerUsers.employeeId, makerEmployees.id))
+      .leftJoin(makerBranches, eq(makerEmployees.branchId, makerBranches.id))
+      .leftJoin(
         supervisorUsers,
         eq(storeUsers.supervisorApplicationUserId, supervisorUsers.id),
       )
-      .innerJoin(supervisorRoles, eq(supervisorRoles.userId, supervisorUsers.id))
-      .innerJoin(
+      .leftJoin(supervisorRoles, eq(supervisorRoles.userId, supervisorUsers.id))
+      .leftJoin(
         supervisorEmployees,
         eq(supervisorUsers.employeeId, supervisorEmployees.id),
       )
-      .innerJoin(
+      .leftJoin(
         supervisorBranches,
         eq(supervisorEmployees.branchId, supervisorBranches.id),
       );
@@ -512,7 +565,7 @@ export async function listStoreUsers(
       totalItems === 0 ? 0 : Math.ceil(totalItems / query.pageSize);
     const offset = (query.page - 1) * query.pageSize;
 
-    const rows = await storeUserJoins(where)
+    const rows = await storeUserJoins(getDb(), where)
       .orderBy(
         asc(stores.storeName),
         asc(makerEmployees.employeeName),

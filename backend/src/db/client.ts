@@ -3,10 +3,16 @@ import { Pool } from "pg";
 import type { Env } from "../config/env.js";
 import * as schema from "./schema/index.js";
 
-let pool: Pool | undefined;
-let db: ReturnType<typeof drizzle<typeof schema>> | undefined;
+export type AppDatabase = ReturnType<typeof drizzle<typeof schema>>;
+export type AppTransaction = Parameters<
+  Parameters<AppDatabase["transaction"]>[0]
+>[0];
+export type DbExecutor = AppDatabase | AppTransaction;
 
-export function createDb(env: Env): ReturnType<typeof drizzle<typeof schema>> {
+let pool: Pool | undefined;
+let db: AppDatabase | undefined;
+
+export function createDb(env: Env): AppDatabase {
   if (db && pool) {
     return db;
   }
@@ -26,7 +32,7 @@ export function getPool(): Pool {
   return pool;
 }
 
-export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
+export function getDb(): AppDatabase {
   if (!db) {
     throw new Error("Database client has not been initialized");
   }

@@ -1,11 +1,20 @@
 import type {
   ItemRequestActionType,
+  ItemRequestIssueActionKind,
   ItemRequestQueue,
+  ItemRequestStatus,
   ItemRequestWorkflowRole,
 } from "@printing-stationery/shared";
 import {
+  ITEM_REQUEST_ISSUE_ACTION_LABELS,
+  ITEM_REQUEST_REVIEW_EMPTY_MESSAGE,
+  ITEM_REQUEST_REVIEW_EMPTY_TITLE,
   getItemRequestNavQueues,
+  itemRequestIssueActionHref,
   itemRequestQueueIsFulfilment,
+  itemRequestWorkflowIsCorporateMaker,
+  resolveItemRequestIssueAction,
+  type ItemRequestActiveIssueSummary,
 } from "@printing-stationery/shared";
 
 export type ItemRequestQueueDefinition = {
@@ -204,6 +213,18 @@ const CORPORATE_CHECKER_LABELS: Partial<
   },
 };
 
+const CORPORATE_MAKER_LABELS: Partial<
+  Record<ItemRequestQueue, QueueLabelOverride>
+> = {
+  review: {
+    sidebarLabel: "Review Request",
+    tabLabel: "Review",
+    title: "Branch Requests for Review",
+    description:
+      "Corporate maker queue — forward requests for approval or return them to the branch.",
+  },
+};
+
 const QUEUE_BY_KEY = new Map(
   ITEM_REQUEST_QUEUE_DEFINITIONS.map((queue) => [queue.key, queue]),
 );
@@ -212,6 +233,14 @@ function applyRoleLabels(
   queue: ItemRequestQueueDefinition,
   workflowRoles: readonly ItemRequestWorkflowRole[],
 ): ItemRequestQueueDefinition {
+  if (itemRequestWorkflowIsCorporateMaker(workflowRoles)) {
+    const override = CORPORATE_MAKER_LABELS[queue.key];
+    return {
+      ...queue,
+      ...override,
+      showCreate: false,
+    };
+  }
   const corporateCheckerOnly =
     workflowRoles.length === 1 && workflowRoles[0] === "CORPORATE_CHECKER";
   if (!corporateCheckerOnly) {
@@ -233,6 +262,33 @@ export function getItemRequestQueue(
     throw new Error(`Unknown item request queue: ${key}`);
   }
   return applyRoleLabels(found, workflowRoles);
+}
+
+export function getItemRequestListEmptyState(params: {
+  queue: ItemRequestQueue;
+  workflowRoles: readonly ItemRequestWorkflowRole[];
+  hasFilters: boolean;
+  canCreate: boolean;
+}): { title: string; message: string } {
+  if (
+    params.queue === "review" &&
+    itemRequestWorkflowIsCorporateMaker(params.workflowRoles) &&
+    !params.hasFilters
+  ) {
+    return {
+      title: ITEM_REQUEST_REVIEW_EMPTY_TITLE,
+      message: ITEM_REQUEST_REVIEW_EMPTY_MESSAGE,
+    };
+  }
+
+  return {
+    title: "No item requests found",
+    message: params.hasFilters
+      ? "Try adjusting search or filters."
+      : params.canCreate
+        ? "Create a request to get started."
+        : "No requests are in this queue for you right now.",
+  };
 }
 
 export function getItemRequestWorkflowTabQueues(
@@ -329,27 +385,49 @@ export const ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS: Record<
   rejected: [],
 };
 
-const QUEUES_WITH_CREATE_ISSUE: ReadonlySet<ItemRequestQueue> = new Set([
+const QUEUES_WITH_ISSUE_ACTIONS: ReadonlySet<ItemRequestQueue> = new Set([
   "ready-to-issue",
+  "partial-pending",
 ]);
 
 export type ItemRequestListRowActions = {
-  showCreateIssue: boolean;
+  issueAction: ItemRequestIssueActionKind | null;
+  issueHref: string | null;
+  issueActionLabel: string | null;
   workflowActions: ItemRequestActionType[];
 };
 
 export function getItemRequestListRowActions(
   queue: ItemRequestQueue,
   request: {
+    id: string;
+    status: ItemRequestStatus;
     canCreateIssue: boolean;
+    activeIssue: ItemRequestActiveIssueSummary | null;
     allowedActions: readonly ItemRequestActionType[];
   },
 ): ItemRequestListRowActions {
   const allowedOnQueue = ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS[queue];
+  const issueAction = QUEUES_WITH_ISSUE_ACTIONS.has(queue)
+    ? resolveItemRequestIssueAction({
+        canCreateNewIssue: request.canCreateIssue,
+        requestStatus: request.status,
+        activeIssue: request.activeIssue,
+      })
+    : null;
 
   return {
-    showCreateIssue:
-      request.canCreateIssue && QUEUES_WITH_CREATE_ISSUE.has(queue),
+    issueAction,
+    issueHref: issueAction
+      ? itemRequestIssueActionHref({
+          requestId: request.id,
+          action: issueAction,
+          activeIssueId: request.activeIssue?.id,
+        })
+      : null,
+    issueActionLabel: issueAction
+      ? ITEM_REQUEST_ISSUE_ACTION_LABELS[issueAction]
+      : null,
     workflowActions: allowedOnQueue.filter((action) =>
       request.allowedActions.includes(action),
     ),
