@@ -54,6 +54,7 @@ import {
   itemRequestWorkflowCanCreate,
   itemRequestWorkflowIsCorporateMaker,
   preferCorporateControlStore,
+  remainingRequestedQuantity,
   userHasRole,
 } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
@@ -1591,7 +1592,11 @@ function toListItem(
   const totalIssued = parseQuantityToScaled(
     String(row.totalIssuedQuantity ?? "0"),
   );
-  const remaining = totalRequested - totalIssued;
+  const remainingQuantity = remainingRequestedQuantity(
+    scaledToQuantity(totalRequested),
+    scaledToQuantity(totalIssued),
+  );
+  const remaining = parseQuantityToScaled(remainingQuantity);
   const activeIssue = parseActiveIssue(row.activeIssue);
   const canCreateIssue =
     remaining > 0n &&
@@ -1626,7 +1631,7 @@ function toListItem(
     itemCount: Number(row.itemCount),
     totalRequestedQuantity: scaledToQuantity(totalRequested),
     totalIssuedQuantity: scaledToQuantity(totalIssued),
-    totalRemainingQuantity: scaledToQuantity(remaining < 0n ? 0n : remaining),
+    totalRemainingQuantity: remainingQuantity,
     availableStockQuantity: null,
     createdAt: row.request.createdAt.toISOString(),
     updatedAt: row.request.updatedAt.toISOString(),
@@ -2130,7 +2135,10 @@ export async function getItemRequestById(
     const lines = lineRows.map((row) => {
       const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
       const issued = issuedTotals.get(row.line.id) ?? 0n;
-      const remaining = requested - issued;
+      const remainingQuantity = remainingRequestedQuantity(
+        scaledToQuantity(requested),
+        scaledToQuantity(issued),
+      );
       const stockKey = destinationStoreId
         ? operationalStockKey(destinationStoreId, row.item.id, row.unitId)
         : null;
@@ -2139,7 +2147,7 @@ export async function getItemRequestById(
         itemId: row.line.itemId,
         requestedQuantity: row.line.requestedQuantity,
         issuedQuantity: scaledToQuantity(issued),
-        remainingQuantity: scaledToQuantity(remaining < 0n ? 0n : remaining),
+        remainingQuantity,
         availableStockQuantity: stockKey
           ? (stockByItemUnit.get(stockKey) ?? "0")
           : null,

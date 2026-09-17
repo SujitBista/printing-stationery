@@ -723,7 +723,13 @@ export {
   multiplyDecimalStrings,
   sumDecimalStrings,
   isNonNegativeDecimalString,
+  remainingNonNegativeDecimalString,
 } from "./decimal-amount.js";
+export {
+  remainingRequestedQuantity,
+  itemIssueLineQuantities,
+} from "./item-issue-quantities.js";
+export type { ItemIssueLineQuantities } from "./item-issue-quantities.js";
 export {
   CORPORATE_STORE_CODE,
   isCorporateControlStore,

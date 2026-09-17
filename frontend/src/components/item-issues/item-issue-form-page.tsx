@@ -25,6 +25,9 @@ import {
   formatAvailableStockQuantity,
   formatDateTime,
   ITEM_ISSUE_STATUS_LABELS,
+  itemIssueDisplayedRemainingQuantity,
+  itemIssueQtyColumnLabel,
+  itemIssueRemainingColumnLabel,
   personDisplayName,
 } from "./item-issue-labels";
 import { departmentDisplayName } from "@/components/item-requests/item-request-labels";
@@ -534,9 +537,20 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                   <th className="px-3 py-2 font-semibold">Unit</th>
                   <th className="px-3 py-2 font-semibold">Requested Qty</th>
                   <th className="px-3 py-2 font-semibold">Previously Issued Qty</th>
-                  <th className="px-3 py-2 font-semibold">Remaining Qty</th>
+                  {isPosted ? (
+                    <th className="px-3 py-2 font-semibold">
+                      {itemIssueQtyColumnLabel(issue?.status)}
+                    </th>
+                  ) : null}
+                  <th className="px-3 py-2 font-semibold">
+                    {itemIssueRemainingColumnLabel(issue?.status)}
+                  </th>
                   <th className="px-3 py-2 font-semibold">Available Stock</th>
-                  <th className="px-3 py-2 font-semibold">Issue Qty</th>
+                  {isPosted ? null : (
+                    <th className="px-3 py-2 font-semibold">
+                      {itemIssueQtyColumnLabel(issue?.status)}
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -555,28 +569,37 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                     <td className="whitespace-nowrap px-3 py-3">
                       {line.previouslyIssuedQuantity}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">{line.remainingQuantity}</td>
+                    {isPosted ? (
+                      <td className="whitespace-nowrap px-3 py-3">
+                        {line.thisIssueQuantity}
+                      </td>
+                    ) : null}
+                    <td className="whitespace-nowrap px-3 py-3">
+                      {itemIssueDisplayedRemainingQuantity(line, issue?.status)}
+                    </td>
                     <td className="whitespace-nowrap px-3 py-3">
                       {formatAvailableStockQuantity(
                         line.availableStockQuantity,
                         line.unit.unitName,
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">
-                      <input
-                        value={issueQuantities[line.requestLineId] ?? ""}
-                        onChange={(event) =>
-                          setIssueQuantities((current) => ({
-                            ...current,
-                            [line.requestLineId]: event.target.value,
-                          }))
-                        }
-                        inputMode="decimal"
-                        disabled={saving || !canEdit}
-                        readOnly={!canEdit}
-                        className="w-28 rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20 disabled:opacity-70"
-                      />
-                    </td>
+                    {isPosted ? null : (
+                      <td className="whitespace-nowrap px-3 py-3">
+                        <input
+                          value={issueQuantities[line.requestLineId] ?? ""}
+                          onChange={(event) =>
+                            setIssueQuantities((current) => ({
+                              ...current,
+                              [line.requestLineId]: event.target.value,
+                            }))
+                          }
+                          inputMode="decimal"
+                          disabled={saving || !canEdit}
+                          readOnly={!canEdit}
+                          className="w-28 rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20 disabled:opacity-70"
+                        />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

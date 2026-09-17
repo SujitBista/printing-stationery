@@ -33,8 +33,11 @@ import {
   ITEM_ISSUE_ACTIVE_CONFLICT_CODE,
   ITEM_ISSUE_OPEN_STATUSES,
   ITEM_ISSUE_QUEUE_STATUSES,
+  itemIssueLineQuantities,
   itemIssueStatusIsEditable,
+  itemIssueStatusIsPosted,
   multiplyDecimalStrings,
+  remainingRequestedQuantity,
   requestStatusAllowsItemIssue,
   userHasRole,
 } from "@printing-stationery/shared";
@@ -524,16 +527,40 @@ function assertRequestCanCreateIssue(status: string): void {
   }
 }
 
+type PostedIssueTotalOptions = {
+  excludeIssueId?: string;
+  earlierThanIssue?: {
+    id: string;
+    verifiedAt: Date | null;
+    createdAt: Date;
+  };
+};
+
 async function loadPostedIssueTotalsByRequestLine(
   requestId: string,
-  excludeIssueId?: string,
+  options?: PostedIssueTotalOptions,
 ): Promise<Map<string, bigint>> {
   const conditions: SQL[] = [
     eq(itemIssues.requestId, requestId),
     eq(itemIssues.status, "POSTED"),
   ];
-  if (excludeIssueId) {
-    conditions.push(sql`${itemIssues.id} <> ${excludeIssueId}`);
+  if (options?.excludeIssueId) {
+    conditions.push(sql`${itemIssues.id} <> ${options.excludeIssueId}`);
+  }
+  if (options?.earlierThanIssue) {
+    const earlier = options.earlierThanIssue;
+    const earlierInstant = earlier.verifiedAt ?? earlier.createdAt;
+    conditions.push(
+      sql`(
+        coalesce(${itemIssues.verifiedAt}, ${itemIssues.createdAt}),
+        ${itemIssues.createdAt},
+        ${itemIssues.id}
+      ) < (
+        ${earlierInstant},
+        ${earlier.createdAt},
+        ${earlier.id}::uuid
+      )`,
+    );
   }
 
   const rows = await getDb()
@@ -551,14 +578,56 @@ async function loadPostedIssueTotalsByRequestLine(
   );
 }
 
+function availabilityFromPostedTotals(params: {
+  requestLineRows: RequestLineRow[];
+  postedTotals: Map<string, bigint>;
+  fromStoreId: string;
+  stockByItemUnit: Map<string, string>;
+}): ItemIssueLineAvailability[] {
+  return params.requestLineRows.map((row) => {
+    const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
+    const previouslyIssued = params.postedTotals.get(row.line.id) ?? 0n;
+    const quantities = itemIssueLineQuantities({
+      requestedQuantity: scaledToQuantity(requested),
+      previouslyIssuedQuantity: scaledToQuantity(previouslyIssued),
+      thisIssueQuantity: "0",
+      currentIssuePosted: false,
+    });
+    const stockKey = operationalStockKey(
+      params.fromStoreId,
+      row.item.id,
+      row.unitId,
+    );
+
+    return {
+      requestLineId: row.line.id,
+      itemId: row.item.id,
+      itemCode: row.item.itemCode,
+      itemName: row.item.itemName,
+      unit: {
+        id: row.unitId,
+        unitName: row.unitName,
+      },
+      requestedQuantity: quantities.requestedQuantity,
+      previouslyIssuedQuantity: quantities.previouslyIssuedQuantity,
+      thisIssueQuantity: quantities.thisIssueQuantity,
+      outstandingBeforeThisIssue: quantities.outstandingBeforeThisIssue,
+      remainingQuantity: quantities.remainingQuantity,
+      remainingAfterIssue: quantities.remainingAfterIssue,
+      availableStockQuantity: params.stockByItemUnit.get(stockKey) ?? "0",
+      stockBalanceKnown: true,
+    };
+  });
+}
+
 async function buildAvailability(
   requestId: string,
   fromStoreId: string,
-  excludeIssueId?: string,
+  options?: PostedIssueTotalOptions,
 ): Promise<ItemIssueLineAvailability[]> {
   const [requestLineRows, submittedTotals] = await Promise.all([
     loadRequestLineRows(requestId),
-    loadPostedIssueTotalsByRequestLine(requestId, excludeIssueId),
+    loadPostedIssueTotalsByRequestLine(requestId, options),
   ]);
 
   const itemIds = [...new Set(requestLineRows.map((row) => row.item.id))];
@@ -573,27 +642,11 @@ async function buildAvailability(
     ]),
   );
 
-  return requestLineRows.map((row) => {
-    const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
-    const previouslyIssued = submittedTotals.get(row.line.id) ?? 0n;
-    const remaining = requested - previouslyIssued;
-    const stockKey = operationalStockKey(fromStoreId, row.item.id, row.unitId);
-
-    return {
-      requestLineId: row.line.id,
-      itemId: row.item.id,
-      itemCode: row.item.itemCode,
-      itemName: row.item.itemName,
-      unit: {
-        id: row.unitId,
-        unitName: row.unitName,
-      },
-      requestedQuantity: scaledToQuantity(requested),
-      previouslyIssuedQuantity: scaledToQuantity(previouslyIssued),
-      remainingQuantity: scaledToQuantity(remaining < 0n ? 0n : remaining),
-      availableStockQuantity: stockByItemUnit.get(stockKey) ?? "0",
-      stockBalanceKnown: true,
-    };
+  return availabilityFromPostedTotals({
+    requestLineRows,
+    postedTotals: submittedTotals,
+    fromStoreId,
+    stockByItemUnit,
   });
 }
 
@@ -681,7 +734,9 @@ export function validateIssueLinesAgainstAvailability(params: {
       throw new AppError("Issue quantity must be greater than zero", 400);
     }
 
-    const remaining = parseQuantityToScaled(available.remainingQuantity);
+    const remaining = parseQuantityToScaled(
+      available.outstandingBeforeThisIssue || available.remainingQuantity,
+    );
     if (issueQuantity > remaining) {
       throw new AppError(
         `Issue quantity for ${available.itemCode} exceeds the remaining requested quantity.`,
@@ -997,6 +1052,7 @@ function toIssueListItem(
 
 function toIssueRequestLines(
   rows: RequestLineRow[],
+  postedTotals: Map<string, bigint>,
   availability: ItemIssueLineAvailability[],
 ) {
   const availabilityByLine = new Map(
@@ -1005,12 +1061,17 @@ function toIssueRequestLines(
 
   return rows.map((row) => {
     const available = availabilityByLine.get(row.line.id);
+    const requested = parseQuantityToScaled(String(row.line.requestedQuantity));
+    const issued = postedTotals.get(row.line.id) ?? 0n;
     return {
       id: row.line.id,
       itemId: row.line.itemId,
       requestedQuantity: String(row.line.requestedQuantity),
-      issuedQuantity: available?.previouslyIssuedQuantity ?? "0",
-      remainingQuantity: available?.remainingQuantity ?? String(row.line.requestedQuantity),
+      issuedQuantity: scaledToQuantity(issued),
+      remainingQuantity: remainingRequestedQuantity(
+        scaledToQuantity(requested),
+        scaledToQuantity(issued),
+      ),
       availableStockQuantity: available?.availableStockQuantity ?? "0",
       createdAt: row.line.createdAt.toISOString(),
       updatedAt: row.line.updatedAt.toISOString(),
@@ -1166,7 +1227,16 @@ export async function getItemIssueEligibility(
         request.requestedByEmployee,
         request.requestedByBranch,
       ),
-      lines: toIssueRequestLines(await loadRequestLineRows(requestId), availability),
+      lines: toIssueRequestLines(
+        await loadRequestLineRows(requestId),
+        new Map(
+          availability.map((line) => [
+            line.requestLineId,
+            parseQuantityToScaled(line.previouslyIssuedQuantity),
+          ]),
+        ),
+        availability,
+      ),
       actions: [],
     },
     lines: availability,
@@ -1318,29 +1388,62 @@ export async function getItemIssueById(
     }
 
     const requestHeader = await loadIssueSourceRequest(header.issue.requestId);
-    const [lineRows, availability, requestActions, issueActions] = await Promise.all([
-      getDb()
-        .select({
-          line: itemIssueLines,
-          requestLine: itemRequestLines,
-          item: items,
-          unitId: units.id,
-          unitName: units.unitName,
-        })
-        .from(itemIssueLines)
-        .innerJoin(itemRequestLines, eq(itemIssueLines.requestLineId, itemRequestLines.id))
-        .innerJoin(items, eq(itemIssueLines.itemId, items.id))
-        .innerJoin(units, eq(items.unitId, units.id))
-        .where(eq(itemIssueLines.itemIssueId, issueId))
-        .orderBy(asc(items.itemName), asc(items.itemCode), asc(itemIssueLines.id)),
-      buildAvailability(
-        header.issue.requestId,
-        header.issue.fromStoreId,
-        header.issue.id,
-      ),
-      loadRequestActionRows(header.issue.requestId),
-      loadIssueActionRows(issueId),
-    ]);
+    const postedIssue = itemIssueStatusIsPosted(header.issue.status);
+    const [lineRows, baseAvailability, requestLineRows, postedTotals, requestActions, issueActions] =
+      await Promise.all([
+        getDb()
+          .select({
+            line: itemIssueLines,
+            requestLine: itemRequestLines,
+            item: items,
+            unitId: units.id,
+            unitName: units.unitName,
+          })
+          .from(itemIssueLines)
+          .innerJoin(itemRequestLines, eq(itemIssueLines.requestLineId, itemRequestLines.id))
+          .innerJoin(items, eq(itemIssueLines.itemId, items.id))
+          .innerJoin(units, eq(items.unitId, units.id))
+          .where(eq(itemIssueLines.itemIssueId, issueId))
+          .orderBy(asc(items.itemName), asc(items.itemCode), asc(itemIssueLines.id)),
+        buildAvailability(header.issue.requestId, header.issue.fromStoreId, {
+          excludeIssueId: header.issue.id,
+          earlierThanIssue: postedIssue
+            ? {
+                id: header.issue.id,
+                verifiedAt: header.issue.verifiedAt,
+                createdAt: header.issue.createdAt,
+              }
+            : undefined,
+        }),
+        loadRequestLineRows(header.issue.requestId),
+        loadPostedIssueTotalsByRequestLine(header.issue.requestId),
+        loadRequestActionRows(header.issue.requestId),
+        loadIssueActionRows(issueId),
+      ]);
+
+    const thisIssueByLine = new Map(
+      lineRows.map((row) => [
+        row.line.requestLineId,
+        scaledToQuantity(parseQuantityToScaled(String(row.line.issueQuantity))),
+      ]),
+    );
+    const availability = baseAvailability.map((line) => {
+      const quantities = itemIssueLineQuantities({
+        requestedQuantity: line.requestedQuantity,
+        previouslyIssuedQuantity: line.previouslyIssuedQuantity,
+        thisIssueQuantity: thisIssueByLine.get(line.requestLineId) ?? "0",
+        currentIssuePosted: postedIssue,
+      });
+      return {
+        ...line,
+        requestedQuantity: quantities.requestedQuantity,
+        previouslyIssuedQuantity: quantities.previouslyIssuedQuantity,
+        thisIssueQuantity: quantities.thisIssueQuantity,
+        outstandingBeforeThisIssue: quantities.outstandingBeforeThisIssue,
+        remainingQuantity: quantities.remainingQuantity,
+        remainingAfterIssue: quantities.remainingAfterIssue,
+      };
+    });
 
     return {
       ...toIssueListItem(header, actor, access),
@@ -1375,10 +1478,7 @@ export async function getItemIssueById(
           requestHeader.requestedByEmployee,
           requestHeader.requestedByBranch,
         ),
-        lines: toIssueRequestLines(
-          await loadRequestLineRows(header.issue.requestId),
-          availability,
-        ),
+        lines: toIssueRequestLines(requestLineRows, postedTotals, availability),
         actions: requestActions,
       },
       lines: lineRows.map((row) => ({
@@ -1587,7 +1687,7 @@ export async function submitItemIssue(
       const availability = await buildAvailability(
         issue.requestId,
         issue.fromStoreId,
-        issue.id,
+        { excludeIssueId: issue.id },
       );
 
       const issueLineRows = await tx
@@ -1776,7 +1876,7 @@ export async function verifyAndPostItemIssue(
       const availability = await buildAvailability(
         issue.requestId,
         issue.fromStoreId,
-        issue.id,
+        { excludeIssueId: issue.id },
       );
       const lockedStock = await getOperationalAvailableQuantities(
         {

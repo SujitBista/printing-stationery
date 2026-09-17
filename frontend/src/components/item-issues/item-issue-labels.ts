@@ -1,4 +1,5 @@
 import type {
+  ItemIssueLineAvailability,
   ItemIssueStatus,
   ItemRequestPersonSummary,
 } from "@printing-stationery/shared";
@@ -63,4 +64,28 @@ export function formatAvailableStockQuantity(
     ? `${sign}${groupedWhole}.${fractionPart}`
     : `${sign}${groupedWhole}`;
   return `${formatted} ${unitName}`;
+}
+
+export function itemIssueRemainingColumnLabel(
+  status: ItemIssueStatus | undefined,
+): string {
+  return status === "POSTED"
+    ? "Remaining After Issue"
+    : "Outstanding Before This Issue";
+}
+
+export function itemIssueQtyColumnLabel(
+  status: ItemIssueStatus | undefined,
+): string {
+  return status === "POSTED" ? "Qty Issued Now" : "Issue Qty";
+}
+
+export function itemIssueDisplayedRemainingQuantity(
+  line: ItemIssueLineAvailability,
+  status: ItemIssueStatus | undefined,
+): string {
+  if (status === "POSTED") {
+    return line.remainingAfterIssue ?? line.remainingQuantity;
+  }
+  return line.outstandingBeforeThisIssue ?? line.remainingQuantity;
 }

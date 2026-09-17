@@ -293,7 +293,10 @@ export const itemIssueLineAvailabilitySchema = z.object({
   unit: itemRequestUnitSummarySchema,
   requestedQuantity: z.string(),
   previouslyIssuedQuantity: z.string(),
+  thisIssueQuantity: z.string(),
+  outstandingBeforeThisIssue: z.string(),
   remainingQuantity: z.string(),
+  remainingAfterIssue: z.string().nullable(),
   availableStockQuantity: z.string().nullable(),
   stockBalanceKnown: z.boolean(),
 });

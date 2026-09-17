@@ -43,7 +43,10 @@ function availabilityLine(overrides?: {
     unit: { id: "77777777-7777-4777-8777-777777777777", unitName: "Pcs" },
     requestedQuantity: "10",
     previouslyIssuedQuantity: "0",
+    thisIssueQuantity: "0",
+    outstandingBeforeThisIssue: overrides?.remainingQuantity ?? "10",
     remainingQuantity: overrides?.remainingQuantity ?? "10",
+    remainingAfterIssue: null,
     availableStockQuantity: null,
     stockBalanceKnown: false,
   };

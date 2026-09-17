@@ -95,6 +95,38 @@ function isAppError(
   );
 }
 
+function assertIssueAvailabilityQuantities(
+  line:
+    | {
+        requestedQuantity: string;
+        previouslyIssuedQuantity: string;
+        thisIssueQuantity: string;
+        outstandingBeforeThisIssue: string;
+        remainingQuantity: string;
+        remainingAfterIssue: string | null;
+      }
+    | undefined,
+  expected: {
+    requestedQuantity: string;
+    previouslyIssuedQuantity: string;
+    thisIssueQuantity: string;
+    outstandingBeforeThisIssue: string;
+    remainingQuantity: string;
+    remainingAfterIssue: string | null;
+  },
+) {
+  assert.ok(line);
+  assert.equal(line.requestedQuantity, expected.requestedQuantity);
+  assert.equal(line.previouslyIssuedQuantity, expected.previouslyIssuedQuantity);
+  assert.equal(line.thisIssueQuantity, expected.thisIssueQuantity);
+  assert.equal(
+    line.outstandingBeforeThisIssue,
+    expected.outstandingBeforeThisIssue,
+  );
+  assert.equal(line.remainingQuantity, expected.remainingQuantity);
+  assert.equal(line.remainingAfterIssue, expected.remainingAfterIssue);
+}
+
   async function deleteIssuesForRequests(requestIds: string[]): Promise<void> {
     if (requestIds.length === 0) {
       return;
@@ -892,6 +924,18 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.equal(issue.createdBy.id, corporateMaker.id);
     assert.equal(issue.canEdit, true);
     assert.equal(issue.canVerify, false);
+    assertIssueAvailabilityQuantities(issue.availability[0], {
+      requestedQuantity: "10",
+      previouslyIssuedQuantity: "0",
+      thisIssueQuantity: "4",
+      outstandingBeforeThisIssue: "10",
+      remainingQuantity: "10",
+      remainingAfterIssue: null,
+    });
+    assert.equal(issue.request.lines[0]?.issuedQuantity, "0");
+    assert.equal(issue.request.lines[0]?.remainingQuantity, "10");
+    assert.equal(beforeCreate.lines[0]?.remainingQuantity, "10");
+    assert.equal(beforeCreate.totalRemainingQuantity, "10");
   });
 
   it("records the authenticated supplying-store maker as the creator", async () => {
@@ -992,6 +1036,15 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       expectedVersion: 1,
     });
     assert.equal(submitted.status, "PENDING_VERIFICATION");
+    assertIssueAvailabilityQuantities(submitted.availability[0], {
+      requestedQuantity: "10",
+      previouslyIssuedQuantity: "0",
+      thisIssueQuantity: "4",
+      outstandingBeforeThisIssue: "10",
+      remainingQuantity: "10",
+      remainingAfterIssue: null,
+    });
+    assert.equal(submitted.request.lines[0]?.remainingQuantity, "10");
     const after = await getOperationalAvailableQuantities({
       storeId: corporate.storeId,
       itemIds: [itemId],
@@ -1015,6 +1068,8 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     const request = await getItemRequestById(approvedRequestId, corporateMaker);
     assert.equal(request.status, "APPROVED");
     assert.equal(request.totalIssuedQuantity, "0");
+    assert.equal(request.totalRemainingQuantity, "10");
+    assert.equal(request.lines[0]?.remainingQuantity, "10");
     assert.equal(request.canCreateIssue, false);
     assert.equal(request.activeIssue?.id, createdIssueId);
     assert.equal(request.activeIssue?.status, "PENDING_VERIFICATION");
@@ -1124,6 +1179,16 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     });
     assert.equal(posted.status, "POSTED");
     assert.equal(posted.verifiedBy?.id, corporateChecker.id);
+    assertIssueAvailabilityQuantities(posted.availability[0], {
+      requestedQuantity: "10",
+      previouslyIssuedQuantity: "0",
+      thisIssueQuantity: "4",
+      outstandingBeforeThisIssue: "10",
+      remainingQuantity: "6",
+      remainingAfterIssue: "6",
+    });
+    assert.equal(posted.request.lines[0]?.issuedQuantity, "4");
+    assert.equal(posted.request.lines[0]?.remainingQuantity, "6");
 
     const afterCorporate = await getOperationalAvailableQuantities({
       storeId: corporate.storeId,
@@ -1148,6 +1213,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.equal(request.status, "PARTIALLY_ISSUED");
     assert.equal(request.lines[0]?.issuedQuantity, "4");
     assert.equal(request.lines[0]?.remainingQuantity, "6");
+    assert.equal(request.totalRemainingQuantity, "6");
     assert.equal(request.canCreateIssue, true);
     assert.equal(request.activeIssue, null);
 
@@ -1172,6 +1238,9 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       partial.items.some((item) => item.id === approvedRequestId),
       true,
     );
+    const partialRow = partial.items.find((item) => item.id === approvedRequestId);
+    assert.equal(partialRow?.totalIssuedQuantity, "4");
+    assert.equal(partialRow?.totalRemainingQuantity, "6");
 
     const branchNotes = await listNotifications(requestingMaker.id, {
       page: 1,
@@ -1202,6 +1271,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
   });
 
   it("keeps remaining quantity eligible after partial posting and then marks the request issued", async () => {
+    assert.ok(createdIssueId);
     const second = await createItemIssueFromRequest(
       approvedRequestId,
       corporateMaker,
@@ -1210,17 +1280,58 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         lines: [{ requestLineId, issueQuantity: "6" }],
       },
     );
+    assertIssueAvailabilityQuantities(second.availability[0], {
+      requestedQuantity: "10",
+      previouslyIssuedQuantity: "4",
+      thisIssueQuantity: "6",
+      outstandingBeforeThisIssue: "6",
+      remainingQuantity: "6",
+      remainingAfterIssue: null,
+    });
     const submitted = await submitItemIssue(second.id, corporateMaker, {
       expectedVersion: second.version,
     });
+    assertIssueAvailabilityQuantities(submitted.availability[0], {
+      requestedQuantity: "10",
+      previouslyIssuedQuantity: "4",
+      thisIssueQuantity: "6",
+      outstandingBeforeThisIssue: "6",
+      remainingQuantity: "6",
+      remainingAfterIssue: null,
+    });
+    const submittedRequest = await getItemRequestById(
+      approvedRequestId,
+      corporateMaker,
+    );
+    assert.equal(submittedRequest.lines[0]?.remainingQuantity, "6");
     const posted = await verifyAndPostItemIssue(second.id, corporateChecker, {
       expectedVersion: submitted.version,
       remarks: null,
     });
     assert.equal(posted.status, "POSTED");
+    assertIssueAvailabilityQuantities(posted.availability[0], {
+      requestedQuantity: "10",
+      previouslyIssuedQuantity: "4",
+      thisIssueQuantity: "6",
+      outstandingBeforeThisIssue: "6",
+      remainingQuantity: "0",
+      remainingAfterIssue: "0",
+    });
+    const firstPosted = await getItemIssueById(createdIssueId, corporateMaker);
+    assertIssueAvailabilityQuantities(firstPosted.availability[0], {
+      requestedQuantity: "10",
+      previouslyIssuedQuantity: "0",
+      thisIssueQuantity: "4",
+      outstandingBeforeThisIssue: "10",
+      remainingQuantity: "6",
+      remainingAfterIssue: "6",
+    });
+    assert.equal(firstPosted.request.lines[0]?.issuedQuantity, "10");
+    assert.equal(firstPosted.request.lines[0]?.remainingQuantity, "0");
     const request = await getItemRequestById(approvedRequestId, corporateMaker);
     assert.equal(request.status, "ISSUED");
     assert.equal(request.lines[0]?.remainingQuantity, "0");
+    assert.equal(request.totalRemainingQuantity, "0");
     assert.equal(request.canCreateIssue, false);
     assert.equal(request.activeIssue, null);
 

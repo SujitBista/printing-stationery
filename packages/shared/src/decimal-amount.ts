@@ -52,3 +52,17 @@ export function sumDecimalStrings(values: string[], scale = 4): string {
   }, 0n);
   return fromScaledInteger(total, scale);
 }
+
+/** `left − right`, floored at zero. */
+export function remainingNonNegativeDecimalString(
+  left: string,
+  right: string,
+  scale = 4,
+): string {
+  if (!isNonNegativeDecimalString(left) || !isNonNegativeDecimalString(right)) {
+    throw new Error("Quantity inputs must be non-negative decimal strings");
+  }
+
+  const remaining = toScaledInteger(left, scale) - toScaledInteger(right, scale);
+  return fromScaledInteger(remaining < 0n ? 0n : remaining, scale);
+}
