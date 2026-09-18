@@ -17,7 +17,9 @@ export type StockLedgerMovementType =
   | "ITEM_ISSUE_IN_TRANSIT"
   | "ITEM_ISSUE_RECEIPT"
   | "ITEM_ISSUE_DISCREPANCY"
-  | "DEPARTMENT_CONSUMPTION";
+  | "DEPARTMENT_CONSUMPTION"
+  | "LEGACY_OPENING_IN_TRANSIT"
+  | "LEGACY_OPENING_IN_TRANSIT_RECEIPT";
 
 export type StockLedgerReferenceType = StockLedgerMovementType;
 

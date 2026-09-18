@@ -10,6 +10,7 @@ import type {
   Store,
   Unit,
 } from "@printing-stationery/shared";
+import { isZeroQuantity } from "@printing-stationery/shared";
 import { fetchItems } from "@/lib/api/items";
 import {
   cancelOpeningStock,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/api/opening-stock";
 import { fetchStores } from "@/lib/api/stores";
 import { fetchUnits } from "@/lib/api/units";
+import { confirmLegacyOpeningInTransitReceipt } from "@/lib/api/stock-balances";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -290,7 +292,7 @@ export function OpeningStockDetailPage() {
     const warnings: string[] = [];
     if (preview.summary.inTransitRowCount > 0) {
       warnings.push(
-        `${preview.summary.inTransitRowCount} items are in transit. They will not be included in opening stock and must be imported separately.`,
+        `${preview.summary.inTransitRowCount} items are in transit. They will post as in-transit stock at the destination store and will not increase available opening stock. The original supplying store is unknown.`,
       );
     }
     for (const message of preview.summary.warningMessages) {
@@ -402,6 +404,32 @@ export function OpeningStockDetailPage() {
       setSavingLineId(null);
       setSaveFeedback("Match saved.");
     } finally {
+      hideImmediateSavingOverlay();
+    }
+  }
+
+  async function confirmInTransit(line: OpeningStockBatchLine): Promise<void> {
+    setError(null);
+    setSaveFeedback(null);
+    showImmediateSavingOverlay("Confirming in-transit receipt…");
+    setSavingLineId(line.id);
+    try {
+      const result = await confirmLegacyOpeningInTransitReceipt(line.id, {
+        quantity: line.remainingInTransitQuantity,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      const refreshed = await fetchOpeningStockBatch(batchId);
+      if (refreshed.ok) {
+        setPreview(refreshed.data);
+      }
+      setSaveFeedback(
+        `Confirmed ${result.data.confirmedQuantity} as available. Remaining in transit: ${result.data.remainingInTransitQuantity}.`,
+      );
+    } finally {
+      setSavingLineId(null);
       hideImmediateSavingOverlay();
     }
   }
@@ -772,7 +800,25 @@ export function OpeningStockDetailPage() {
                   <td className="px-3 py-3">{displayLine.receivedQuantity}</td>
                   <td className="px-3 py-3">{displayLine.consumptionQuantity}</td>
                   <td className="px-3 py-3">{displayLine.transferQuantity}</td>
-                  <td className="px-3 py-3">{displayLine.inTransitQuantity}</td>
+                  <td className="px-3 py-3">
+                    <div>{displayLine.inTransitQuantity}</div>
+                    {preview.batch.status === "POSTED" &&
+                    !isZeroQuantity(displayLine.remainingInTransitQuantity) ? (
+                      <button
+                        type="button"
+                        className="mt-2 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-60"
+                        disabled={saving || Boolean(savingLineId)}
+                        onClick={() => void confirmInTransit(line)}
+                      >
+                        Confirm receipt ({displayLine.remainingInTransitQuantity})
+                      </button>
+                    ) : null}
+                    {displayLine.needsAdminReview ? (
+                      <p className="mt-2 text-xs text-danger">
+                        {displayLine.inTransitReviewReason ?? "Needs Admin review."}
+                      </p>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3">
                     <div>{displayLine.closingQuantity}</div>
                     {editable ? (

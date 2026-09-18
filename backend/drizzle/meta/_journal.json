@@ -225,6 +225,20 @@
       "when": 1788830000000,
       "tag": "0031_item_issue_delivery_classify",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788835000000,
+      "tag": "0032_stock_ledger_balance_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788840000000,
+      "tag": "0033_legacy_opening_in_transit",
+      "breakpoints": true
     }
   ]
 }

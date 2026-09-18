@@ -28,6 +28,9 @@ import type {
   cancelOpeningStockInputSchema,
   openingStockValidationResultSchema,
   openingStockPostResultSchema,
+  confirmLegacyOpeningInTransitInputSchema,
+  openingStockLineIdSchema,
+  confirmLegacyOpeningInTransitResultSchema,
 } from "../schemas/opening-stock.js";
 
 export type OpeningStockSourceType = z.infer<typeof openingStockSourceTypeSchema>;
@@ -87,4 +90,11 @@ export type OpeningStockValidationResult = z.infer<
 >;
 export type OpeningStockPostResult = z.infer<
   typeof openingStockPostResultSchema
+>;
+export type ConfirmLegacyOpeningInTransitInput = z.infer<
+  typeof confirmLegacyOpeningInTransitInputSchema
+>;
+export type OpeningStockLineId = z.infer<typeof openingStockLineIdSchema>;
+export type ConfirmLegacyOpeningInTransitResult = z.infer<
+  typeof confirmLegacyOpeningInTransitResultSchema
 >;

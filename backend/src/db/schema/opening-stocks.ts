@@ -59,6 +59,8 @@ export const stockLedgerMovementTypeEnum = pgEnum("stock_ledger_movement_type", 
   "ITEM_ISSUE_RECEIPT",
   "ITEM_ISSUE_DISCREPANCY",
   "DEPARTMENT_CONSUMPTION",
+  "LEGACY_OPENING_IN_TRANSIT",
+  "LEGACY_OPENING_IN_TRANSIT_RECEIPT",
 ]);
 
 export const stockLedgerReferenceTypeEnum = pgEnum("stock_ledger_reference_type", [
@@ -69,6 +71,8 @@ export const stockLedgerReferenceTypeEnum = pgEnum("stock_ledger_reference_type"
   "ITEM_ISSUE_RECEIPT",
   "ITEM_ISSUE_DISCREPANCY",
   "DEPARTMENT_CONSUMPTION",
+  "LEGACY_OPENING_IN_TRANSIT",
+  "LEGACY_OPENING_IN_TRANSIT_RECEIPT",
 ]);
 
 export const stockLedgerCategoryEnum = pgEnum("stock_ledger_category", [
@@ -214,6 +218,20 @@ export const openingStockLines = pgTable(
       .default(sql`'{}'::text[]`),
     sourceRowNumber: numeric("source_row_number", { precision: 10, scale: 0 }).notNull(),
     isIncludedForPosting: boolean("is_included_for_posting").notNull().default(true),
+    remainingInTransitQuantity: numeric("remaining_in_transit_quantity", {
+      precision: 18,
+      scale: 4,
+    })
+      .notNull()
+      .default("0"),
+    confirmedReceivedQuantity: numeric("confirmed_received_quantity", {
+      precision: 18,
+      scale: 4,
+    })
+      .notNull()
+      .default("0"),
+    needsAdminReview: boolean("needs_admin_review").notNull().default(false),
+    inTransitReviewReason: varchar("in_transit_review_reason", { length: 500 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -332,6 +350,14 @@ export const stockLedger = pgTable(
       table.storeId,
       table.itemId,
       table.unitId,
+    ),
+    index("stock_ledger_store_item_unit_category_date_idx").on(
+      table.storeId,
+      table.itemId,
+      table.unitId,
+      table.stockCategory,
+      table.transactionDate,
+      table.createdAt,
     ),
     index("stock_ledger_reference_idx").on(
       table.referenceType,

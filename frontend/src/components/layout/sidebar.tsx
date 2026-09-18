@@ -60,6 +60,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Dashboard", href: "/" },
       { label: "Items", href: "#", soon: true },
       { label: "Purchases", href: "/purchases" },
+      { label: "Stock Balance", href: "/inventory/stock-balance" },
       { label: "Opening Stock", href: "/stock/opening-stock", adminSetup: true },
       {
         label: "Requests",
@@ -283,6 +284,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     canAccessItemRequests,
     canAccessOpeningStock,
     canAccessPurchases,
+    canAccessStockBalance,
   } = useAuth();
   const {
     workflowRoles,
@@ -367,6 +369,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               )
               .filter(
                 (item) => item.href !== "/purchases" || canAccessPurchases,
+              )
+              .filter(
+                (item) =>
+                  item.href !== "/inventory/stock-balance" ||
+                  canAccessStockBalance,
               );
 
             if (filteredItems.length === 0) {

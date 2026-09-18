@@ -18,8 +18,6 @@ import type {
   OpeningStockValidationResult,
   PaginatedOpeningStockResponse,
   PostOpeningStockInput,
-  StockBalanceListQuery,
-  StockBalanceResponse,
   StockBalanceSummary,
 } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
@@ -36,12 +34,13 @@ import {
 import { AppError } from "../utils/errors.js";
 import { databaseUnavailableError, isDatabaseUnavailableError } from "../utils/db-errors.js";
 import { stockLedgerSourceKey } from "./stock-ledger.js";
+import { buildLegacyOpeningInTransitLedgerValue } from "./opening-stock-in-transit.js";
 
 const MAX_IMPORT_FILE_BYTES = 3 * 1024 * 1024;
 const HISTORICAL_CUTOVER_WARNING =
   "This report ends before today. Treat it as a development/test migration unless final cutover is explicitly confirmed and no later legacy transactions exist.";
 const IN_TRANSIT_WARNING =
-  "Rows with In Transit quantity were detected. Outstanding In Transit must be migrated separately from a detailed legacy transfer export.";
+  "Rows with In Transit quantity will post as in-transit stock at the destination store. The original supplying store is unknown and will be shown as Legacy Opening In Transit.";
 
 type ParsedLegacyRow = {
   sourceRowNumber: number;
@@ -585,6 +584,10 @@ async function mapLineRows(
       mappingStatus: line.mappingStatus,
       validationErrors: [...line.validationErrors],
       isIncludedForPosting: line.isIncludedForPosting,
+      remainingInTransitQuantity: String(line.remainingInTransitQuantity),
+      confirmedReceivedQuantity: String(line.confirmedReceivedQuantity),
+      needsAdminReview: line.needsAdminReview,
+      inTransitReviewReason: line.inTransitReviewReason,
       store,
       item,
       unit,
@@ -629,7 +632,7 @@ function buildLineValidationErrors(params: {
   ) {
     errors.push("Mapped unit does not match Item Setup.");
   }
-  // In-transit qty is informational only: Closing Stock Qty still posts as opening stock.
+  // Imported in-transit qty posts separately as IN_TRANSIT and does not change Closing Stock Qty.
   return errors;
 }
 
@@ -1458,6 +1461,9 @@ export async function postOpeningStockBatch(
       const postableLines = lineRows.filter(
         (line) => line.isIncludedForPosting && parseScaled(String(line.openingQuantity), 4) > 0n,
       );
+      const inTransitLines = lineRows.filter(
+        (line) => parseScaled(String(line.sourceInTransitQuantity), 4) > 0n,
+      );
 
       for (const line of lineRows) {
         const hasBlockingError = line.validationErrors.some((error) =>
@@ -1468,7 +1474,14 @@ export async function postOpeningStockBatch(
         }
       }
 
-      // In-transit quantities are ignored on purpose: only Closing Stock Qty posts as opening stock.
+      for (const line of inTransitLines) {
+        if (!line.storeId || !line.itemId || !line.unitId) {
+          throw new AppError(
+            "Imported in-transit quantities require a mapped destination store, item, and unit before posting.",
+            409,
+          );
+        }
+      }
 
       const duplicateConflictChecks = await Promise.all(
         postableLines.map((line) =>
@@ -1482,6 +1495,8 @@ export async function postOpeningStockBatch(
                 eq(stockLedger.unitId, line.unitId!),
                 eq(stockLedger.rate, line.itemRate),
                 eq(stockLedger.transactionDate, batch.cutoverDate),
+                eq(stockLedger.movementType, "OPENING_STOCK"),
+                eq(stockLedger.stockCategory, "AVAILABLE"),
               ),
             )
             .limit(1),
@@ -1494,43 +1509,72 @@ export async function postOpeningStockBatch(
         );
       }
 
-      if (postableLines.length > 0) {
-        await tx.insert(stockLedger).values(
-          postableLines.map((line) => ({
+      const postedAt = new Date();
+      const ledgerValues = [
+        ...postableLines.map((line) => ({
+          storeId: line.storeId!,
+          itemId: line.itemId!,
+          unitId: line.unitId!,
+          rate: line.itemRate,
+          movementType: "OPENING_STOCK" as const,
+          stockCategory: "AVAILABLE" as const,
+          quantityIn: line.openingQuantity,
+          quantityOut: "0",
+          amountIn: line.openingAmount,
+          amountOut: "0",
+          transactionDate: batch.cutoverDate,
+          referenceType: "OPENING_STOCK" as const,
+          referenceId: batch.id,
+          referenceLineId: line.id,
+          sourceKey: stockLedgerSourceKey({
+            referenceType: "OPENING_STOCK",
+            referenceLineId: line.id,
+            storeId: line.storeId!,
+            movementType: "OPENING_STOCK",
+            stockCategory: "AVAILABLE",
+            rate: line.itemRate,
+          }),
+          postedByApplicationUserId: actor.id,
+          postedAt,
+        })),
+        ...inTransitLines.map((line) =>
+          buildLegacyOpeningInTransitLedgerValue({
             storeId: line.storeId!,
             itemId: line.itemId!,
             unitId: line.unitId!,
             rate: line.itemRate,
-            movementType: "OPENING_STOCK" as const,
-            stockCategory: "AVAILABLE" as const,
-            quantityIn: line.openingQuantity,
-            quantityOut: "0",
-            amountIn: line.openingAmount,
-            amountOut: "0",
+            quantityIn: String(line.sourceInTransitQuantity),
+            amountIn: String(line.sourceInTransitAmount),
             transactionDate: batch.cutoverDate,
-            referenceType: "OPENING_STOCK" as const,
-            referenceId: batch.id,
-            referenceLineId: line.id,
-            sourceKey: stockLedgerSourceKey({
-              referenceType: "OPENING_STOCK",
-              referenceLineId: line.id,
-              storeId: line.storeId!,
-              movementType: "OPENING_STOCK",
-              stockCategory: "AVAILABLE",
-              rate: line.itemRate,
-            }),
+            batchId: batch.id,
+            lineId: line.id,
             postedByApplicationUserId: actor.id,
-            postedAt: new Date(),
-          })),
-        );
+            postedAt,
+          }),
+        ),
+      ];
+
+      if (ledgerValues.length > 0) {
+        await tx.insert(stockLedger).values(ledgerValues);
       }
+
+      await tx
+        .update(openingStockLines)
+        .set({
+          remainingInTransitQuantity: sql`case when ${openingStockLines.sourceInTransitQuantity}::numeric > 0 then ${openingStockLines.sourceInTransitQuantity} else '0' end`,
+          confirmedReceivedQuantity: "0",
+          needsAdminReview: false,
+          inTransitReviewReason: null,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(openingStockLines.openingStockBatchId, batchId));
 
       await tx
         .update(openingStockBatches)
         .set({
           status: "POSTED",
           postedByApplicationUserId: actor.id,
-          postedAt: new Date(),
+          postedAt,
           updatedAt: sql`now()`,
         })
         .where(eq(openingStockBatches.id, batchId));
@@ -1541,7 +1585,7 @@ export async function postOpeningStockBatch(
       );
       return {
         batch: batchSummary,
-        postedLedgerLineCount: postableLines.length,
+        postedLedgerLineCount: ledgerValues.length,
         postedBalanceGroupCount: distinctBalanceRows.size,
       };
     });
@@ -1666,111 +1710,4 @@ export async function getOperationalAvailableQuantities(
       row.quantityOut,
     ),
   }));
-}
-
-export async function listStockBalances(
-  actor: AuthenticatedUser,
-  query: StockBalanceListQuery,
-): Promise<StockBalanceResponse> {
-  requireOpeningStockAdmin(actor);
-  const conditions: SQL[] = [eq(stockLedger.stockCategory, "AVAILABLE")];
-  if (query.storeId) {
-    conditions.push(eq(stockLedger.storeId, query.storeId));
-  }
-  if (query.itemId) {
-    conditions.push(eq(stockLedger.itemId, query.itemId));
-  }
-  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
-
-  const grouped = await getDb()
-    .select({
-      storeId: stores.id,
-      storeCode: stores.storeCode,
-      storeName: stores.storeName,
-      itemId: items.id,
-      itemCode: items.itemCode,
-      itemName: items.itemName,
-      unitId: units.id,
-      unitName: units.unitName,
-      rate: stockLedger.rate,
-      quantityIn: sql<string>`coalesce(sum(${stockLedger.quantityIn}), 0)::text`,
-      quantityOut: sql<string>`coalesce(sum(${stockLedger.quantityOut}), 0)::text`,
-      amountIn: sql<string>`coalesce(sum(${stockLedger.amountIn}), 0)::text`,
-      amountOut: sql<string>`coalesce(sum(${stockLedger.amountOut}), 0)::text`,
-    })
-    .from(stockLedger)
-    .innerJoin(stores, eq(stockLedger.storeId, stores.id))
-    .innerJoin(items, eq(stockLedger.itemId, items.id))
-    .innerJoin(units, eq(stockLedger.unitId, units.id))
-    .where(where)
-    .groupBy(
-      stores.id,
-      stores.storeCode,
-      stores.storeName,
-      items.id,
-      items.itemCode,
-      items.itemName,
-      units.id,
-      units.unitName,
-      stockLedger.rate,
-    )
-    .orderBy(asc(stores.storeName), asc(items.itemName), asc(units.unitName), asc(stockLedger.rate));
-
-  const balances = grouped.map((row) => {
-    const quantityIn = row.quantityIn;
-    const quantityOut = row.quantityOut;
-    const amountIn = row.amountIn;
-    const amountOut = row.amountOut;
-    return {
-      store: {
-        id: row.storeId,
-        storeCode: row.storeCode,
-        storeName: row.storeName,
-      },
-      item: {
-        id: row.itemId,
-        itemCode: row.itemCode,
-        itemName: row.itemName,
-      },
-      unit: {
-        id: row.unitId,
-        unitName: row.unitName,
-      },
-      rate: String(row.rate),
-      quantityIn,
-      quantityOut,
-      availableQuantity: availableQuantityFromLedgerTotals(
-        quantityIn,
-        quantityOut,
-      ),
-      amountIn,
-      amountOut,
-      availableAmount: formatScaled(
-        parseScaled(amountIn, 2) - parseScaled(amountOut, 2),
-        2,
-      ),
-    };
-  });
-
-  const operationalMap = new Map<string, bigint>();
-  for (const balance of balances) {
-    const key = `${balance.store.id}|${balance.item.id}|${balance.unit.id}`;
-    operationalMap.set(
-      key,
-      (operationalMap.get(key) ?? 0n) + parseScaled(balance.availableQuantity, 4),
-    );
-  }
-
-  return {
-    balances,
-    operationalSummaries: [...operationalMap.entries()].map(([key, quantity]) => {
-      const [storeId, itemId, unitId] = key.split("|");
-      return {
-        storeId: storeId!,
-        itemId: itemId!,
-        unitId: unitId!,
-        availableQuantity: formatScaled(quantity, 4),
-      };
-    }),
-  };
 }

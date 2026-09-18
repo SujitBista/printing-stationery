@@ -7,7 +7,6 @@ import {
   openingStockIdSchema,
   openingStockListQuerySchema,
   postOpeningStockInputSchema,
-  stockBalanceListQuerySchema,
   updateOpeningStockMappingsInputSchema,
 } from "@printing-stationery/shared";
 import { AppError } from "../utils/errors.js";
@@ -16,7 +15,6 @@ import {
   createManualOpeningStockBatch,
   getOpeningStockBatch,
   listOpeningStockBatches,
-  listStockBalances,
   postOpeningStockBatch,
   previewLegacyOpeningStockImport,
   updateOpeningStockMappings,
@@ -206,21 +204,6 @@ export async function cancelOpeningStockBatchHandler(
     const batchId = parseOrThrow(openingStockIdSchema.safeParse(req.params.batchId));
     const input = parseOrThrow(cancelOpeningStockInputSchema.safeParse(req.body));
     const result = await cancelOpeningStockBatch(actor, batchId, input);
-    res.status(200).json(result);
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function listStockBalancesHandler(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  try {
-    const actor = requireActor(req);
-    const query = parseOrThrow(stockBalanceListQuerySchema.safeParse(req.query));
-    const result = await listStockBalances(actor, query);
     res.status(200).json(result);
   } catch (error) {
     next(error);

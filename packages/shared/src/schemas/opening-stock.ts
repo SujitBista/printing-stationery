@@ -172,6 +172,10 @@ export const openingStockBatchLineSchema = openingStockLegacyRowSchema.extend({
   mappingStatus: openingStockMappingStatusSchema,
   validationErrors: z.array(z.string()),
   isIncludedForPosting: z.boolean(),
+  remainingInTransitQuantity: quantityStringSchema,
+  confirmedReceivedQuantity: quantityStringSchema,
+  needsAdminReview: z.boolean(),
+  inTransitReviewReason: z.string().nullable(),
   store: openingStockStoreSummarySchema.nullable(),
   item: openingStockItemSummarySchema.nullable(),
   unit: openingStockUnitSummarySchema.nullable(),
@@ -271,4 +275,23 @@ export const openingStockPostResultSchema = z.object({
   batch: openingStockBatchSummarySchema,
   postedLedgerLineCount: z.number().int().nonnegative(),
   postedBalanceGroupCount: z.number().int().nonnegative(),
+});
+
+export const confirmLegacyOpeningInTransitInputSchema = z
+  .object({
+    quantity: nonNegativeQuantityStringSchema.refine((value) => /[1-9]/.test(value), {
+      message: "Quantity must be greater than zero",
+    }),
+  })
+  .strict();
+
+export const openingStockLineIdSchema = z.string().uuid("Invalid opening stock line id");
+
+export const confirmLegacyOpeningInTransitResultSchema = z.object({
+  openingStockLineId: z.string().uuid(),
+  openingStockBatchId: z.string().uuid(),
+  confirmedQuantity: quantityStringSchema,
+  remainingInTransitQuantity: quantityStringSchema,
+  availableQuantityAfter: quantityStringSchema,
+  inTransitQuantityAfter: quantityStringSchema,
 });

@@ -672,6 +672,9 @@ export {
   cancelOpeningStockInputSchema,
   openingStockValidationResultSchema,
   openingStockPostResultSchema,
+  confirmLegacyOpeningInTransitInputSchema,
+  openingStockLineIdSchema,
+  confirmLegacyOpeningInTransitResultSchema,
 } from "./schemas/opening-stock.js";
 export type {
   OpeningStockSourceType,
@@ -702,20 +705,66 @@ export type {
   CancelOpeningStockInput,
   OpeningStockValidationResult,
   OpeningStockPostResult,
+  ConfirmLegacyOpeningInTransitInput,
+  OpeningStockLineId,
+  ConfirmLegacyOpeningInTransitResult,
 } from "./types/opening-stock.js";
 
 export {
   stockBalanceListQuerySchema,
+  stockLedgerListQuerySchema,
   stockBalanceSchema,
   stockBalanceSummarySchema,
+  stockBalanceUnitSummarySchema,
+  stockBalanceStoreOptionSchema,
   stockBalanceResponseSchema,
+  stockLedgerEntrySchema,
+  stockLedgerResponseSchema,
+  stockLedgerCategorySchema,
+  stockLedgerCategoryFilterSchema,
+  stockLedgerMovementTypeSchema,
 } from "./schemas/stock-balance.js";
 export type {
   StockBalanceListQuery,
   StockBalance,
   StockBalanceSummary,
   StockBalanceResponse,
+  StockBalanceUnitSummary,
+  StockBalanceStoreOption,
+  StockLedgerListQuery,
+  StockLedgerEntry,
+  StockLedgerResponse,
+  StockLedgerCategory,
+  StockLedgerCategoryFilter,
+  StockLedgerMovementType,
 } from "./types/stock-balance.js";
+export {
+  STOCK_LEDGER_CATEGORIES,
+  STOCK_LEDGER_CATEGORY_FILTERS,
+  STOCK_LEDGER_MOVEMENT_TYPES,
+  STOCK_BALANCE_SORT_FIELDS,
+  LEGACY_OPENING_IN_TRANSIT_SOURCE_LABEL,
+  UNKNOWN_LEGACY_SOURCE_LABEL,
+  isLegacyOpeningInTransitMovement,
+  legacyOpeningInTransitSourceDisplay,
+  isSignedQuantityString,
+  formatQuantityString,
+  addQuantityStrings,
+  subtractQuantityStrings,
+  ledgerNetQuantity,
+  totalTrackedQuantity,
+  isZeroQuantity,
+  isNegativeQuantity,
+  compareQuantityStrings,
+  hasNonZeroTrackedQuantity,
+  withCategoryRunningBalances,
+  summarizeBalancesByUnit,
+} from "./stock-balance.js";
+export type {
+  StockBalanceSortField,
+  StockLedgerRunningBalanceInput,
+  StockBalanceUnitSummaryInput,
+} from "./stock-balance.js";
 
 export {
   partyStatusFilterSchema,

@@ -14,7 +14,8 @@
     "db:migrate": "drizzle-kit migrate",
     "auth:bootstrap-admin": "tsx --env-file=../.env --env-file=.env src/scripts/bootstrap-admin.ts",
     "auth:cleanup-sessions": "tsx --env-file=../.env --env-file=.env src/scripts/cleanup-sessions.ts",
-    "store-users:backfill-assignments": "tsx --env-file=../.env --env-file=.env src/scripts/backfill-store-assignments.ts"
+    "store-users:backfill-assignments": "tsx --env-file=../.env --env-file=.env src/scripts/backfill-store-assignments.ts",
+    "opening-stock:backfill-in-transit": "tsx --env-file=../.env --env-file=.env src/scripts/backfill-opening-stock-in-transit.ts"
   },
   "dependencies": {
     "@printing-stationery/shared": "*",

@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, ne, or, sql, type SQL } from "drizzle-orm";
 import type {
   AppRole,
   ApplicationUserAssignedStore,
+  AuthenticatedUser,
   StoreManagingRole,
 } from "@printing-stationery/shared";
 import {
@@ -9,6 +10,7 @@ import {
   NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE,
   resolveStoreAssignment,
   STORE_MANAGING_ROLES,
+  userHasRole,
 } from "@printing-stationery/shared";
 import { getDb, type DbExecutor } from "../db/client.js";
 import { applicationUsers, userRoles } from "../db/schema/auth.js";
@@ -570,4 +572,97 @@ export async function syncApplicationUserStoreAssignment(params: {
   });
 
   return { assignedStore, warning: null };
+}
+
+export type VisibleInventoryStore = {
+  id: string;
+  storeCode: string;
+  storeName: string;
+  isActive: boolean;
+  branchId: string;
+  branchCode: string;
+  branchName: string;
+};
+
+export type InventoryStoreAccess = {
+  unrestricted: boolean;
+  stores: VisibleInventoryStore[];
+};
+
+function toVisibleInventoryStore(row: {
+  store: {
+    id: string;
+    storeCode: string;
+    storeName: string;
+    isActive: boolean;
+    branchId: string;
+  };
+  branch: {
+    branchCode: string;
+    branchName: string;
+  };
+}): VisibleInventoryStore {
+  return {
+    id: row.store.id,
+    storeCode: row.store.storeCode,
+    storeName: row.store.storeName,
+    isActive: row.store.isActive,
+    branchId: row.store.branchId,
+    branchCode: row.branch.branchCode,
+    branchName: row.branch.branchName,
+  };
+}
+
+export async function listVisibleInventoryStores(
+  actor: AuthenticatedUser,
+  db?: DbExecutor,
+): Promise<InventoryStoreAccess> {
+  const executor = useDb(db);
+  if (userHasRole(actor.roles, "ADMIN")) {
+    const rows = await executor
+      .select({
+        store: stores,
+        branch: branches,
+      })
+      .from(stores)
+      .innerJoin(branches, eq(stores.branchId, branches.id))
+      .orderBy(asc(stores.storeName), asc(stores.storeCode), asc(stores.id));
+    return {
+      unrestricted: true,
+      stores: rows.map(toVisibleInventoryStore),
+    };
+  }
+
+  const rows = await executor
+    .select({
+      store: stores,
+      branch: branches,
+    })
+    .from(storeUsers)
+    .innerJoin(stores, eq(storeUsers.storeId, stores.id))
+    .innerJoin(branches, eq(stores.branchId, branches.id))
+    .where(
+      and(
+        eq(storeUsers.isActive, true),
+        eq(stores.isActive, true),
+        eq(branches.isActive, true),
+        or(
+          eq(storeUsers.makerApplicationUserId, actor.id),
+          eq(storeUsers.supervisorApplicationUserId, actor.id),
+        ),
+      ),
+    )
+    .orderBy(asc(stores.storeName), asc(stores.storeCode), asc(stores.id));
+
+  const unique = new Map<string, VisibleInventoryStore>();
+  for (const row of rows) {
+    if (!unique.has(row.store.id)) {
+      unique.set(row.store.id, toVisibleInventoryStore(row));
+    }
+  }
+
+  return {
+    unrestricted: false,
+    stores: [...unique.values()],
+  };
 }

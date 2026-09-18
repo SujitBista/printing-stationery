@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   canAccessOrganizationSetup,
   canAccessPurchases,
+  canAccessStockBalance,
   canMutateMasterData,
   canMutatePurchases,
   canReadMasterData,
@@ -45,5 +46,15 @@ describe("purchase access", () => {
     assert.equal(canAccessPurchases(userWithRoles(["HR"])), false);
     assert.equal(canMutatePurchases(userWithRoles(["CHECKER"])), false);
     assert.equal(canMutatePurchases(userWithRoles(["MAKER"])), true);
+  });
+});
+
+describe("stock balance access", () => {
+  it("lets inventory operators view stock balances and excludes HR", () => {
+    assert.equal(canAccessStockBalance(userWithRoles(["ADMIN"])), true);
+    assert.equal(canAccessStockBalance(userWithRoles(["MAKER"])), true);
+    assert.equal(canAccessStockBalance(userWithRoles(["CHECKER"])), true);
+    assert.equal(canAccessStockBalance(userWithRoles(["HR"])), false);
+    assert.equal(canAccessStockBalance(null), false);
   });
 });

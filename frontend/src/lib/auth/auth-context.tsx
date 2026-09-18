@@ -15,6 +15,7 @@ import {
   canAccessOpeningStock,
   canAccessOrganizationSetup,
   canAccessPurchases,
+  canAccessStockBalance,
   canManageApplicationUsers,
   canManageStoreUsers,
   canMutateMasterData,
@@ -36,6 +37,7 @@ type AuthContextValue = {
   canAccessItemRequests: boolean;
   canAccessOpeningStock: boolean;
   canAccessPurchases: boolean;
+  canAccessStockBalance: boolean;
   canMutatePurchases: boolean;
 };
 
@@ -76,6 +78,7 @@ export function AuthProvider({ initialUser, children }: AuthProviderProps) {
       canAccessItemRequests: canAccessItemRequests(user),
       canAccessOpeningStock: canAccessOpeningStock(user),
       canAccessPurchases: canAccessPurchases(user),
+      canAccessStockBalance: canAccessStockBalance(user),
       canMutatePurchases: canMutatePurchases(user),
     }),
     [user, refresh, logout],

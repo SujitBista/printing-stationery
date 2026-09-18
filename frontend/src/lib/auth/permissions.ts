@@ -60,6 +60,15 @@ export function canAccessOpeningStock(
   return isAdmin(user);
 }
 
+export function canAccessStockBalance(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  if (!user) {
+    return false;
+  }
+  return userHasAnyRole(user.roles, ["ADMIN", "MAKER", "CHECKER"]);
+}
+
 export function canAccessPurchases(
   user: AuthenticatedUser | null | undefined,
 ): boolean {
