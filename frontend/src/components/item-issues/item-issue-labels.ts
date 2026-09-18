@@ -23,6 +23,7 @@ export const ITEM_ISSUE_DELIVERY_STATUS_LABELS: Record<
   PARTIALLY_RECEIVED: "Partially Received",
   RECEIVED: "Received",
   RECEIVED_WITH_DISCREPANCY: "Received with Discrepancy",
+  NEEDS_REVIEW: "Needs Review",
 };
 
 export function itemIssueStatusDisplayLabel(params: {
@@ -38,6 +39,9 @@ export function itemIssueStatusTone(
   deliveryStatus?: ItemIssueDeliveryStatus | null,
 ): "success" | "warning" | "danger" | "neutral" | "info" {
   if (status === "POSTED" && deliveryStatus === "RECEIVED_WITH_DISCREPANCY") {
+    return "warning";
+  }
+  if (status === "POSTED" && deliveryStatus === "NEEDS_REVIEW") {
     return "warning";
   }
   switch (status) {

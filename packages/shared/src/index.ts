@@ -508,6 +508,7 @@ export {
   ITEM_ISSUE_STATUSES,
   ITEM_ISSUE_DESTINATION_TYPES,
   ITEM_ISSUE_DELIVERY_STATUSES,
+  ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES,
   ITEM_ISSUE_RECEIPT_STATUSES,
   ITEM_ISSUE_DISCREPANCY_REASONS,
   ITEM_ISSUE_DISCREPANCY_RESOLUTIONS,
@@ -787,6 +788,7 @@ export {
 export {
   remainingRequestedQuantity,
   remainingInTransitQuantity,
+  shipmentLineQuantityBalance,
   itemIssueLineQuantities,
 } from "./item-issue-quantities.js";
 export type { ItemIssueLineQuantities } from "./item-issue-quantities.js";

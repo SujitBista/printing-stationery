@@ -211,6 +211,20 @@
       "when": 1788820000000,
       "tag": "0029_item_issue_dispatch_receipt",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788825000000,
+      "tag": "0030_item_issue_delivery_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788830000000,
+      "tag": "0031_item_issue_delivery_classify",
+      "breakpoints": true
     }
   ]
 }

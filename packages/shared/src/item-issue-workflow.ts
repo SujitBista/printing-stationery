@@ -223,6 +223,9 @@ export function itemIssueBusinessStatusLabel(params: {
   if (params.deliveryStatus === "RECEIVED_WITH_DISCREPANCY") {
     return "Received with Discrepancy";
   }
+  if (params.deliveryStatus === "NEEDS_REVIEW") {
+    return "Needs Review";
+  }
   return "Dispatched";
 }
 

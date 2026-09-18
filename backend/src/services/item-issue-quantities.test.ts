@@ -4,6 +4,7 @@ import {
   itemIssueLineQuantities,
   remainingRequestedQuantity,
   remainingInTransitQuantity,
+  shipmentLineQuantityBalance,
 } from "@printing-stationery/shared";
 
 describe("remainingRequestedQuantity", () => {
@@ -104,5 +105,41 @@ describe("remainingInTransitQuantity", () => {
 
   it("does not count unverified receipts as received", () => {
     assert.equal(remainingInTransitQuantity("5", "0"), "5");
+  });
+
+  it("subtracts finalized missing discrepancy from remaining in transit", () => {
+    assert.equal(remainingInTransitQuantity("5", "4", "1"), "0");
+  });
+
+  it("keeps remaining in transit when one unit is still expected", () => {
+    assert.equal(remainingInTransitQuantity("5", "4", "0"), "1");
+  });
+
+  it("does not reduce remaining for a pending or unverified discrepancy", () => {
+    assert.equal(remainingInTransitQuantity("5", "0", "0"), "5");
+    assert.equal(remainingInTransitQuantity("5", "4"), "1");
+  });
+
+  it("balances dispatched across confirmed usable, remaining, and finalized discrepancy", () => {
+    const remaining = remainingInTransitQuantity("5", "4", "1");
+    assert.equal(
+      shipmentLineQuantityBalance({
+        dispatchedQuantity: "5",
+        confirmedUsableReceivedQuantity: "4",
+        remainingInTransitQuantity: remaining,
+        finalizedDiscrepancyQuantity: "1",
+      }),
+      "5",
+    );
+    const stillExpected = remainingInTransitQuantity("5", "4", "0");
+    assert.equal(
+      shipmentLineQuantityBalance({
+        dispatchedQuantity: "5",
+        confirmedUsableReceivedQuantity: "4",
+        remainingInTransitQuantity: stillExpected,
+        finalizedDiscrepancyQuantity: "0",
+      }),
+      "5",
+    );
   });
 });

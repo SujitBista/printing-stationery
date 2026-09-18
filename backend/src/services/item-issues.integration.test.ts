@@ -5,7 +5,12 @@ import { and, eq, inArray, like, or } from "drizzle-orm";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import type { AuthenticatedUser } from "@printing-stationery/shared";
-import { ITEM_ISSUE_ACTIVE_CONFLICT_CODE, preferCorporateControlStore } from "@printing-stationery/shared";
+import {
+  ITEM_ISSUE_ACTIVE_CONFLICT_CODE,
+  preferCorporateControlStore,
+  remainingInTransitQuantity,
+  shipmentLineQuantityBalance,
+} from "@printing-stationery/shared";
 import { createApp } from "../app.js";
 import { loadEnv, type Env } from "../config/env.js";
 import { closePool, createDb, getDb } from "../db/client.js";
@@ -33,6 +38,7 @@ import {
   itemIssueShipments,
 } from "../db/schema/item-issue-delivery.js";
 import { stockLedgerSourceKey } from "./stock-ledger.js";
+import { classifyHistoricalItemIssueDeliveries } from "./item-issue-delivery-backfill.js";
 import { itemRequestLines, itemRequests } from "../db/schema/item-requests.js";
 import { notifications } from "../db/schema/notifications.js";
 import { items } from "../db/schema/items.js";
@@ -471,6 +477,160 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       requestLineId = lineId;
     }
     return id;
+  }
+
+  async function countLedgerRows(issueId: string, shipmentId: string): Promise<number> {
+    const rows = await getDb()
+      .select({ id: stockLedger.id })
+      .from(stockLedger)
+      .where(
+        or(
+          eq(stockLedger.referenceId, issueId),
+          eq(stockLedger.referenceId, shipmentId),
+        ),
+      );
+    return rows.length;
+  }
+
+  async function insertBlindHistoricalIssue(params: {
+    requestId: string;
+    destinationAvailable: boolean;
+  }): Promise<{
+    issueId: string;
+    shipmentId: string;
+    shipmentLineId: string;
+  }> {
+    const postedAt = new Date();
+    const issueRows = await getDb()
+      .insert(itemIssues)
+      .values({
+        issueNumber: `II-TBF-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        requestId: params.requestId,
+        fromStoreId: corporate.storeId,
+        toStoreId: requesting.storeId,
+        destinationType: "BRANCH_STORE",
+        deliveryStatus: "IN_TRANSIT",
+        status: "POSTED",
+        createdByApplicationUserId: corporateMaker.id,
+        submittedByApplicationUserId: corporateMaker.id,
+        verifiedByApplicationUserId: corporateChecker.id,
+        submittedAt: postedAt,
+        verifiedAt: postedAt,
+      })
+      .returning({ id: itemIssues.id });
+    const issueId = issueRows[0]?.id;
+    if (!issueId) {
+      throw new Error("Failed to insert historical item issue");
+    }
+    const lineRows = await getDb()
+      .insert(itemIssueLines)
+      .values({
+        itemIssueId: issueId,
+        requestLineId,
+        itemId,
+        issueQuantity: "5",
+      })
+      .returning({ id: itemIssueLines.id });
+    const issueLineId = lineRows[0]?.id;
+    if (!issueLineId) {
+      throw new Error("Failed to insert historical item issue line");
+    }
+    await getDb().insert(itemIssueActions).values({
+      itemIssueId: issueId,
+      action: "VERIFY_POST",
+      fromStatus: "PENDING_VERIFICATION",
+      toStatus: "POSTED",
+      actorApplicationUserId: corporateChecker.id,
+      actorWorkflowRole: "CORPORATE_CHECKER",
+    });
+    await getDb().insert(stockLedger).values({
+      storeId: corporate.storeId,
+      itemId,
+      unitId: itemUnitId,
+      rate: "1",
+      movementType: "ITEM_ISSUE",
+      stockCategory: "AVAILABLE",
+      quantityIn: "0",
+      quantityOut: "5",
+      amountIn: "0",
+      amountOut: "5",
+      transactionDate: postedAt,
+      referenceType: "ITEM_ISSUE",
+      referenceId: issueId,
+      referenceLineId: issueLineId,
+      sourceKey: stockLedgerSourceKey({
+        referenceType: "ITEM_ISSUE",
+        referenceLineId: issueLineId,
+        storeId: corporate.storeId,
+        movementType: "ITEM_ISSUE",
+        stockCategory: "AVAILABLE",
+        rate: "1",
+      }),
+      postedByApplicationUserId: corporateChecker.id,
+      postedAt,
+    });
+    if (params.destinationAvailable) {
+      await getDb().insert(stockLedger).values({
+        storeId: requesting.storeId,
+        itemId,
+        unitId: itemUnitId,
+        rate: "1",
+        movementType: "ITEM_ISSUE",
+        stockCategory: "AVAILABLE",
+        quantityIn: "5",
+        quantityOut: "0",
+        amountIn: "5",
+        amountOut: "0",
+        transactionDate: postedAt,
+        referenceType: "ITEM_ISSUE",
+        referenceId: issueId,
+        referenceLineId: issueLineId,
+        sourceKey: stockLedgerSourceKey({
+          referenceType: "ITEM_ISSUE",
+          referenceLineId: issueLineId,
+          storeId: requesting.storeId,
+          movementType: "ITEM_ISSUE",
+          stockCategory: "AVAILABLE",
+          rate: "1",
+        }),
+        postedByApplicationUserId: corporateChecker.id,
+        postedAt,
+      });
+    }
+    const shipmentRows = await getDb()
+      .insert(itemIssueShipments)
+      .values({
+        itemIssueId: issueId,
+        requestId: params.requestId,
+        fromStoreId: corporate.storeId,
+        toStoreId: requesting.storeId,
+        deliveryStatus: "IN_TRANSIT",
+        dispatchedAt: postedAt,
+        dispatchedByApplicationUserId: corporateChecker.id,
+      })
+      .returning({ id: itemIssueShipments.id });
+    const shipmentId = shipmentRows[0]?.id;
+    if (!shipmentId) {
+      throw new Error("Failed to insert historical shipment");
+    }
+    const shipmentLineRows = await getDb()
+      .insert(itemIssueShipmentLines)
+      .values({
+        shipmentId,
+        itemIssueLineId: issueLineId,
+        itemId,
+        unitId: itemUnitId,
+        dispatchedQuantity: "5",
+        confirmedReceivedQuantity: "0",
+        remainingInTransitQuantity: "5",
+        discrepancyQuantity: "0",
+      })
+      .returning({ id: itemIssueShipmentLines.id });
+    const shipmentLineId = shipmentLineRows[0]?.id;
+    if (!shipmentLineId) {
+      throw new Error("Failed to insert historical shipment line");
+    }
+    return { issueId, shipmentId, shipmentLineId };
   }
 
   async function createSession(userId: string): Promise<string> {
@@ -2201,5 +2361,503 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.ok(winner);
     assert.equal(winner.deliveryStatus, "PARTIALLY_RECEIVED");
     assert.equal(Number(winner.lines[0]?.remainingInTransitQuantity), 2);
+  });
+
+  it("finalizes 4 usable + 1 missing of 5 dispatched to remaining in transit 0", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const lineId = requestLineId;
+    const beforeBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const draft = await createItemIssueFromRequest(requestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId: lineId, issueQuantity: "5" }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    const dispatched = await verifyAndPostItemIssue(submitted.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+
+    const submittedReceipt = await submitItemIssueReceipt(
+      dispatched.shipment.id,
+      requestingMaker,
+      {
+        receiptDate: new Date().toISOString(),
+        remarks: "4 usable, 1 missing",
+        discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+        lines: [
+          {
+            shipmentLineId,
+            receivedQuantityNow: "4",
+            missingQuantity: "1",
+            damagedQuantity: "0",
+            discrepancyReason: "MISSING",
+            remarks: null,
+          },
+        ],
+      },
+    );
+    const pending = submittedReceipt.receipts.find(
+      (receipt) => receipt.status === "PENDING_VERIFICATION",
+    );
+    assert.ok(pending);
+    const confirmed = await confirmItemIssueReceipt(pending.id, requestingChecker, {
+      expectedVersion: pending.version,
+      remarks: null,
+      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+    });
+    const line = confirmed.lines[0];
+    assert.ok(line);
+    assert.equal(Number(line.confirmedReceivedQuantity), 4);
+    assert.equal(Number(line.discrepancyQuantity), 1);
+    assert.equal(Number(line.remainingInTransitQuantity), 0);
+    assert.equal(
+      remainingInTransitQuantity(
+        line.dispatchedQuantity,
+        line.confirmedReceivedQuantity,
+        line.discrepancyQuantity,
+      ),
+      "0",
+    );
+    assert.equal(
+      Number(
+        shipmentLineQuantityBalance({
+          dispatchedQuantity: line.dispatchedQuantity,
+          confirmedUsableReceivedQuantity: line.confirmedReceivedQuantity,
+          remainingInTransitQuantity: line.remainingInTransitQuantity,
+          finalizedDiscrepancyQuantity: line.discrepancyQuantity,
+        }),
+      ),
+      Number(line.dispatchedQuantity),
+    );
+
+    const afterBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.equal(
+      Number(afterBranch[0]?.availableQuantity ?? "0"),
+      Number(beforeBranch[0]?.availableQuantity ?? "0") + 4,
+    );
+    const discrepancyLedger = await getDb()
+      .select({
+        stockCategory: stockLedger.stockCategory,
+        quantityIn: stockLedger.quantityIn,
+      })
+      .from(stockLedger)
+      .where(
+        and(
+          eq(stockLedger.referenceId, pending.id),
+          inArray(stockLedger.stockCategory, ["DISCREPANCY", "DAMAGED"]),
+        ),
+      );
+    assert.equal(discrepancyLedger.length, 1);
+    assert.equal(discrepancyLedger[0]?.stockCategory, "DISCREPANCY");
+    assert.equal(Number(discrepancyLedger[0]?.quantityIn), 1);
+  });
+
+  it("keeps 1 in transit when 5 were dispatched and 4 were received as still expected", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const lineId = requestLineId;
+    const draft = await createItemIssueFromRequest(requestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId: lineId, issueQuantity: "5" }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    const dispatched = await verifyAndPostItemIssue(submitted.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    const submittedReceipt = await submitItemIssueReceipt(
+      dispatched.shipment.id,
+      requestingMaker,
+      {
+        receiptDate: new Date().toISOString(),
+        remarks: null,
+        discrepancyResolution: "KEEP_IN_TRANSIT",
+        lines: [
+          {
+            shipmentLineId,
+            receivedQuantityNow: "4",
+            missingQuantity: "1",
+            remarks: null,
+          },
+        ],
+      },
+    );
+    const pending = submittedReceipt.receipts.find(
+      (receipt) => receipt.status === "PENDING_VERIFICATION",
+    );
+    assert.ok(pending);
+    const confirmed = await confirmItemIssueReceipt(pending.id, requestingChecker, {
+      expectedVersion: pending.version,
+      remarks: null,
+      discrepancyResolution: "KEEP_IN_TRANSIT",
+    });
+    const line = confirmed.lines[0];
+    assert.ok(line);
+    assert.equal(confirmed.deliveryStatus, "PARTIALLY_RECEIVED");
+    assert.equal(Number(line.confirmedReceivedQuantity), 4);
+    assert.equal(Number(line.discrepancyQuantity), 0);
+    assert.equal(Number(line.remainingInTransitQuantity), 1);
+    assert.equal(
+      remainingInTransitQuantity(
+        line.dispatchedQuantity,
+        line.confirmedReceivedQuantity,
+        line.discrepancyQuantity,
+      ),
+      "1",
+    );
+  });
+
+  it("does not reduce in-transit stock for a pending unverified discrepancy", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const lineId = requestLineId;
+    const beforeBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const draft = await createItemIssueFromRequest(requestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId: lineId, issueQuantity: "5" }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    const dispatched = await verifyAndPostItemIssue(submitted.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    const submittedReceipt = await submitItemIssueReceipt(
+      dispatched.shipment.id,
+      requestingMaker,
+      {
+        receiptDate: new Date().toISOString(),
+        remarks: "Reported missing, not yet verified",
+        discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+        lines: [
+          {
+            shipmentLineId,
+            receivedQuantityNow: "4",
+            missingQuantity: "1",
+            discrepancyReason: "MISSING",
+            remarks: null,
+          },
+        ],
+      },
+    );
+    const line = submittedReceipt.lines[0];
+    assert.ok(line);
+    assert.equal(Number(line.remainingInTransitQuantity), 5);
+    assert.equal(Number(line.confirmedReceivedQuantity), 0);
+    assert.equal(Number(line.discrepancyQuantity), 0);
+    const afterBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterBranch, beforeBranch);
+    const discrepancyLedger = await getDb()
+      .select({ id: stockLedger.id })
+      .from(stockLedger)
+      .where(
+        and(
+          eq(stockLedger.referenceId, submittedReceipt.receipts[0]?.id ?? ""),
+          inArray(stockLedger.stockCategory, ["DISCREPANCY", "DAMAGED"]),
+        ),
+      );
+    assert.equal(discrepancyLedger.length, 0);
+  });
+
+  it("does not move stock twice when a discrepancy confirmation is repeated", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const lineId = requestLineId;
+    const beforeBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const draft = await createItemIssueFromRequest(requestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId: lineId, issueQuantity: "5" }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    const dispatched = await verifyAndPostItemIssue(submitted.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    const submittedReceipt = await submitItemIssueReceipt(
+      dispatched.shipment.id,
+      requestingMaker,
+      {
+        receiptDate: new Date().toISOString(),
+        remarks: null,
+        discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+        lines: [
+          {
+            shipmentLineId,
+            receivedQuantityNow: "4",
+            missingQuantity: "1",
+            discrepancyReason: "MISSING",
+            remarks: null,
+          },
+        ],
+      },
+    );
+    const pending = submittedReceipt.receipts.find(
+      (receipt) => receipt.status === "PENDING_VERIFICATION",
+    );
+    assert.ok(pending);
+    const confirmed = await confirmItemIssueReceipt(pending.id, requestingChecker, {
+      expectedVersion: pending.version,
+      remarks: null,
+      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+    });
+    await assert.rejects(
+      () =>
+        confirmItemIssueReceipt(pending.id, requestingChecker, {
+          expectedVersion: pending.version,
+          remarks: null,
+          discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+        }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.statusCode === 409 &&
+        /already been confirmed/i.test(error.message),
+    );
+    assert.equal(Number(confirmed.lines[0]?.remainingInTransitQuantity), 0);
+    assert.equal(Number(confirmed.lines[0]?.discrepancyQuantity), 1);
+    const afterBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.equal(
+      Number(afterBranch[0]?.availableQuantity ?? "0"),
+      Number(beforeBranch[0]?.availableQuantity ?? "0") + 4,
+    );
+    const discrepancyLedger = await getDb()
+      .select({ id: stockLedger.id })
+      .from(stockLedger)
+      .where(
+        and(
+          eq(stockLedger.referenceId, pending.id),
+          eq(stockLedger.stockCategory, "DISCREPANCY"),
+        ),
+      );
+    assert.equal(discrepancyLedger.length, 1);
+  });
+
+  it("classifies a historical destination AVAILABLE posting as received without new stock movements", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const historical = await insertBlindHistoricalIssue({
+      requestId,
+      destinationAvailable: true,
+    });
+    const beforeCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const beforeBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const ledgerBefore = await countLedgerRows(historical.issueId, historical.shipmentId);
+
+    await classifyHistoricalItemIssueDeliveries();
+
+    const issue = await getDb()
+      .select({
+        deliveryStatus: itemIssues.deliveryStatus,
+        needsAdminReview: itemIssues.needsAdminReview,
+      })
+      .from(itemIssues)
+      .where(eq(itemIssues.id, historical.issueId))
+      .limit(1);
+    assert.equal(issue[0]?.deliveryStatus, "RECEIVED");
+    assert.equal(issue[0]?.needsAdminReview, false);
+    const shipment = await getDb()
+      .select({
+        deliveryStatus: itemIssueShipments.deliveryStatus,
+      })
+      .from(itemIssueShipments)
+      .where(eq(itemIssueShipments.id, historical.shipmentId))
+      .limit(1);
+    assert.equal(shipment[0]?.deliveryStatus, "RECEIVED");
+    const line = await getDb()
+      .select()
+      .from(itemIssueShipmentLines)
+      .where(eq(itemIssueShipmentLines.shipmentId, historical.shipmentId))
+      .limit(1);
+    assert.equal(Number(line[0]?.confirmedReceivedQuantity), 5);
+    assert.equal(Number(line[0]?.remainingInTransitQuantity), 0);
+    assert.equal(await countLedgerRows(historical.issueId, historical.shipmentId), ledgerBefore);
+
+    const incoming = await listIncomingShipments(requestingMaker, {
+      page: 1,
+      pageSize: 50,
+      queue: "in-transit",
+    });
+    assert.equal(
+      incoming.items.some((item) => item.id === historical.shipmentId),
+      false,
+    );
+    const afterCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const afterBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterCorporate, beforeCorporate);
+    assert.deepEqual(afterBranch, beforeBranch);
+  });
+
+  it("keeps evidenced in-transit history receivable without replaying stock", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const draft = await createItemIssueFromRequest(requestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId: requestLineId, issueQuantity: "3" }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    const dispatched = await verifyAndPostItemIssue(submitted.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+    assert.ok(dispatched.shipment);
+    const beforeCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const beforeBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const ledgerBefore = await countLedgerRows(dispatched.id, dispatched.shipment.id);
+
+    await classifyHistoricalItemIssueDeliveries();
+
+    const issue = await getDb()
+      .select({ deliveryStatus: itemIssues.deliveryStatus })
+      .from(itemIssues)
+      .where(eq(itemIssues.id, dispatched.id))
+      .limit(1);
+    assert.equal(issue[0]?.deliveryStatus, "IN_TRANSIT");
+    assert.equal(await countLedgerRows(dispatched.id, dispatched.shipment.id), ledgerBefore);
+    const incoming = await listIncomingShipments(requestingMaker, {
+      page: 1,
+      pageSize: 50,
+      queue: "in-transit",
+    });
+    assert.equal(
+      incoming.items.some((item) => item.id === dispatched.shipment?.id),
+      true,
+    );
+    const afterCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const afterBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterCorporate, beforeCorporate);
+    assert.deepEqual(afterBranch, beforeBranch);
+  });
+
+  it("marks unknown historical posted issues as needs review and not receivable", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const historical = await insertBlindHistoricalIssue({
+      requestId,
+      destinationAvailable: false,
+    });
+    const beforeCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const beforeBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const ledgerBefore = await countLedgerRows(historical.issueId, historical.shipmentId);
+
+    await classifyHistoricalItemIssueDeliveries();
+    await classifyHistoricalItemIssueDeliveries();
+
+    const issue = await getDb()
+      .select({
+        deliveryStatus: itemIssues.deliveryStatus,
+        needsAdminReview: itemIssues.needsAdminReview,
+      })
+      .from(itemIssues)
+      .where(eq(itemIssues.id, historical.issueId))
+      .limit(1);
+    assert.equal(issue[0]?.deliveryStatus, "NEEDS_REVIEW");
+    assert.equal(issue[0]?.needsAdminReview, true);
+    const shipment = await getDb()
+      .select({ deliveryStatus: itemIssueShipments.deliveryStatus })
+      .from(itemIssueShipments)
+      .where(eq(itemIssueShipments.id, historical.shipmentId))
+      .limit(1);
+    assert.equal(shipment[0]?.deliveryStatus, "NEEDS_REVIEW");
+    assert.equal(await countLedgerRows(historical.issueId, historical.shipmentId), ledgerBefore);
+
+    const incoming = await listIncomingShipments(requestingMaker, {
+      page: 1,
+      pageSize: 50,
+      queue: "in-transit",
+    });
+    assert.equal(
+      incoming.items.some((item) => item.id === historical.shipmentId),
+      false,
+    );
+    await assert.rejects(
+      () =>
+        submitItemIssueReceipt(historical.shipmentId, requestingMaker, {
+          receiptDate: new Date().toISOString(),
+          remarks: null,
+          lines: [
+            {
+              shipmentLineId: historical.shipmentLineId,
+              receivedQuantityNow: "5",
+              remarks: null,
+            },
+          ],
+        }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.statusCode === 409 &&
+        /not awaiting receipt/i.test(error.message),
+    );
+    const afterCorporate = await getOperationalAvailableQuantities({
+      storeId: corporate.storeId,
+      itemIds: [itemId],
+    });
+    const afterBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterCorporate, beforeCorporate);
+    assert.deepEqual(afterBranch, beforeBranch);
   });
 });

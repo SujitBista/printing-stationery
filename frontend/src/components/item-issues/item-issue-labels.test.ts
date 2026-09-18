@@ -93,5 +93,13 @@ describe("item issue business status labels", () => {
       }),
       "Issued",
     );
+    assert.equal(
+      itemIssueStatusDisplayLabel({
+        status: "POSTED",
+        destinationType: "BRANCH_STORE",
+        deliveryStatus: "NEEDS_REVIEW",
+      }),
+      "Needs Review",
+    );
   });
 });

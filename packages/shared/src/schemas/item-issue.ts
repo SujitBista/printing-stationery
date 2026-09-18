@@ -37,6 +37,12 @@ export const ITEM_ISSUE_DELIVERY_STATUSES = [
   "PARTIALLY_RECEIVED",
   "RECEIVED",
   "RECEIVED_WITH_DISCREPANCY",
+  "NEEDS_REVIEW",
+] as const;
+
+export const ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES = [
+  "IN_TRANSIT",
+  "PARTIALLY_RECEIVED",
 ] as const;
 
 export const itemIssueDeliveryStatusSchema = z.enum(

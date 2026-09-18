@@ -53,6 +53,7 @@ export const itemIssueDeliveryStatusEnum = pgEnum("item_issue_delivery_status", 
   "PARTIALLY_RECEIVED",
   "RECEIVED",
   "RECEIVED_WITH_DISCREPANCY",
+  "NEEDS_REVIEW",
 ]);
 
 export const itemIssues = pgTable(

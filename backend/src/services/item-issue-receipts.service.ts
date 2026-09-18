@@ -12,7 +12,11 @@ import type {
   ReturnItemIssueReceiptInput,
   SubmitItemIssueReceiptInput,
 } from "@printing-stationery/shared";
-import { userHasRole } from "@printing-stationery/shared";
+import {
+  ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES,
+  remainingInTransitQuantity,
+  userHasRole,
+} from "@printing-stationery/shared";
 import { AppError } from "../utils/errors.js";
 import { mapItemIssueDatabaseError } from "../utils/db-errors.js";
 import {
@@ -269,7 +273,9 @@ async function mapShipment(
 
   const receipts = await listReceiptsForShipment(row.shipment.id, actor, access, row.shipment.toStoreId);
   const canRecordReceipt =
-    ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(row.shipment.deliveryStatus) &&
+    (ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES as readonly string[]).includes(
+      row.shipment.deliveryStatus,
+    ) &&
     (isAdminUser(actor)
       ? false
       : access.makerStoreIds.includes(row.shipment.toStoreId));
@@ -413,7 +419,7 @@ async function listReceiptsForShipment(
 
 function incomingQueueCondition(queue: IncomingShipmentListQuery["queue"]): SQL | undefined {
   if (!queue) {
-    return undefined;
+    return sql`${itemIssueShipments.deliveryStatus} <> 'NEEDS_REVIEW'`;
   }
   if (queue === "in-transit") {
     return eq(itemIssueShipments.deliveryStatus, "IN_TRANSIT");
@@ -443,7 +449,9 @@ export async function listIncomingShipments(
     return { items: [], page: query.page, pageSize: query.pageSize, totalItems: 0, totalPages: 0 };
   }
 
-  const conditions: SQL[] = [];
+  const conditions: SQL[] = [
+    sql`${itemIssueShipments.deliveryStatus} <> 'NEEDS_REVIEW'`,
+  ];
   if (!isAdminUser(actor)) {
     conditions.push(inArray(itemIssueShipments.toStoreId, access.visibleStoreIds));
   }
@@ -548,7 +556,9 @@ export async function listIncomingShipments(
           remainingInTransitQuantity: String(line.remainingInTransitQuantity),
         })),
       canRecordReceipt:
-        ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(row.shipment.deliveryStatus) &&
+        (ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES as readonly string[]).includes(
+          row.shipment.deliveryStatus,
+        ) &&
         access.makerStoreIds.includes(row.shipment.toStoreId) &&
         !pending.has(row.shipment.id),
       canConfirmReceipt:
@@ -860,13 +870,30 @@ export async function confirmItemIssueReceipt(
         const nextConfirmed =
           parseQuantityToScaled(String(shipmentLine.confirmedReceivedQuantity)) +
           received;
-        let nextRemaining = remaining - received - damaged;
-        let nextDiscrepancy =
-          parseQuantityToScaled(String(shipmentLine.discrepancyQuantity)) + damaged;
-        if (resolution === "COMPLETE_WITH_DISCREPANCY") {
-          nextDiscrepancy += nextRemaining;
-          nextRemaining = 0n;
-        }
+        const prevDiscrepancy = parseQuantityToScaled(
+          String(shipmentLine.discrepancyQuantity),
+        );
+        const completeWithDiscrepancy =
+          resolution === "COMPLETE_WITH_DISCREPANCY";
+        const newlyFinalizedDiscrepancy = completeWithDiscrepancy
+          ? remaining - received
+          : 0n;
+        const nextDiscrepancy = prevDiscrepancy + newlyFinalizedDiscrepancy;
+        const nextRemaining = parseQuantityToScaled(
+          remainingInTransitQuantity(
+            String(shipmentLine.dispatchedQuantity),
+            scaledToQuantity(nextConfirmed),
+            scaledToQuantity(nextDiscrepancy),
+          ),
+        );
+        const inTransitOut = completeWithDiscrepancy
+          ? remaining
+          : received;
+        const damagedFinalized = completeWithDiscrepancy ? damaged : 0n;
+        const discrepancyFinalized =
+          completeWithDiscrepancy && remaining - received - damaged > 0n
+            ? remaining - received - damaged
+            : 0n;
         await tx
           .update(itemIssueShipmentLines)
           .set({
@@ -939,38 +966,36 @@ export async function confirmItemIssueReceipt(
           });
         }
 
-        const inTransitOut =
-          resolution === "COMPLETE_WITH_DISCREPANCY"
-            ? remaining
-            : received + damaged;
-        await tx.insert(stockLedger).values({
-          storeId: shipment.toStoreId,
-          itemId: shipmentLine.itemId,
-          unitId: shipmentLine.unitId,
-          rate: "0",
-          movementType: "ITEM_ISSUE_IN_TRANSIT",
-          stockCategory: "IN_TRANSIT",
-          quantityIn: "0",
-          quantityOut: scaledToQuantity(inTransitOut),
-          amountIn: "0",
-          amountOut: "0",
-          transactionDate: confirmedAt,
-          referenceType: "ITEM_ISSUE_IN_TRANSIT",
-          referenceId: receipt.id,
-          referenceLineId: line.id,
-          sourceKey: stockLedgerSourceKey({
-            referenceType: "ITEM_ISSUE_IN_TRANSIT",
-            referenceLineId: line.id,
+        if (inTransitOut > 0n) {
+          await tx.insert(stockLedger).values({
             storeId: shipment.toStoreId,
+            itemId: shipmentLine.itemId,
+            unitId: shipmentLine.unitId,
+            rate: "0",
             movementType: "ITEM_ISSUE_IN_TRANSIT",
             stockCategory: "IN_TRANSIT",
-            rate: "0",
-          }),
-          postedByApplicationUserId: actor.id,
-          postedAt: confirmedAt,
-        });
+            quantityIn: "0",
+            quantityOut: scaledToQuantity(inTransitOut),
+            amountIn: "0",
+            amountOut: "0",
+            transactionDate: confirmedAt,
+            referenceType: "ITEM_ISSUE_IN_TRANSIT",
+            referenceId: receipt.id,
+            referenceLineId: line.id,
+            sourceKey: stockLedgerSourceKey({
+              referenceType: "ITEM_ISSUE_IN_TRANSIT",
+              referenceLineId: line.id,
+              storeId: shipment.toStoreId,
+              movementType: "ITEM_ISSUE_IN_TRANSIT",
+              stockCategory: "IN_TRANSIT",
+              rate: "0",
+            }),
+            postedByApplicationUserId: actor.id,
+            postedAt: confirmedAt,
+          });
+        }
 
-        if (damaged > 0n) {
+        if (damagedFinalized > 0n) {
           await tx.insert(stockLedger).values({
             storeId: shipment.toStoreId,
             itemId: shipmentLine.itemId,
@@ -978,7 +1003,7 @@ export async function confirmItemIssueReceipt(
             rate: "0",
             movementType: "ITEM_ISSUE_DISCREPANCY",
             stockCategory: "DAMAGED",
-            quantityIn: scaledToQuantity(damaged),
+            quantityIn: scaledToQuantity(damagedFinalized),
             quantityOut: "0",
             amountIn: "0",
             amountOut: "0",
@@ -999,16 +1024,12 @@ export async function confirmItemIssueReceipt(
           });
         }
 
-        const unresolved =
-          resolution === "COMPLETE_WITH_DISCREPANCY"
-            ? remaining - received - damaged
-            : 0n;
-        if (unresolved > 0n) {
+        if (discrepancyFinalized > 0n) {
           await tx.insert(itemIssueDiscrepancies).values({
             shipmentLineId: shipmentLine.id,
             receiptId: receipt.id,
             itemIssueId: issue.id,
-            quantity: scaledToQuantity(unresolved),
+            quantity: scaledToQuantity(discrepancyFinalized),
             reason: line.discrepancyReason ?? "MISSING",
             status: "OPEN",
             remarks: line.remarks,
@@ -1020,7 +1041,7 @@ export async function confirmItemIssueReceipt(
             rate: "0",
             movementType: "ITEM_ISSUE_DISCREPANCY",
             stockCategory: "DISCREPANCY",
-            quantityIn: scaledToQuantity(unresolved),
+            quantityIn: scaledToQuantity(discrepancyFinalized),
             quantityOut: "0",
             amountIn: "0",
             amountOut: "0",
@@ -1173,6 +1194,7 @@ export async function listInTransitQuantities(
 
   const conditions: SQL[] = [
     sql`${itemIssueShipmentLines.remainingInTransitQuantity}::numeric > 0`,
+    sql`${itemIssueShipments.deliveryStatus} in ('IN_TRANSIT', 'PARTIALLY_RECEIVED')`,
   ];
   if (!isAdminUser(actor)) {
     conditions.push(

@@ -19,18 +19,42 @@ export function remainingRequestedQuantity(
 }
 
 /**
- * Remaining in-transit quantity is dispatched minus confirmed usable receipts.
- * Pending, returned, rejected, or unverified receipts must not be included in
- * `totalConfirmedReceivedQuantity`.
+ * Remaining in-transit quantity is dispatched minus confirmed usable receipts
+ * minus discrepancies that have been finalized.
+ *
+ * A discrepancy is finalized only when the receipt is confirmed and the
+ * shipment is explicitly completed with discrepancy. Pending, returned,
+ * rejected, or reported-but-unverified discrepancies must not be included in
+ * `finalizedDiscrepancyQuantity`.
+ *
+ * Invariant for every shipment line:
+ * dispatched = confirmed usable received + remaining in transit + finalized discrepancy.
  */
 export function remainingInTransitQuantity(
   dispatchedQuantity: string,
-  totalConfirmedReceivedQuantity: string,
+  confirmedUsableReceivedQuantity: string,
+  finalizedDiscrepancyQuantity = "0",
 ): string {
   return remainingNonNegativeDecimalString(
     dispatchedQuantity,
-    totalConfirmedReceivedQuantity,
+    sumDecimalStrings([
+      confirmedUsableReceivedQuantity,
+      finalizedDiscrepancyQuantity,
+    ]),
   );
+}
+
+export function shipmentLineQuantityBalance(params: {
+  dispatchedQuantity: string;
+  confirmedUsableReceivedQuantity: string;
+  remainingInTransitQuantity: string;
+  finalizedDiscrepancyQuantity: string;
+}): string {
+  return sumDecimalStrings([
+    params.confirmedUsableReceivedQuantity,
+    params.remainingInTransitQuantity,
+    params.finalizedDiscrepancyQuantity,
+  ]);
 }
 
 export type ItemIssueLineQuantities = {
