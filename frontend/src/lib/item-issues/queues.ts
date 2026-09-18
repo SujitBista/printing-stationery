@@ -33,11 +33,11 @@ const ITEM_ISSUE_QUEUE_DEFINITIONS: ItemIssueQueueDefinition[] = [
   },
   {
     key: "posted",
-    sidebarLabel: "Ready for Handover",
-    tabLabel: "Posted Issues",
-    title: "Posted Item Issues",
+    sidebarLabel: "Dispatched Issues",
+    tabLabel: "Dispatched Issues",
+    title: "Dispatched Item Issues",
     description:
-      "Verified Item Issues ready for printing and physical handover to the branch.",
+      "Dispatched transfers and issued department consumption. Branch stock increases only after receipt confirmation.",
     href: "/requests/item-issues/posted",
     navGroup: "fulfilment",
   },

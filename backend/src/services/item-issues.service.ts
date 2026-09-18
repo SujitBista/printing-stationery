@@ -5,7 +5,9 @@ import {
   count,
   desc,
   eq,
+  gte,
   inArray,
+  lte,
   or,
   sql,
   type SQL,
@@ -13,7 +15,10 @@ import {
 import { alias } from "drizzle-orm/pg-core";
 import type {
   AuthenticatedUser,
+  CreateDepartmentIssueInput,
   CreateItemIssueInput,
+  DepartmentConsumptionListItem,
+  DepartmentConsumptionListQuery,
   ItemIssue,
   ItemIssueAction,
   ItemIssueEligibility,
@@ -23,9 +28,11 @@ import type {
   ItemIssueRequestSummary,
   ItemIssueStatus,
   ItemRequestWorkflowRole,
+  PaginatedDepartmentConsumptionResponse,
   PaginatedItemIssueResponse,
   RejectItemIssueInput,
   ReturnItemIssueInput,
+  UpdateDepartmentIssueInput,
   UpdateItemIssueInput,
   VerifyItemIssueInput,
 } from "@printing-stationery/shared";
@@ -36,7 +43,6 @@ import {
   itemIssueLineQuantities,
   itemIssueStatusIsEditable,
   itemIssueStatusIsPosted,
-  multiplyDecimalStrings,
   remainingRequestedQuantity,
   requestStatusAllowsItemIssue,
   userHasRole,
@@ -67,6 +73,8 @@ import {
   lockStoreStockForUpdate,
   operationalStockKey,
 } from "./opening-stocks.service.js";
+import { allocateFifoCost, stockLedgerSourceKey } from "./stock-ledger.js";
+import { getShipmentDetailForIssue } from "./item-issue-receipts.service.js";
 import { getDb } from "../db/client.js";
 import {
   applicationUsers,
@@ -74,6 +82,7 @@ import {
   type ApplicationUserRow,
 } from "../db/schema/auth.js";
 import { branches, type BranchRow } from "../db/schema/branches.js";
+import { departments, type DepartmentRow } from "../db/schema/departments.js";
 import { employees, type EmployeeRow } from "../db/schema/employees.js";
 import {
   itemIssueActions,
@@ -81,6 +90,12 @@ import {
   itemIssues,
   type ItemIssueRow,
 } from "../db/schema/item-issues.js";
+import {
+  departmentConsumptionLines,
+  departmentConsumptions,
+  itemIssueShipmentLines,
+  itemIssueShipments,
+} from "../db/schema/item-issue-delivery.js";
 import {
   itemRequestActions,
   itemRequestLines,
@@ -109,6 +124,8 @@ const submittedByEmployees = alias(
 );
 const verifiedByUsers = alias(applicationUsers, "issue_verified_by_users");
 const verifiedByEmployees = alias(employees, "issue_verified_by_employees");
+const issueDepartments = alias(departments, "issue_departments");
+const consumedByEmployees = alias(employees, "issue_consumed_by_employees");
 const requestStores = alias(stores, "request_stores");
 const requestBranches = alias(branches, "request_branches");
 const corporateStores = alias(stores, "request_corporate_stores");
@@ -574,7 +591,11 @@ async function loadPostedIssueTotalsByRequestLine(
     .groupBy(itemIssueLines.requestLineId);
 
   return new Map(
-    rows.map((row) => [row.requestLineId, parseQuantityToScaled(row.totalQuantity)]),
+    rows
+      .filter((row): row is { requestLineId: string; totalQuantity: string } =>
+        Boolean(row.requestLineId),
+      )
+      .map((row) => [row.requestLineId, parseQuantityToScaled(row.totalQuantity)]),
   );
 }
 
@@ -654,7 +675,7 @@ export function canCreateIssueFromAvailability(
   availability: ItemIssueLineAvailability[],
 ): boolean {
   return availability.some(
-    (line) => parseQuantityToScaled(line.remainingQuantity) > 0n,
+    (line) => parseQuantityToScaled(line.remainingQuantity ?? "0") > 0n,
   );
 }
 
@@ -707,7 +728,7 @@ async function loadActiveIssueForRequest(
 }
 
 export function validateIssueLinesAgainstAvailability(params: {
-  lines: Array<{ requestLineId: string; issueQuantity: string }>;
+  lines: Array<{ requestLineId: string | null; issueQuantity: string }>;
   availability: ItemIssueLineAvailability[];
   enforceStock?: boolean;
 }): void {
@@ -719,7 +740,7 @@ export function validateIssueLinesAgainstAvailability(params: {
 
   for (const line of params.lines) {
     const available = availabilityByLine.get(line.requestLineId);
-    if (!available) {
+    if (!available || !line.requestLineId) {
       throw new AppError("Issue lines must belong to the selected request.", 400);
     }
 
@@ -735,20 +756,22 @@ export function validateIssueLinesAgainstAvailability(params: {
     }
 
     const remaining = parseQuantityToScaled(
-      available.outstandingBeforeThisIssue || available.remainingQuantity,
+      available.outstandingBeforeThisIssue ||
+        available.remainingQuantity ||
+        "0",
     );
     if (issueQuantity > remaining) {
-      throw new AppError(
-        `Issue quantity for ${available.itemCode} exceeds the remaining requested quantity.`,
-        409,
-      );
+        throw new AppError(
+          `Quantity exceeds request remainder.`,
+          409,
+        );
     }
 
     if (params.enforceStock) {
       const stock = parseQuantityToScaled(available.availableStockQuantity ?? "0");
       if (issueQuantity > stock) {
         throw new AppError(
-          `Issue quantity for ${available.itemCode} exceeds the supplying store available stock.`,
+          `Insufficient Corporate Store stock.`,
           409,
         );
       }
@@ -764,7 +787,11 @@ export function validateIssueLinesAgainstAvailability(params: {
 
 async function createDraftWithRetry(
   values: Omit<typeof itemIssues.$inferInsert, "issueNumber">,
-  lines: Array<{ requestLineId: string; itemId: string; issueQuantity: string }>,
+  lines: Array<{
+    requestLineId: string | null;
+    itemId: string;
+    issueQuantity: string;
+  }>,
   action: {
     actorUserId: string;
     actorWorkflowRole: ItemRequestWorkflowRole;
@@ -776,18 +803,20 @@ async function createDraftWithRetry(
     const issueNumber = generateIssueNumber();
     try {
       const createdId = await getDb().transaction(async (tx) => {
-        const lockedRequest = await tx
-          .select({ id: itemRequests.id })
-          .from(itemRequests)
-          .where(eq(itemRequests.id, values.requestId))
-          .for("update");
-        if (!lockedRequest[0]) {
-          throw new AppError("Item request not found", 404);
-        }
+        if (values.requestId) {
+          const lockedRequest = await tx
+            .select({ id: itemRequests.id })
+            .from(itemRequests)
+            .where(eq(itemRequests.id, values.requestId))
+            .for("update");
+          if (!lockedRequest[0]) {
+            throw new AppError("Item request not found", 404);
+          }
 
-        const existing = await loadActiveIssueForRequest(values.requestId, tx);
-        if (existing) {
-          throw activeItemIssueConflict(existing);
+          const existing = await loadActiveIssueForRequest(values.requestId, tx);
+          if (existing) {
+            throw activeItemIssueConflict(existing);
+          }
         }
 
         const inserted = await tx
@@ -834,7 +863,7 @@ async function createDraftWithRetry(
         lastError = error;
         continue;
       }
-      if (isItemIssueOpenDuplicateViolation(error)) {
+      if (isItemIssueOpenDuplicateViolation(error) && values.requestId) {
         const existing = await loadActiveIssueForRequest(values.requestId);
         if (existing) {
           throw activeItemIssueConflict(existing);
@@ -941,6 +970,8 @@ const issueHeaderSelect = {
   fromBranch: fromBranches,
   toStore: toStores,
   toBranch: toBranches,
+  department: issueDepartments,
+  consumedByEmployee: consumedByEmployees,
   createdByUser: createdByUsers,
   createdByEmployee: createdByEmployees,
   submittedByUser: submittedByUsers,
@@ -953,11 +984,16 @@ function issueHeaderBase() {
   return getDb()
     .select(issueHeaderSelect)
     .from(itemIssues)
-    .innerJoin(itemRequests, eq(itemIssues.requestId, itemRequests.id))
+    .leftJoin(itemRequests, eq(itemIssues.requestId, itemRequests.id))
     .innerJoin(fromStores, eq(itemIssues.fromStoreId, fromStores.id))
     .innerJoin(fromBranches, eq(fromStores.branchId, fromBranches.id))
-    .innerJoin(toStores, eq(itemIssues.toStoreId, toStores.id))
-    .innerJoin(toBranches, eq(toStores.branchId, toBranches.id))
+    .leftJoin(toStores, eq(itemIssues.toStoreId, toStores.id))
+    .leftJoin(toBranches, eq(toStores.branchId, toBranches.id))
+    .leftJoin(issueDepartments, eq(itemIssues.departmentId, issueDepartments.id))
+    .leftJoin(
+      consumedByEmployees,
+      eq(itemIssues.consumedByEmployeeId, consumedByEmployees.id),
+    )
     .innerJoin(
       createdByUsers,
       eq(itemIssues.createdByApplicationUserId, createdByUsers.id),
@@ -986,11 +1022,13 @@ function issueHeaderBase() {
 
 type IssueHeaderRow = {
   issue: ItemIssueRow;
-  request: ItemRequestRow;
+  request: ItemRequestRow | null;
   fromStore: StoreRow;
   fromBranch: BranchRow;
-  toStore: StoreRow;
-  toBranch: BranchRow;
+  toStore: StoreRow | null;
+  toBranch: BranchRow | null;
+  department: DepartmentRow | null;
+  consumedByEmployee: EmployeeRow | null;
   createdByUser: ApplicationUserRow;
   createdByEmployee: EmployeeRow | null;
   submittedByUser: ApplicationUserRow | null;
@@ -1025,11 +1063,14 @@ function toIssueListItem(
   return {
     id: row.issue.id,
     issueNumber: row.issue.issueNumber,
-    requestId: row.issue.requestId,
-    requestNumber: row.request.requestNumber,
+    requestId: row.issue.requestId ?? null,
+    requestNumber: row.request?.requestNumber ?? null,
+    destinationType: row.issue.destinationType,
+    deliveryStatus: row.issue.deliveryStatus ?? null,
     status: row.issue.status,
     version: row.issue.version,
     remarks: row.issue.remarks ?? null,
+    consumptionDescription: row.issue.consumptionDescription ?? null,
     createdAt: row.issue.createdAt.toISOString(),
     updatedAt: row.issue.updatedAt.toISOString(),
     issueDate: row.issue.issueDate.toISOString(),
@@ -1038,7 +1079,26 @@ function toIssueListItem(
     returnedAt: row.issue.returnedAt?.toISOString() ?? null,
     rejectedAt: row.issue.rejectedAt?.toISOString() ?? null,
     fromStore: toStoreSummary(row.fromStore, row.fromBranch),
-    toStore: toStoreSummary(row.toStore, row.toBranch),
+    toStore:
+      row.toStore && row.toBranch
+        ? toStoreSummary(row.toStore, row.toBranch)
+        : null,
+    department: row.department
+      ? {
+          id: row.department.id,
+          departmentCode: row.department.departmentCode,
+          departmentName: row.department.departmentName,
+          isActive: row.department.isActive,
+        }
+      : null,
+    consumedBy: row.consumedByEmployee
+      ? {
+          id: row.consumedByEmployee.id,
+          employeeCode: row.consumedByEmployee.employeeCode,
+          employeeName: row.consumedByEmployee.employeeName,
+          isActive: row.consumedByEmployee.isActive,
+        }
+      : null,
     createdBy,
     submittedBy,
     verifiedBy,
@@ -1231,8 +1291,8 @@ export async function getItemIssueEligibility(
         await loadRequestLineRows(requestId),
         new Map(
           availability.map((line) => [
-            line.requestLineId,
-            parseQuantityToScaled(line.previouslyIssuedQuantity),
+            line.requestLineId ?? "",
+            parseQuantityToScaled(line.previouslyIssuedQuantity ?? "0"),
           ]),
         ),
         availability,
@@ -1283,6 +1343,7 @@ export async function createItemIssueFromRequest(
       requestId,
       fromStoreId: supplyingStoreId,
       toStoreId: eligibility.request.requestingStore.id,
+      destinationType: "BRANCH_STORE",
       status: "DRAFT",
       remarks: input.remarks,
       createdByApplicationUserId: actor.id,
@@ -1324,9 +1385,9 @@ export async function listItemIssues(
     const countBase = getDb()
       .select({ value: count() })
       .from(itemIssues)
-      .innerJoin(itemRequests, eq(itemIssues.requestId, itemRequests.id))
+      .leftJoin(itemRequests, eq(itemIssues.requestId, itemRequests.id))
       .innerJoin(fromStores, eq(itemIssues.fromStoreId, fromStores.id))
-      .innerJoin(toStores, eq(itemIssues.toStoreId, toStores.id));
+      .leftJoin(toStores, eq(itemIssues.toStoreId, toStores.id));
 
     const countRows = where ? await countBase.where(where) : await countBase;
     const totalItems = countRows[0]?.value ?? 0;
@@ -1387,9 +1448,11 @@ export async function getItemIssueById(
       throw new AppError("Item issue not found", 404);
     }
 
-    const requestHeader = await loadIssueSourceRequest(header.issue.requestId);
+    const requestHeader = header.issue.requestId
+      ? await loadIssueSourceRequest(header.issue.requestId)
+      : null;
     const postedIssue = itemIssueStatusIsPosted(header.issue.status);
-    const [lineRows, baseAvailability, requestLineRows, postedTotals, requestActions, issueActions] =
+    const [lineRows, baseAvailability, requestLineRows, postedTotals, requestActions, issueActions, shipment] =
       await Promise.all([
         getDb()
           .select({
@@ -1400,113 +1463,161 @@ export async function getItemIssueById(
             unitName: units.unitName,
           })
           .from(itemIssueLines)
-          .innerJoin(itemRequestLines, eq(itemIssueLines.requestLineId, itemRequestLines.id))
+          .leftJoin(itemRequestLines, eq(itemIssueLines.requestLineId, itemRequestLines.id))
           .innerJoin(items, eq(itemIssueLines.itemId, items.id))
           .innerJoin(units, eq(items.unitId, units.id))
           .where(eq(itemIssueLines.itemIssueId, issueId))
           .orderBy(asc(items.itemName), asc(items.itemCode), asc(itemIssueLines.id)),
-        buildAvailability(header.issue.requestId, header.issue.fromStoreId, {
-          excludeIssueId: header.issue.id,
-          earlierThanIssue: postedIssue
-            ? {
-                id: header.issue.id,
-                verifiedAt: header.issue.verifiedAt,
-                createdAt: header.issue.createdAt,
-              }
-            : undefined,
-        }),
-        loadRequestLineRows(header.issue.requestId),
-        loadPostedIssueTotalsByRequestLine(header.issue.requestId),
-        loadRequestActionRows(header.issue.requestId),
+        header.issue.requestId
+          ? buildAvailability(header.issue.requestId, header.issue.fromStoreId, {
+              excludeIssueId: header.issue.id,
+              earlierThanIssue: postedIssue
+                ? {
+                    id: header.issue.id,
+                    verifiedAt: header.issue.verifiedAt,
+                    createdAt: header.issue.createdAt,
+                  }
+                : undefined,
+            })
+          : Promise.resolve([] as ItemIssueLineAvailability[]),
+        header.issue.requestId
+          ? loadRequestLineRows(header.issue.requestId)
+          : Promise.resolve([]),
+        header.issue.requestId
+          ? loadPostedIssueTotalsByRequestLine(header.issue.requestId)
+          : Promise.resolve(new Map<string, bigint>()),
+        header.issue.requestId
+          ? loadRequestActionRows(header.issue.requestId)
+          : Promise.resolve([]),
         loadIssueActionRows(issueId),
+        getShipmentDetailForIssue(issueId, actor, access),
       ]);
 
     const thisIssueByLine = new Map(
-      lineRows.map((row) => [
-        row.line.requestLineId,
-        scaledToQuantity(parseQuantityToScaled(String(row.line.issueQuantity))),
-      ]),
+      lineRows
+        .filter((row) => row.line.requestLineId)
+        .map((row) => [
+          row.line.requestLineId as string,
+          scaledToQuantity(parseQuantityToScaled(String(row.line.issueQuantity))),
+        ]),
     );
-    const availability = baseAvailability.map((line) => {
-      const quantities = itemIssueLineQuantities({
-        requestedQuantity: line.requestedQuantity,
-        previouslyIssuedQuantity: line.previouslyIssuedQuantity,
-        thisIssueQuantity: thisIssueByLine.get(line.requestLineId) ?? "0",
-        currentIssuePosted: postedIssue,
-      });
-      return {
-        ...line,
-        requestedQuantity: quantities.requestedQuantity,
-        previouslyIssuedQuantity: quantities.previouslyIssuedQuantity,
-        thisIssueQuantity: quantities.thisIssueQuantity,
-        outstandingBeforeThisIssue: quantities.outstandingBeforeThisIssue,
-        remainingQuantity: quantities.remainingQuantity,
-        remainingAfterIssue: quantities.remainingAfterIssue,
-      };
-    });
+    const availability =
+      baseAvailability.length > 0
+        ? baseAvailability.map((line) => {
+            const quantities = itemIssueLineQuantities({
+              requestedQuantity: line.requestedQuantity ?? "0",
+              previouslyIssuedQuantity: line.previouslyIssuedQuantity ?? "0",
+              thisIssueQuantity:
+                (line.requestLineId
+                  ? thisIssueByLine.get(line.requestLineId)
+                  : undefined) ?? "0",
+              currentIssuePosted: postedIssue,
+            });
+            return {
+              ...line,
+              requestedQuantity: quantities.requestedQuantity,
+              previouslyIssuedQuantity: quantities.previouslyIssuedQuantity,
+              thisIssueQuantity: quantities.thisIssueQuantity,
+              outstandingBeforeThisIssue: quantities.outstandingBeforeThisIssue,
+              remainingQuantity: quantities.remainingQuantity,
+              remainingAfterIssue: quantities.remainingAfterIssue,
+            };
+          })
+        : lineRows.map((row) => ({
+            requestLineId: row.line.requestLineId,
+            itemId: row.item.id,
+            itemCode: row.item.itemCode,
+            itemName: row.item.itemName,
+            unit: { id: row.unitId, unitName: row.unitName },
+            requestedQuantity: null,
+            previouslyIssuedQuantity: null,
+            thisIssueQuantity: String(row.line.issueQuantity),
+            outstandingBeforeThisIssue: null,
+            remainingQuantity: null,
+            remainingAfterIssue: null,
+            availableStockQuantity: "0",
+            stockBalanceKnown: true,
+          }));
+
+    const shipmentLinesByIssueLine = new Map(
+      (shipment?.lines ?? []).map((line) => [line.itemIssueLineId, line]),
+    );
 
     return {
       ...toIssueListItem(header, actor, access),
-      request: {
-        id: requestHeader.request.id,
-        requestNumber: requestHeader.request.requestNumber,
-        status: requestHeader.request.status,
-        remarks: requestHeader.request.remarks ?? null,
-        createdAt: requestHeader.request.createdAt.toISOString(),
-        approvedAt: requestHeader.request.approvedAt?.toISOString() ?? null,
-        requestingStore: toStoreSummary(
-          requestHeader.requestingStore,
-          requestHeader.requestingBranch,
-        ),
-        corporateStore: toStoreSummary(
-          requestHeader.corporateStore,
-          requestHeader.corporateBranch,
-        ),
-        sourceStore: toStoreSummary(
-          requestHeader.requestingStore,
-          requestHeader.requestingBranch,
-        ),
-        destinationStore: toStoreSummary(
-          requestHeader.corporateStore,
-          requestHeader.corporateBranch,
-        ),
-        createdBy: toPersonSummary(
-          requestHeader.createdByUser,
-          requestHeader.createdByEmployee,
-        )!,
-        requestedBy: toRequestedByEmployeeSummary(
-          requestHeader.requestedByEmployee,
-          requestHeader.requestedByBranch,
-        ),
-        lines: toIssueRequestLines(requestLineRows, postedTotals, availability),
-        actions: requestActions,
-      },
-      lines: lineRows.map((row) => ({
-        id: row.line.id,
-        requestLineId: row.line.requestLineId,
-        itemId: row.line.itemId,
-        issueQuantity: String(row.line.issueQuantity),
-        createdAt: row.line.createdAt.toISOString(),
-        updatedAt: row.line.updatedAt.toISOString(),
-        requestLine: {
-          id: row.requestLine.id,
-          requestedQuantity: String(row.requestLine.requestedQuantity),
-          item: {
-            id: row.item.id,
-            itemCode: row.item.itemCode,
-            itemName: row.item.itemName,
-            isActive: row.item.isActive,
-            isRequestable: row.item.isRequestable,
-            isIssuable: row.item.isIssuable,
-            unit: {
-              id: row.unitId,
-              unitName: row.unitName,
-            },
-          },
-        },
-      })),
+      request: requestHeader
+        ? {
+            id: requestHeader.request.id,
+            requestNumber: requestHeader.request.requestNumber,
+            status: requestHeader.request.status,
+            remarks: requestHeader.request.remarks ?? null,
+            createdAt: requestHeader.request.createdAt.toISOString(),
+            approvedAt: requestHeader.request.approvedAt?.toISOString() ?? null,
+            requestingStore: toStoreSummary(
+              requestHeader.requestingStore,
+              requestHeader.requestingBranch,
+            ),
+            corporateStore: toStoreSummary(
+              requestHeader.corporateStore,
+              requestHeader.corporateBranch,
+            ),
+            sourceStore: toStoreSummary(
+              requestHeader.requestingStore,
+              requestHeader.requestingBranch,
+            ),
+            destinationStore: toStoreSummary(
+              requestHeader.corporateStore,
+              requestHeader.corporateBranch,
+            ),
+            createdBy: toPersonSummary(
+              requestHeader.createdByUser,
+              requestHeader.createdByEmployee,
+            )!,
+            requestedBy: toRequestedByEmployeeSummary(
+              requestHeader.requestedByEmployee,
+              requestHeader.requestedByBranch,
+            ),
+            lines: toIssueRequestLines(requestLineRows, postedTotals, availability),
+            actions: requestActions,
+          }
+        : null,
+      lines: lineRows.map((row) => {
+        const shipped = shipmentLinesByIssueLine.get(row.line.id);
+        return {
+          id: row.line.id,
+          requestLineId: row.line.requestLineId,
+          itemId: row.line.itemId,
+          issueQuantity: String(row.line.issueQuantity),
+          createdAt: row.line.createdAt.toISOString(),
+          updatedAt: row.line.updatedAt.toISOString(),
+          unit: { id: row.unitId, unitName: row.unitName },
+          dispatchedQuantity: shipped?.dispatchedQuantity ?? null,
+          confirmedReceivedQuantity: shipped?.confirmedReceivedQuantity ?? null,
+          remainingInTransitQuantity: shipped?.remainingInTransitQuantity ?? null,
+          discrepancyQuantity: shipped?.discrepancyQuantity ?? null,
+          requestLine: row.requestLine
+            ? {
+                id: row.requestLine.id,
+                requestedQuantity: String(row.requestLine.requestedQuantity),
+                item: {
+                  id: row.item.id,
+                  itemCode: row.item.itemCode,
+                  itemName: row.item.itemName,
+                  isActive: row.item.isActive,
+                  isRequestable: row.item.isRequestable,
+                  isIssuable: row.item.isIssuable,
+                  unit: {
+                    id: row.unitId,
+                    unitName: row.unitName,
+                  },
+                },
+              }
+            : null,
+        };
+      }),
       availability,
       actions: issueActions,
+      shipment,
     };
   } catch (error) {
     if (error instanceof AppError) {
@@ -1522,10 +1633,7 @@ export async function updateItemIssue(
   input: UpdateItemIssueInput,
 ): Promise<ItemIssue> {
   const existing = await getItemIssueById(issueId, actor);
-  const supplyingStoreId = existing.request.corporateStore?.id;
-  if (!supplyingStoreId || existing.fromStore.id !== supplyingStoreId) {
-    throw new AppError(ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE, 403);
-  }
+  const supplyingStoreId = existing.fromStore.id;
   await requireSupplyingStoreMaker(actor, supplyingStoreId);
   if (!existing.canEdit) {
     throw new AppError("This issue cannot be edited.", 403);
@@ -1635,7 +1743,12 @@ export async function submitItemIssue(
         throw new AppError("This issue has already been submitted.", 409);
       }
       if (issue.status === "POSTED") {
-        throw new AppError("This issue has already been posted.", 409);
+        throw new AppError(
+          issue.destinationType === "CORPORATE_DEPARTMENT"
+            ? "This issue has already been issued."
+            : "This issue has already been dispatched.",
+          409,
+        );
       }
       if (issue.status !== "DRAFT" && issue.status !== "RETURNED") {
         throw new AppError(
@@ -1645,6 +1758,89 @@ export async function submitItemIssue(
       }
       if (issue.version !== input.expectedVersion) {
         throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+
+      if (issue.destinationType === "CORPORATE_DEPARTMENT") {
+        if (!issue.consumptionDescription) {
+          throw new AppError("Consumption Description is required.", 400);
+        }
+        const assignment = await requireSupplyingStoreMaker(actor, issue.fromStoreId);
+        const issueLineRows = await tx
+          .select({ id: itemIssueLines.id })
+          .from(itemIssueLines)
+          .where(eq(itemIssueLines.itemIssueId, issueId));
+        if (issueLineRows.length === 0) {
+          throw new AppError("At least one issue line is required.", 400);
+        }
+
+        const updated = await tx
+          .update(itemIssues)
+          .set({
+            status: "PENDING_VERIFICATION",
+            submittedByApplicationUserId: actor.id,
+            submittedAt: new Date(),
+            returnedAt: null,
+            updatedAt: new Date(),
+            version: issue.version + 1,
+          })
+          .where(
+            and(
+              eq(itemIssues.id, issueId),
+              inArray(itemIssues.status, ["DRAFT", "RETURNED"]),
+              eq(itemIssues.version, input.expectedVersion),
+            ),
+          )
+          .returning({ id: itemIssues.id });
+        if (!updated[0]) {
+          throw new AppError(STALE_ISSUE_MESSAGE, 409);
+        }
+
+        await tx.insert(itemIssueActions).values({
+          itemIssueId: issueId,
+          action: "SUBMIT",
+          fromStatus: issue.status,
+          toStatus: "PENDING_VERIFICATION",
+          actorApplicationUserId: actor.id,
+          actorWorkflowRole: issueActorWorkflowRole(
+            actor,
+            "MAKER",
+            assignment.branch.branchType,
+          ),
+          remarks: issue.remarks,
+        });
+
+        const supervisors = await tx
+          .select({
+            supervisorApplicationUserId: storeUsers.supervisorApplicationUserId,
+          })
+          .from(storeUsers)
+          .where(
+            and(eq(storeUsers.storeId, issue.fromStoreId), eq(storeUsers.isActive, true)),
+          );
+        const actorName =
+          actorRecord.employee.employeeName ?? actorRecord.user.username;
+        await insertItemIssueWorkflowNotifications(tx, {
+          type: "ITEM_ISSUE_SUBMITTED",
+          issueId,
+          issueNumber: issue.issueNumber,
+          requestNumber: "",
+          actorUserId: actor.id,
+          actorName,
+          remarks: issue.remarks ?? null,
+          createdByApplicationUserId: issue.createdByApplicationUserId,
+          corporateCheckerApplicationUserId:
+            supervisors[0]?.supervisorApplicationUserId ?? null,
+          branchMakerApplicationUserId: null,
+          branchCheckerApplicationUserId: null,
+          extraRecipientIds: supervisors
+            .map((row) => row.supervisorApplicationUserId)
+            .filter((id): id is string => Boolean(id)),
+        });
+        return;
+      }
+
+      if (!issue.requestId) {
+        throw new AppError("Item request not found", 404);
       }
 
       const requestRows = await tx
@@ -1796,7 +1992,12 @@ export async function verifyAndPostItemIssue(
         throw new AppError("Item issue not found", 404);
       }
       if (issue.status === "POSTED") {
-        throw new AppError("This issue has already been posted.", 409);
+        throw new AppError(
+          issue.destinationType === "CORPORATE_DEPARTMENT"
+            ? "This issue has already been issued."
+            : "This issue has already been dispatched.",
+          409,
+        );
       }
       if (issue.status !== "PENDING_VERIFICATION") {
         throw new AppError(
@@ -1806,6 +2007,20 @@ export async function verifyAndPostItemIssue(
       }
       if (issue.version !== input.expectedVersion) {
         throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+
+      if (issue.destinationType === "CORPORATE_DEPARTMENT") {
+        await confirmDepartmentConsumption(tx, {
+          issue,
+          actor,
+          actorRecord,
+          input,
+        });
+        return;
+      }
+
+      if (!issue.requestId) {
+        throw new AppError("Item request not found", 404);
       }
 
       const requestRows = await tx
@@ -1906,18 +2121,23 @@ export async function verifyAndPostItemIssue(
 
       validateIssueLinesAgainstAvailability({
         lines: issueLineRows.map((line) => ({
-          requestLineId: line.requestLineId,
+          requestLineId: line.requestLineId ?? "",
           issueQuantity: String(line.issueQuantity),
         })),
         availability: availabilityWithLockedStock,
         enforceStock: true,
       });
 
+      if (!issue.toStoreId) {
+        throw new AppError("Destination Branch Store is required.", 400);
+      }
+
       const postedAt = new Date();
       const updated = await tx
         .update(itemIssues)
         .set({
           status: "POSTED",
+          deliveryStatus: "IN_TRANSIT",
           verifiedByApplicationUserId: actor.id,
           verifiedAt: postedAt,
           updatedAt: postedAt,
@@ -1936,38 +2156,126 @@ export async function verifyAndPostItemIssue(
         throw new AppError(STALE_ISSUE_MESSAGE, 409);
       }
 
-      const ledgerRows = await tx
-        .insert(stockLedger)
-        .values(
-          issueLineRows.map((line) => ({
+      const ledgerValues = [];
+      for (const line of issueLineRows) {
+        const fifo = await allocateFifoCost(
+          {
             storeId: issue.fromStoreId,
             itemId: line.itemId,
             unitId: line.unitId,
-            rate: String(line.purchaseRate),
+            quantity: String(line.issueQuantity),
+          },
+          tx,
+        );
+        for (const allocation of fifo.allocations) {
+          ledgerValues.push({
+            storeId: issue.fromStoreId,
+            itemId: line.itemId,
+            unitId: line.unitId,
+            rate: allocation.rate,
             movementType: "ITEM_ISSUE" as const,
+            stockCategory: "AVAILABLE" as const,
             quantityIn: "0",
-            quantityOut: String(line.issueQuantity),
+            quantityOut: allocation.quantity,
             amountIn: "0",
-            amountOut: multiplyDecimalStrings(
-              String(line.issueQuantity),
-              String(line.purchaseRate),
-              2,
-            ),
+            amountOut: allocation.amount,
             transactionDate: postedAt,
             referenceType: "ITEM_ISSUE" as const,
             referenceId: issueId,
             referenceLineId: line.id,
+            sourceKey: stockLedgerSourceKey({
+              referenceType: "ITEM_ISSUE",
+              referenceLineId: line.id,
+              storeId: issue.fromStoreId,
+              movementType: "ITEM_ISSUE",
+              stockCategory: "AVAILABLE",
+              rate: allocation.rate,
+            }),
             postedByApplicationUserId: actor.id,
             postedAt,
-          })),
-        )
+          });
+        }
+      }
+
+      const ledgerRows = await tx
+        .insert(stockLedger)
+        .values(ledgerValues)
         .returning({ id: stockLedger.id });
 
-      await applyRequestFulfilmentStatus(tx, issue.requestId);
+      const shipmentRows = await tx
+        .insert(itemIssueShipments)
+        .values({
+          itemIssueId: issueId,
+          requestId: issue.requestId,
+          fromStoreId: issue.fromStoreId,
+          toStoreId: issue.toStoreId,
+          deliveryStatus: "IN_TRANSIT",
+          dispatchedAt: postedAt,
+          dispatchedByApplicationUserId: actor.id,
+        })
+        .returning({ id: itemIssueShipments.id });
+      const shipmentId = shipmentRows[0]?.id;
+      if (!shipmentId) {
+        throw new AppError("Failed to create in-transit shipment.", 500);
+      }
+
+      const shipmentLineRows = await tx
+        .insert(itemIssueShipmentLines)
+        .values(
+          issueLineRows.map((line) => ({
+            shipmentId,
+            itemIssueLineId: line.id,
+            itemId: line.itemId,
+            unitId: line.unitId,
+            dispatchedQuantity: String(line.issueQuantity),
+            confirmedReceivedQuantity: "0",
+            remainingInTransitQuantity: String(line.issueQuantity),
+            discrepancyQuantity: "0",
+          })),
+        )
+        .returning({
+          id: itemIssueShipmentLines.id,
+          itemId: itemIssueShipmentLines.itemId,
+          unitId: itemIssueShipmentLines.unitId,
+          dispatchedQuantity: itemIssueShipmentLines.dispatchedQuantity,
+        });
+
+      await tx.insert(stockLedger).values(
+        shipmentLineRows.map((line) => ({
+          storeId: issue.toStoreId!,
+          itemId: line.itemId,
+          unitId: line.unitId,
+          rate: "0",
+          movementType: "ITEM_ISSUE_IN_TRANSIT" as const,
+          stockCategory: "IN_TRANSIT" as const,
+          quantityIn: String(line.dispatchedQuantity),
+          quantityOut: "0",
+          amountIn: "0",
+          amountOut: "0",
+          transactionDate: postedAt,
+          referenceType: "ITEM_ISSUE_IN_TRANSIT" as const,
+          referenceId: shipmentId,
+          referenceLineId: line.id,
+          sourceKey: stockLedgerSourceKey({
+            referenceType: "ITEM_ISSUE_IN_TRANSIT",
+            referenceLineId: line.id,
+            storeId: issue.toStoreId!,
+            movementType: "ITEM_ISSUE_IN_TRANSIT",
+            stockCategory: "IN_TRANSIT",
+            rate: "0",
+          }),
+          postedByApplicationUserId: actor.id,
+          postedAt,
+        })),
+      );
+
+      if (issue.requestId) {
+        await applyRequestFulfilmentStatus(tx, issue.requestId);
+      }
 
       await tx.insert(itemIssueActions).values({
         itemIssueId: issueId,
-        action: "VERIFY_POST",
+        action: "DISPATCH",
         fromStatus: "PENDING_VERIFICATION",
         toStatus: "POSTED",
         actorApplicationUserId: actor.id,
@@ -1979,6 +2287,53 @@ export async function verifyAndPostItemIssue(
         remarks: input.remarks,
         stockLedgerReferenceId: ledgerRows[0]?.id ?? null,
       });
+
+      const destinationAssignees = await tx
+        .select({
+          makerApplicationUserId: storeUsers.makerApplicationUserId,
+          supervisorApplicationUserId: storeUsers.supervisorApplicationUserId,
+        })
+        .from(storeUsers)
+        .where(
+          and(eq(storeUsers.storeId, issue.toStoreId), eq(storeUsers.isActive, true)),
+        );
+      const extraRecipientIds = destinationAssignees.flatMap((row) =>
+        [row.makerApplicationUserId, row.supervisorApplicationUserId].filter(
+          (id): id is string => Boolean(id),
+        ),
+      );
+
+      const firstLine = issueLineRows[0];
+      const itemNameRow = firstLine
+        ? await tx
+            .select({ itemName: items.itemName, itemCode: items.itemCode, unitName: units.unitName })
+            .from(items)
+            .innerJoin(units, eq(items.unitId, units.id))
+            .where(eq(items.id, firstLine.itemId))
+            .limit(1)
+        : [];
+      const fromStoreName = (
+        await tx
+          .select({ storeName: stores.storeName })
+          .from(stores)
+          .where(eq(stores.id, issue.fromStoreId))
+          .limit(1)
+      )[0]?.storeName ?? "Corporate Store";
+      const toStoreName = (
+        await tx
+          .select({ storeName: stores.storeName })
+          .from(stores)
+          .where(eq(stores.id, issue.toStoreId))
+          .limit(1)
+      )[0]?.storeName ?? "Branch Store";
+      const qtyLabel = firstLine ? String(firstLine.issueQuantity) : "";
+      const itemLabel = itemNameRow[0]
+        ? `${qtyLabel} ${itemNameRow[0].unitName} of ${itemNameRow[0].itemName}`
+        : `issue ${issue.issueNumber}`;
+      const requestPart = requestRow.request.requestNumber
+        ? ` against request ${requestRow.request.requestNumber}`
+        : "";
+      const dispatchMessage = `${fromStoreName} dispatched ${itemLabel} to ${toStoreName}${requestPart}.`;
 
       const actorName =
         actorRecord.employee.employeeName ?? actorRecord.user.username;
@@ -1997,6 +2352,26 @@ export async function verifyAndPostItemIssue(
           requestRow.request.createdByApplicationUserId,
         branchCheckerApplicationUserId:
           requestRow.request.branchCheckerApplicationUserId,
+        extraRecipientIds,
+        customMessage: dispatchMessage,
+      });
+      await insertItemIssueWorkflowNotifications(tx, {
+        type: "ITEM_ISSUE_DISPATCHED",
+        issueId,
+        issueNumber: issue.issueNumber,
+        requestNumber: requestRow.request.requestNumber,
+        actorUserId: actor.id,
+        actorName,
+        remarks: input.remarks,
+        createdByApplicationUserId: issue.createdByApplicationUserId,
+        corporateCheckerApplicationUserId:
+          requestRow.request.corporateCheckerApplicationUserId,
+        branchMakerApplicationUserId:
+          requestRow.request.createdByApplicationUserId,
+        branchCheckerApplicationUserId:
+          requestRow.request.branchCheckerApplicationUserId,
+        extraRecipientIds,
+        customMessage: dispatchMessage,
       });
     });
 
@@ -2067,6 +2442,67 @@ async function concludePendingIssue(
       }
       if (issue.version !== params.expectedVersion) {
         throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+
+      if (issue.destinationType === "CORPORATE_DEPARTMENT") {
+        await requireSupplyingStoreVerifier(
+          actor,
+          issue.fromStoreId,
+          issue.createdByApplicationUserId,
+        );
+        const now = new Date();
+        const updated = await tx
+          .update(itemIssues)
+          .set({
+            status: params.toStatus,
+            returnedAt: params.toStatus === "RETURNED" ? now : issue.returnedAt,
+            rejectedAt: params.toStatus === "REJECTED" ? now : issue.rejectedAt,
+            updatedAt: now,
+            version: issue.version + 1,
+          })
+          .where(
+            and(
+              eq(itemIssues.id, issueId),
+              eq(itemIssues.status, "PENDING_VERIFICATION"),
+              eq(itemIssues.version, params.expectedVersion),
+            ),
+          )
+          .returning({ id: itemIssues.id });
+        if (!updated[0]) {
+          throw new AppError(STALE_ISSUE_MESSAGE, 409);
+        }
+        await tx.insert(itemIssueActions).values({
+          itemIssueId: issueId,
+          action: params.action,
+          fromStatus: "PENDING_VERIFICATION",
+          toStatus: params.toStatus,
+          actorApplicationUserId: actor.id,
+          actorWorkflowRole: "CORPORATE_CHECKER",
+          remarks: params.remarks,
+        });
+        const actorName =
+          actorRecord.employee.employeeName ?? actorRecord.user.username;
+        await insertItemIssueWorkflowNotifications(tx, {
+          type:
+            params.action === "RETURN"
+              ? "ITEM_ISSUE_RETURNED"
+              : "ITEM_ISSUE_REJECTED",
+          issueId,
+          issueNumber: issue.issueNumber,
+          requestNumber: "",
+          actorUserId: actor.id,
+          actorName,
+          remarks: params.remarks,
+          createdByApplicationUserId: issue.createdByApplicationUserId,
+          corporateCheckerApplicationUserId: actor.id,
+          branchMakerApplicationUserId: null,
+          branchCheckerApplicationUserId: null,
+        });
+        return;
+      }
+
+      if (!issue.requestId) {
+        throw new AppError("Item request not found", 404);
       }
 
       const requestRows = await tx
@@ -2199,4 +2635,507 @@ async function applyRequestFulfilmentStatus(
         inArray(itemRequests.status, ["APPROVED", "PARTIALLY_ISSUED", "ISSUED"]),
       ),
     );
+}
+
+async function confirmDepartmentConsumption(
+  tx: Pick<
+    ReturnType<typeof getDb>,
+    "select" | "insert" | "update" | "execute"
+  >,
+  params: {
+    issue: ItemIssueRow;
+    actor: AuthenticatedUser;
+    actorRecord: Awaited<ReturnType<typeof assertActiveParticipant>>;
+    input: VerifyItemIssueInput;
+  },
+): Promise<void> {
+  const { issue, actor, actorRecord, input } = params;
+  if (!issue.departmentId || !issue.consumptionDescription) {
+    throw new AppError("Consumption Description is required.", 400);
+  }
+  const departmentRows = await tx
+    .select()
+    .from(departments)
+    .where(eq(departments.id, issue.departmentId))
+    .limit(1);
+  const department = departmentRows[0];
+  if (!department || !department.isActive) {
+    throw new AppError("Department is inactive or invalid.", 409);
+  }
+
+  await requireSupplyingStoreVerifier(
+    actor,
+    issue.fromStoreId,
+    issue.createdByApplicationUserId,
+  );
+
+  const issueLineRows = await tx
+    .select({
+      id: itemIssueLines.id,
+      itemId: itemIssueLines.itemId,
+      issueQuantity: itemIssueLines.issueQuantity,
+      unitId: units.id,
+    })
+    .from(itemIssueLines)
+    .innerJoin(items, eq(itemIssueLines.itemId, items.id))
+    .innerJoin(units, eq(items.unitId, units.id))
+    .where(eq(itemIssueLines.itemIssueId, issue.id));
+  if (issueLineRows.length === 0) {
+    throw new AppError("At least one issue line is required.", 400);
+  }
+
+  await lockStoreStockForUpdate(
+    tx,
+    issue.fromStoreId,
+    issueLineRows.map((line) => line.itemId),
+  );
+
+  const postedAt = new Date();
+  const updated = await tx
+    .update(itemIssues)
+    .set({
+      status: "POSTED",
+      verifiedByApplicationUserId: actor.id,
+      verifiedAt: postedAt,
+      updatedAt: postedAt,
+      version: issue.version + 1,
+    })
+    .where(
+      and(
+        eq(itemIssues.id, issue.id),
+        eq(itemIssues.status, "PENDING_VERIFICATION"),
+        eq(itemIssues.version, input.expectedVersion),
+      ),
+    )
+    .returning({ id: itemIssues.id });
+  if (!updated[0]) {
+    throw new AppError(STALE_ISSUE_MESSAGE, 409);
+  }
+
+  const consumptionRows = await tx
+    .insert(departmentConsumptions)
+    .values({
+      itemIssueId: issue.id,
+      departmentId: issue.departmentId,
+      consumptionDescription: issue.consumptionDescription,
+      consumedByEmployeeId: issue.consumedByEmployeeId,
+      issueDate: issue.issueDate,
+      createdByApplicationUserId: issue.createdByApplicationUserId,
+      verifiedByApplicationUserId: actor.id,
+    })
+    .returning({ id: departmentConsumptions.id });
+  const consumptionId = consumptionRows[0]?.id;
+  if (!consumptionId) {
+    throw new AppError("Failed to record department consumption.", 500);
+  }
+
+  const ledgerValues = [];
+  for (const line of issueLineRows) {
+    const fifo = await allocateFifoCost(
+      {
+        storeId: issue.fromStoreId,
+        itemId: line.itemId,
+        unitId: line.unitId,
+        quantity: String(line.issueQuantity),
+      },
+      tx,
+    );
+    await tx.insert(departmentConsumptionLines).values({
+      departmentConsumptionId: consumptionId,
+      itemIssueLineId: line.id,
+      itemId: line.itemId,
+      unitId: line.unitId,
+      quantity: String(line.issueQuantity),
+      unitCost: fifo.averageRate,
+      totalCost: fifo.totalAmount,
+    });
+    for (const allocation of fifo.allocations) {
+      ledgerValues.push({
+        storeId: issue.fromStoreId,
+        itemId: line.itemId,
+        unitId: line.unitId,
+        rate: allocation.rate,
+        movementType: "DEPARTMENT_CONSUMPTION" as const,
+        stockCategory: "AVAILABLE" as const,
+        quantityIn: "0",
+        quantityOut: allocation.quantity,
+        amountIn: "0",
+        amountOut: allocation.amount,
+        transactionDate: postedAt,
+        referenceType: "DEPARTMENT_CONSUMPTION" as const,
+        referenceId: issue.id,
+        referenceLineId: line.id,
+        sourceKey: stockLedgerSourceKey({
+          referenceType: "DEPARTMENT_CONSUMPTION",
+          referenceLineId: line.id,
+          storeId: issue.fromStoreId,
+          movementType: "DEPARTMENT_CONSUMPTION",
+          stockCategory: "AVAILABLE",
+          rate: allocation.rate,
+        }),
+        postedByApplicationUserId: actor.id,
+        postedAt,
+      });
+    }
+  }
+  const ledgerRows = await tx.insert(stockLedger).values(ledgerValues).returning({
+    id: stockLedger.id,
+  });
+
+  await tx.insert(itemIssueActions).values({
+    itemIssueId: issue.id,
+    action: "ISSUE_TO_DEPARTMENT",
+    fromStatus: "PENDING_VERIFICATION",
+    toStatus: "POSTED",
+    actorApplicationUserId: actor.id,
+    actorWorkflowRole: "CORPORATE_CHECKER",
+    remarks: input.remarks,
+    stockLedgerReferenceId: ledgerRows[0]?.id ?? null,
+  });
+
+  await insertItemIssueWorkflowNotifications(tx, {
+    type: "ITEM_ISSUE_DEPARTMENT_ISSUED",
+    issueId: issue.id,
+    issueNumber: issue.issueNumber,
+    requestNumber: "",
+    actorUserId: actor.id,
+    actorName: actorRecord.employee.employeeName ?? actorRecord.user.username,
+    remarks: input.remarks,
+    createdByApplicationUserId: issue.createdByApplicationUserId,
+    corporateCheckerApplicationUserId: actor.id,
+    branchMakerApplicationUserId: null,
+    branchCheckerApplicationUserId: null,
+  });
+}
+
+export async function createDepartmentIssue(
+  actor: AuthenticatedUser,
+  input: CreateDepartmentIssueInput,
+): Promise<ItemIssue> {
+  const assignment = await requireSupplyingStoreMaker(actor, input.fromStoreId);
+  const departmentRows = await getDb()
+    .select()
+    .from(departments)
+    .where(eq(departments.id, input.departmentId))
+    .limit(1);
+  const department = departmentRows[0];
+  if (!department || !department.isActive) {
+    throw new AppError("Department is inactive or invalid.", 409);
+  }
+  if (!input.consumptionDescription.trim()) {
+    throw new AppError("Consumption Description is required.", 400);
+  }
+
+  const itemIds = [...new Set(input.lines.map((line) => line.itemId))];
+  const itemRows = await getDb()
+    .select({ item: items })
+    .from(items)
+    .where(inArray(items.id, itemIds));
+  const itemById = new Map(itemRows.map((row) => [row.item.id, row.item]));
+  for (const line of input.lines) {
+    const item = itemById.get(line.itemId);
+    if (!item || !item.isActive || !item.isIssuable) {
+      throw new AppError("Items and units must match Item Setup.", 400);
+    }
+  }
+
+  const createdId = await createDraftWithRetry(
+    {
+      requestId: null,
+      fromStoreId: input.fromStoreId,
+      toStoreId: null,
+      destinationType: "CORPORATE_DEPARTMENT",
+      departmentId: input.departmentId,
+      consumedByEmployeeId: input.consumedByEmployeeId ?? null,
+      consumptionDescription: input.consumptionDescription,
+      status: "DRAFT",
+      remarks: input.remarks,
+      createdByApplicationUserId: actor.id,
+      issueDate: new Date(),
+      version: 1,
+    },
+    input.lines.map((line) => ({
+      requestLineId: null,
+      itemId: line.itemId,
+      issueQuantity: line.issueQuantity,
+    })),
+    {
+      actorUserId: actor.id,
+      actorWorkflowRole: issueActorWorkflowRole(
+        actor,
+        "MAKER",
+        assignment.branch.branchType,
+      ),
+    },
+  );
+  return getItemIssueById(createdId, actor);
+}
+
+export async function updateDepartmentIssue(
+  issueId: string,
+  actor: AuthenticatedUser,
+  input: UpdateDepartmentIssueInput,
+): Promise<ItemIssue> {
+  const existing = await getItemIssueById(issueId, actor);
+  if (existing.destinationType !== "CORPORATE_DEPARTMENT") {
+    throw new AppError("This issue is not a department consumption.", 409);
+  }
+  await requireSupplyingStoreMaker(actor, existing.fromStore.id);
+  if (!existing.canEdit) {
+    throw new AppError("This issue cannot be edited.", 403);
+  }
+  if (input.departmentId) {
+    const departmentRows = await getDb()
+      .select()
+      .from(departments)
+      .where(eq(departments.id, input.departmentId))
+      .limit(1);
+    if (!departmentRows[0] || !departmentRows[0].isActive) {
+      throw new AppError("Department is inactive or invalid.", 409);
+    }
+  }
+  if (input.lines) {
+    const itemIds = [...new Set(input.lines.map((line) => line.itemId))];
+    const itemRows = await getDb()
+      .select({ item: items })
+      .from(items)
+      .where(inArray(items.id, itemIds));
+    const itemById = new Map(itemRows.map((row) => [row.item.id, row.item]));
+    for (const line of input.lines) {
+      const item = itemById.get(line.itemId);
+      if (!item || !item.isActive || !item.isIssuable) {
+        throw new AppError("Items and units must match Item Setup.", 400);
+      }
+    }
+  }
+
+  try {
+    await getDb().transaction(async (tx) => {
+      const updated = await tx
+        .update(itemIssues)
+        .set({
+          ...(input.departmentId !== undefined
+            ? { departmentId: input.departmentId }
+            : {}),
+          ...(input.consumedByEmployeeId !== undefined
+            ? { consumedByEmployeeId: input.consumedByEmployeeId }
+            : {}),
+          ...(input.consumptionDescription !== undefined
+            ? { consumptionDescription: input.consumptionDescription }
+            : {}),
+          ...(input.remarks !== undefined ? { remarks: input.remarks } : {}),
+          version: existing.version + 1,
+          updatedAt: sql`now()`,
+        })
+        .where(
+          and(
+            eq(itemIssues.id, issueId),
+            eq(itemIssues.version, input.expectedVersion),
+            inArray(itemIssues.status, ["DRAFT", "RETURNED"]),
+          ),
+        )
+        .returning({ id: itemIssues.id });
+      if (!updated[0]) {
+        throw new AppError(STALE_ISSUE_MESSAGE, 409);
+      }
+      if (input.lines) {
+        await tx.delete(itemIssueLines).where(eq(itemIssueLines.itemIssueId, issueId));
+        await tx.insert(itemIssueLines).values(
+          input.lines.map((line) => ({
+            itemIssueId: issueId,
+            requestLineId: null,
+            itemId: line.itemId,
+            issueQuantity: line.issueQuantity,
+          })),
+        );
+      }
+      await tx.insert(itemIssueActions).values({
+        itemIssueId: issueId,
+        action: "UPDATE",
+        fromStatus: existing.status,
+        toStatus: existing.status,
+        actorApplicationUserId: actor.id,
+        actorWorkflowRole: issueActorWorkflowRole(
+          actor,
+          "MAKER",
+          existing.fromStore.branch.branchType,
+        ),
+        remarks: input.remarks ?? existing.remarks,
+      });
+    });
+    return getItemIssueById(issueId, actor);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    mapItemIssueDatabaseError(error);
+  }
+}
+
+export async function listDepartmentConsumptions(
+  actor: AuthenticatedUser,
+  query: DepartmentConsumptionListQuery,
+): Promise<PaginatedDepartmentConsumptionResponse> {
+  const access = await loadIssueAccessContext(actor);
+  const conditions: SQL[] = [eq(itemIssues.status, "POSTED")];
+  if (!isAdminUser(actor) && access.visibleStoreIds.length > 0) {
+    conditions.push(inArray(itemIssues.fromStoreId, access.visibleStoreIds));
+  } else if (!isAdminUser(actor)) {
+    return {
+      items: [],
+      page: query.page,
+      pageSize: query.pageSize,
+      totalItems: 0,
+      totalPages: 0,
+    };
+  }
+  if (query.departmentId) {
+    conditions.push(eq(departmentConsumptions.departmentId, query.departmentId));
+  }
+  if (query.consumedByEmployeeId) {
+    conditions.push(
+      eq(departmentConsumptions.consumedByEmployeeId, query.consumedByEmployeeId),
+    );
+  }
+  if (query.issuedByUserId) {
+    conditions.push(
+      eq(departmentConsumptions.verifiedByApplicationUserId, query.issuedByUserId),
+    );
+  }
+  if (query.fromDate) {
+    conditions.push(gte(departmentConsumptions.issueDate, new Date(query.fromDate)));
+  }
+  if (query.toDate) {
+    conditions.push(lte(departmentConsumptions.issueDate, new Date(query.toDate)));
+  }
+  if (query.itemId) {
+    conditions.push(
+      sql`exists (
+        select 1 from ${departmentConsumptionLines}
+        where ${departmentConsumptionLines.departmentConsumptionId} = ${departmentConsumptions.id}
+          and ${departmentConsumptionLines.itemId} = ${query.itemId}
+      )`,
+    );
+  }
+  if (query.search) {
+    const pattern = `%${escapeIlikePattern(query.search)}%`;
+    conditions.push(sql`${itemIssues.issueNumber} ILIKE ${pattern} ESCAPE '\\'`);
+  }
+  const where = and(...conditions);
+  const totalItems =
+    (
+      await getDb()
+        .select({ value: count() })
+        .from(departmentConsumptions)
+        .innerJoin(itemIssues, eq(departmentConsumptions.itemIssueId, itemIssues.id))
+        .where(where)
+    )[0]?.value ?? 0;
+  const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / query.pageSize);
+  const rows = await getDb()
+    .select({
+      consumption: departmentConsumptions,
+      issue: itemIssues,
+      department: departments,
+      consumedBy: employees,
+      createdByUser: createdByUsers,
+      createdByEmployee: createdByEmployees,
+      verifiedByUser: verifiedByUsers,
+      verifiedByEmployee: verifiedByEmployees,
+    })
+    .from(departmentConsumptions)
+    .innerJoin(itemIssues, eq(departmentConsumptions.itemIssueId, itemIssues.id))
+    .innerJoin(departments, eq(departmentConsumptions.departmentId, departments.id))
+    .leftJoin(employees, eq(departmentConsumptions.consumedByEmployeeId, employees.id))
+    .innerJoin(
+      createdByUsers,
+      eq(departmentConsumptions.createdByApplicationUserId, createdByUsers.id),
+    )
+    .leftJoin(createdByEmployees, eq(createdByUsers.employeeId, createdByEmployees.id))
+    .innerJoin(
+      verifiedByUsers,
+      eq(departmentConsumptions.verifiedByApplicationUserId, verifiedByUsers.id),
+    )
+    .leftJoin(
+      verifiedByEmployees,
+      eq(verifiedByUsers.employeeId, verifiedByEmployees.id),
+    )
+    .where(where)
+    .orderBy(desc(departmentConsumptions.issueDate), desc(departmentConsumptions.id))
+    .limit(query.pageSize)
+    .offset((query.page - 1) * query.pageSize);
+
+  const consumptionIds = rows.map((row) => row.consumption.id);
+  const lineRows =
+    consumptionIds.length === 0
+      ? []
+      : await getDb()
+          .select({
+            line: departmentConsumptionLines,
+            itemCode: items.itemCode,
+            itemName: items.itemName,
+            unitName: units.unitName,
+          })
+          .from(departmentConsumptionLines)
+          .innerJoin(items, eq(departmentConsumptionLines.itemId, items.id))
+          .innerJoin(units, eq(departmentConsumptionLines.unitId, units.id))
+          .where(
+            inArray(departmentConsumptionLines.departmentConsumptionId, consumptionIds),
+          );
+
+  const itemsOut: DepartmentConsumptionListItem[] = rows.map((row) => {
+    const lines = lineRows
+      .filter((line) => line.line.departmentConsumptionId === row.consumption.id)
+      .map((line) => ({
+        id: line.line.id,
+        itemId: line.line.itemId,
+        itemCode: line.itemCode,
+        itemName: line.itemName,
+        unit: { id: line.line.unitId, unitName: line.unitName },
+        quantity: String(line.line.quantity),
+        unitCost: String(line.line.unitCost),
+        totalCost: String(line.line.totalCost),
+      }));
+    const quantityConsumed = lines.reduce(
+      (sum, line) => sum + parseQuantityToScaled(line.quantity),
+      0n,
+    );
+    const totalValue = lines.reduce(
+      (sum, line) => sum + parseQuantityToScaled(line.totalCost),
+      0n,
+    );
+    return {
+      id: row.consumption.id,
+      itemIssueId: row.issue.id,
+      issueNumber: row.issue.issueNumber,
+      issueDate: row.consumption.issueDate.toISOString(),
+      department: {
+        id: row.department.id,
+        departmentCode: row.department.departmentCode,
+        departmentName: row.department.departmentName,
+        isActive: row.department.isActive,
+      },
+      consumptionDescription: row.consumption.consumptionDescription,
+      consumedBy: row.consumedBy
+        ? {
+            id: row.consumedBy.id,
+            employeeCode: row.consumedBy.employeeCode,
+            employeeName: row.consumedBy.employeeName,
+            isActive: row.consumedBy.isActive,
+          }
+        : null,
+      createdBy: toPersonSummary(row.createdByUser, row.createdByEmployee)!,
+      verifiedBy: toPersonSummary(row.verifiedByUser, row.verifiedByEmployee)!,
+      quantityConsumed: scaledToQuantity(quantityConsumed),
+      totalConsumptionValue: scaledToQuantity(totalValue),
+      lines,
+    };
+  });
+
+  return {
+    items: itemsOut,
+    page: query.page,
+    pageSize: query.pageSize,
+    totalItems,
+    totalPages,
+  };
 }

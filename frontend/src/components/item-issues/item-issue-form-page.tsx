@@ -24,13 +24,17 @@ import { requestedByDisplayName } from "@/components/item-requests/item-request-
 import {
   formatAvailableStockQuantity,
   formatDateTime,
-  ITEM_ISSUE_STATUS_LABELS,
   itemIssueDisplayedRemainingQuantity,
   itemIssueQtyColumnLabel,
   itemIssueRemainingColumnLabel,
+  itemIssueStatusDisplayLabel,
   personDisplayName,
 } from "./item-issue-labels";
 import { departmentDisplayName } from "@/components/item-requests/item-request-labels";
+import { DepartmentIssueFormPage } from "./department-issue-form-page";
+import {
+  itemIssueCheckerActionLabel,
+} from "@printing-stationery/shared";
 
 type ItemIssueFormPageProps =
   | {
@@ -61,10 +65,10 @@ function buildInitialQuantities(
 ): Record<string, string> {
   const values: Record<string, string> = {};
   for (const line of availability) {
-    values[line.requestLineId] = "";
+  values[line.requestLineId ?? line.itemId] = "";
   }
   for (const line of issue?.lines ?? []) {
-    values[line.requestLineId] = line.issueQuantity;
+    values[line.requestLineId ?? line.itemId] = line.issueQuantity;
   }
   return values;
 }
@@ -74,7 +78,9 @@ function buildDraftPayload(params: {
   issueQuantities: Record<string, string>;
   availability: ItemIssueLineAvailability[];
 }) {
-  const allowedIds = new Set(params.availability.map((line) => line.requestLineId));
+  const allowedIds = new Set(
+    params.availability.map((line) => line.requestLineId).filter(Boolean),
+  );
   const lines = Object.entries(params.issueQuantities)
     .map(([requestLineId, issueQuantity]) => ({
       requestLineId,
@@ -353,6 +359,18 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
     );
   }
 
+  if (
+    !loading &&
+    issue?.destinationType === "CORPORATE_DEPARTMENT" &&
+    props.mode === "detail"
+  ) {
+    return <DepartmentIssueFormPage mode="detail" issueId={issue.id} />;
+  }
+
+  const checkerLabel = itemIssueCheckerActionLabel({
+    destinationType: issue?.destinationType,
+  });
+
   return (
     <section className="w-full max-w-6xl">
       <Link
@@ -391,12 +409,17 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               </h1>
               <p className="mt-1 text-ink-muted">
                 {issue
-                  ? ITEM_ISSUE_STATUS_LABELS[issue.status]
+                  ? itemIssueStatusDisplayLabel({
+                      status: issue.status,
+                      destinationType: issue.destinationType,
+                      deliveryStatus: issue.deliveryStatus,
+                    })
                   : "Draft not yet created"}
               </p>
               <p className="mt-1 text-sm text-ink-muted">
-                Corporate Maker creates the issue. Corporate Checker verifies and
-                posts it before handover.
+                Corporate Maker creates the transfer. Corporate Checker dispatches
+                it into in-transit stock. Branch stock increases only after receipt
+                confirmation.
               </p>
             </div>
             {issue?.issueNumber ? (
@@ -506,7 +529,15 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               <span className="font-medium text-ink">Issue status</span>
               <input
                 readOnly
-                value={issue ? ITEM_ISSUE_STATUS_LABELS[issue.status] : "Draft"}
+                value={
+                  issue
+                    ? itemIssueStatusDisplayLabel({
+                        status: issue.status,
+                        destinationType: issue.destinationType,
+                        deliveryStatus: issue.deliveryStatus,
+                      })
+                    : "Draft"
+                }
                 className="rounded-md border border-border bg-paper px-3 py-2 text-ink-muted"
               />
             </label>
@@ -556,7 +587,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               <tbody>
                 {availability.map((line) => (
                   <tr
-                    key={line.requestLineId}
+                    key={line.requestLineId ?? line.itemId}
                     className="border-b border-border last:border-b-0 transition-colors hover:bg-accent-soft/70"
                   >
                     <td className="px-3 py-3">
@@ -586,11 +617,13 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                     {isPosted ? null : (
                       <td className="whitespace-nowrap px-3 py-3">
                         <input
-                          value={issueQuantities[line.requestLineId] ?? ""}
+                          value={
+                            issueQuantities[line.requestLineId ?? line.itemId] ?? ""
+                          }
                           onChange={(event) =>
                             setIssueQuantities((current) => ({
                               ...current,
-                              [line.requestLineId]: event.target.value,
+                              [line.requestLineId ?? line.itemId]: event.target.value,
                             }))
                           }
                           inputMode="decimal"
@@ -639,7 +672,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                   }}
                   className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-60"
                 >
-                  Verify and Post
+                  {checkerLabel}
                 </button>
                 <button
                   type="button"
@@ -681,7 +714,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
           ) : null}
           {issue?.verifiedAt ? (
             <p className="text-sm text-ink-muted">
-              Verified and posted by {personDisplayName(issue.verifiedBy)} on{" "}
+              Verified and dispatched by {personDisplayName(issue.verifiedBy)} on{" "}
               {formatDateTime(issue.verifiedAt)}.
             </p>
           ) : null}
@@ -695,7 +728,14 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                   <li key={action.id} className="border-l-2 border-border pl-3">
                     <div className="font-medium">
                       {action.action.replaceAll("_", " ")} →{" "}
-                      {ITEM_ISSUE_STATUS_LABELS[action.toStatus]}
+                      {itemIssueStatusDisplayLabel({
+                        status: action.toStatus,
+                        destinationType: issue.destinationType,
+                        deliveryStatus:
+                          action.toStatus === "POSTED"
+                            ? issue.deliveryStatus
+                            : null,
+                      })}
                     </div>
                     <div className="text-ink-muted">
                       {personDisplayName(action.actor)} · {action.actorWorkflowRole} ·{" "}
@@ -757,14 +797,14 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
           <div className="w-full max-w-xl rounded-lg border border-border bg-paper-elevated p-5 shadow-lg">
             <h2 className="text-xl font-semibold tracking-tight">
               {checkerAction === "verify"
-                ? "Verify and Post Item Issue"
+                ? checkerLabel
                 : checkerAction === "return"
                   ? "Return Item Issue"
                   : "Reject Item Issue"}
             </h2>
             <p className="mt-2 text-sm text-ink-muted">
               {checkerAction === "verify"
-                ? "This will deduct Corporate Store stock once and mark the issue as posted."
+                ? "This will decrease Corporate Store stock, create in-transit stock, and will not increase Branch Store stock until receipt is confirmed."
                 : "Stock will not change. Remarks are required."}
             </p>
             <label className="mt-4 flex flex-col gap-1 text-sm">
@@ -798,7 +838,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
                 {saving
                   ? "Working…"
                   : checkerAction === "verify"
-                    ? "Verify and Post"
+                    ? checkerLabel
                     : checkerAction === "return"
                       ? "Return"
                       : "Reject"}

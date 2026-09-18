@@ -21,10 +21,21 @@ import {
   itemIssueLines,
   itemIssues,
 } from "../db/schema/item-issues.js";
+import {
+  departmentConsumptionLines,
+  departmentConsumptions,
+  itemIssueDiscrepancies,
+  itemIssueReceiptActions,
+  itemIssueReceiptLines,
+  itemIssueReceipts,
+  itemIssueShipmentLines,
+  itemIssueShipments,
+} from "../db/schema/item-issue-delivery.js";
 import { itemRequestActions, itemRequestLines, itemRequests } from "../db/schema/item-requests.js";
 import { notifications } from "../db/schema/notifications.js";
 import { items } from "../db/schema/items.js";
 import { stockLedger } from "../db/schema/opening-stocks.js";
+import { stockLedgerSourceKey } from "./stock-ledger.js";
 import { stores } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
 import {
@@ -159,6 +170,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         unitId: itemUnitId,
         rate: "1",
         movementType: "PURCHASE",
+        stockCategory: "AVAILABLE",
         quantityIn: quantity,
         quantityOut: "0",
         amountIn: quantity,
@@ -167,6 +179,14 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         referenceType: "PURCHASE",
         referenceId: randomUUID(),
         referenceLineId: randomUUID(),
+        sourceKey: stockLedgerSourceKey({
+          referenceType: "PURCHASE",
+          referenceLineId: randomUUID(),
+          storeId,
+          movementType: "PURCHASE",
+          stockCategory: "AVAILABLE",
+          rate: "1",
+        }),
         postedByApplicationUserId: admin.id,
         postedAt: new Date(),
       })
@@ -244,6 +264,66 @@ describe("store-to-store item requests", { concurrency: false }, () => {
     }
 
     if (issueIds.length > 0) {
+      const shipmentRows = await db
+        .select({ id: itemIssueShipments.id })
+        .from(itemIssueShipments)
+        .where(inArray(itemIssueShipments.itemIssueId, issueIds));
+      const shipmentIds = shipmentRows.map((row) => row.id);
+      const receiptRows =
+        shipmentIds.length > 0
+          ? await db
+              .select({ id: itemIssueReceipts.id })
+              .from(itemIssueReceipts)
+              .where(inArray(itemIssueReceipts.shipmentId, shipmentIds))
+          : [];
+      const receiptIds = receiptRows.map((row) => row.id);
+      const consumptionRows = await db
+        .select({ id: departmentConsumptions.id })
+        .from(departmentConsumptions)
+        .where(inArray(departmentConsumptions.itemIssueId, issueIds));
+      const consumptionIds = consumptionRows.map((row) => row.id);
+      if (receiptIds.length > 0) {
+        await db
+          .delete(itemIssueDiscrepancies)
+          .where(inArray(itemIssueDiscrepancies.receiptId, receiptIds));
+        await db
+          .delete(itemIssueReceiptActions)
+          .where(inArray(itemIssueReceiptActions.receiptId, receiptIds));
+        await db
+          .delete(itemIssueReceiptLines)
+          .where(inArray(itemIssueReceiptLines.receiptId, receiptIds));
+      }
+      await db
+        .delete(itemIssueDiscrepancies)
+        .where(inArray(itemIssueDiscrepancies.itemIssueId, issueIds));
+      await db
+        .delete(stockLedger)
+        .where(
+          inArray(stockLedger.referenceId, [
+            ...issueIds,
+            ...shipmentIds,
+            ...receiptIds,
+          ]),
+        );
+      if (receiptIds.length > 0) {
+        await db.delete(itemIssueReceipts).where(inArray(itemIssueReceipts.id, receiptIds));
+      }
+      if (shipmentIds.length > 0) {
+        await db
+          .delete(itemIssueShipmentLines)
+          .where(inArray(itemIssueShipmentLines.shipmentId, shipmentIds));
+        await db.delete(itemIssueShipments).where(inArray(itemIssueShipments.id, shipmentIds));
+      }
+      if (consumptionIds.length > 0) {
+        await db
+          .delete(departmentConsumptionLines)
+          .where(
+            inArray(departmentConsumptionLines.departmentConsumptionId, consumptionIds),
+          );
+        await db
+          .delete(departmentConsumptions)
+          .where(inArray(departmentConsumptions.id, consumptionIds));
+      }
       await db
         .delete(notifications)
         .where(
@@ -1252,7 +1332,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       },
     );
     assert.equal(firstIssue.fromStore.id, sourceStoreId);
-    assert.equal(firstIssue.toStore.id, destinationStoreId);
+    assert.equal(firstIssue.toStore?.id, destinationStoreId);
 
     const submitted = await submitItemIssue(firstIssue.id, sourceMaker, {
       expectedVersion: firstIssue.version,
@@ -1274,7 +1354,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
           lines: [{ requestLineId, issueQuantity: "7" }],
         }),
       (error: unknown) =>
-        isAppError(error, 409, /exceeds the remaining requested quantity/i),
+        isAppError(error, 409, /exceeds request remainder/i),
     );
 
     const secondIssue = await createItemIssueFromRequest(
@@ -1607,7 +1687,7 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       lines: [{ requestLineId, issueQuantity: "3" }],
     });
     assert.equal(issue.fromStore.id, corporateStoreId);
-    assert.equal(issue.toStore.id, birtamodStoreId);
+    assert.equal(issue.toStore?.id, birtamodStoreId);
     assert.notEqual(issue.fromStore.id, birtamodStoreId);
 
     const submitted = await submitItemIssue(issue.id, corporateMaker, {

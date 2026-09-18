@@ -5,6 +5,7 @@ import {
   itemIssueDisplayedRemainingQuantity,
   itemIssueQtyColumnLabel,
   itemIssueRemainingColumnLabel,
+  itemIssueStatusDisplayLabel,
 } from "./item-issue-labels.js";
 
 describe("formatAvailableStockQuantity", () => {
@@ -40,7 +41,7 @@ describe("item issue remaining quantity labels", () => {
 
   it("labels posted remaining as Remaining After Issue", () => {
     assert.equal(itemIssueRemainingColumnLabel("POSTED"), "Remaining After Issue");
-    assert.equal(itemIssueQtyColumnLabel("POSTED"), "Qty Issued Now");
+    assert.equal(itemIssueQtyColumnLabel("POSTED"), "Quantity Issued Now");
     assert.equal(itemIssueDisplayedRemainingQuantity(line, "POSTED"), "5");
   });
 
@@ -58,10 +59,39 @@ describe("item issue remaining quantity labels", () => {
       itemIssueRemainingColumnLabel("PENDING_VERIFICATION"),
       "Outstanding Before This Issue",
     );
-    assert.equal(itemIssueQtyColumnLabel("DRAFT"), "Issue Qty");
+    assert.equal(itemIssueQtyColumnLabel("DRAFT"), "Quantity Issued Now");
     assert.equal(
       itemIssueDisplayedRemainingQuantity(draftLine, "DRAFT"),
       "10",
+    );
+  });
+});
+
+describe("item issue business status labels", () => {
+  it("does not show Posted when a clearer business term applies", () => {
+    assert.equal(
+      itemIssueStatusDisplayLabel({
+        status: "POSTED",
+        destinationType: "BRANCH_STORE",
+        deliveryStatus: "IN_TRANSIT",
+      }),
+      "In Transit",
+    );
+    assert.equal(
+      itemIssueStatusDisplayLabel({
+        status: "POSTED",
+        destinationType: "BRANCH_STORE",
+        deliveryStatus: "RECEIVED",
+      }),
+      "Received",
+    );
+    assert.equal(
+      itemIssueStatusDisplayLabel({
+        status: "POSTED",
+        destinationType: "CORPORATE_DEPARTMENT",
+        deliveryStatus: null,
+      }),
+      "Issued",
     );
   });
 });

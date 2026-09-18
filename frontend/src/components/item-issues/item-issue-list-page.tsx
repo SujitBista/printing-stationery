@@ -10,7 +10,7 @@ import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-n
 import { Badge } from "@/components/ui/badge";
 import {
   formatDateTime,
-  ITEM_ISSUE_STATUS_LABELS,
+  itemIssueStatusDisplayLabel,
   itemIssueStatusTone,
   personDisplayName,
 } from "./item-issue-labels";
@@ -159,23 +159,39 @@ export function ItemIssueListPage({ queue }: ItemIssueListPageProps) {
                   >
                     <td className="px-3 py-3 font-medium">{issue.issueNumber}</td>
                     <td className="px-3 py-3">
-                      <Link
-                        href={`/requests/item-requests/${issue.requestId}`}
-                        className="font-medium text-accent hover:underline"
-                      >
-                        {issue.requestNumber}
-                      </Link>
+                      {issue.requestId && issue.requestNumber ? (
+                        <Link
+                          href={`/requests/item-requests/${issue.requestId}`}
+                          className="font-medium text-accent hover:underline"
+                        >
+                          {issue.requestNumber}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <div>{issue.fromStore.storeName}</div>
                       <div className="text-xs text-ink-muted">
-                        Receiving: {issue.toStore.storeName} (
-                        {issue.toStore.branch.branchName})
+                        {issue.destinationType === "CORPORATE_DEPARTMENT"
+                          ? `Department: ${issue.department?.departmentName ?? "Consumption"}`
+                          : `Receiving: ${issue.toStore?.storeName ?? "—"} (${
+                              issue.toStore?.branch.branchName ?? ""
+                            })`}
                       </div>
                     </td>
                     <td className="px-3 py-3">
-                      <Badge variant={itemIssueStatusTone(issue.status)}>
-                        {ITEM_ISSUE_STATUS_LABELS[issue.status]}
+                      <Badge
+                        variant={itemIssueStatusTone(
+                          issue.status,
+                          issue.deliveryStatus,
+                        )}
+                      >
+                        {itemIssueStatusDisplayLabel({
+                          status: issue.status,
+                          destinationType: issue.destinationType,
+                          deliveryStatus: issue.deliveryStatus,
+                        })}
                       </Badge>
                     </td>
                     <td className="px-3 py-3">
@@ -192,7 +208,9 @@ export function ItemIssueListPage({ queue }: ItemIssueListPageProps) {
                         {issue.status === "RETURNED" && issue.canEdit
                           ? "Correct and Resubmit"
                           : issue.canVerify
-                            ? "Verify"
+                            ? issue.destinationType === "CORPORATE_DEPARTMENT"
+                              ? "Issue to Department"
+                              : "Dispatch"
                             : issue.canEdit
                               ? "Continue Draft"
                               : "View"}

@@ -315,7 +315,7 @@ describe("item issue remaining quantity rules", () => {
       (error: unknown) =>
         error instanceof AppError &&
         error.statusCode === 409 &&
-        /exceeds the remaining requested quantity/i.test(error.message),
+        /exceeds request remainder/i.test(error.message),
     );
   });
 
@@ -336,7 +336,7 @@ describe("item issue remaining quantity rules", () => {
       (error: unknown) =>
         error instanceof AppError &&
         error.statusCode === 409 &&
-        /exceeds the supplying store available stock/i.test(error.message),
+        /Insufficient Corporate Store stock/i.test(error.message),
     );
   });
 

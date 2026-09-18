@@ -1,27 +1,47 @@
 import type { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
 import {
+  confirmItemIssueReceiptInputSchema,
+  createDepartmentIssueInputSchema,
   createItemIssueInputSchema,
+  departmentConsumptionListQuerySchema,
+  incomingShipmentListQuerySchema,
   itemIssueIdSchema,
   itemIssueListQuerySchema,
+  itemIssueReceiptIdSchema,
+  itemIssueShipmentIdSchema,
   itemRequestIdSchema,
   rejectItemIssueInputSchema,
   returnItemIssueInputSchema,
+  returnItemIssueReceiptInputSchema,
   submitItemIssueInputSchema,
+  submitItemIssueReceiptInputSchema,
+  updateDepartmentIssueInputSchema,
   updateItemIssueInputSchema,
   verifyItemIssueInputSchema,
 } from "@printing-stationery/shared";
 import {
+  createDepartmentIssue,
   createItemIssueFromRequest,
   getItemIssueById,
   getItemIssueEligibility,
+  listDepartmentConsumptions,
   listItemIssues,
   rejectItemIssue,
   returnItemIssue,
   submitItemIssue,
+  updateDepartmentIssue,
   updateItemIssue,
   verifyAndPostItemIssue,
 } from "../services/item-issues.service.js";
+import {
+  confirmItemIssueReceipt,
+  getIncomingShipment,
+  listIncomingShipments,
+  listInTransitQuantities,
+  returnItemIssueReceipt,
+  submitItemIssueReceipt,
+} from "../services/item-issue-receipts.service.js";
 import { AppError } from "../utils/errors.js";
 
 function validationMessage(error: ZodError): string {
@@ -186,6 +206,175 @@ export async function rejectItemIssueHandler(
     const input = parseOrThrow(rejectItemIssueInputSchema.safeParse(req.body));
     const result = await rejectItemIssue(issueId, actor, input);
     res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createDepartmentIssueHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const input = parseOrThrow(createDepartmentIssueInputSchema.safeParse(req.body));
+    const result = await createDepartmentIssue(actor, input);
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateDepartmentIssueHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const issueId = parseOrThrow(itemIssueIdSchema.safeParse(req.params.issueId));
+    const input = parseOrThrow(updateDepartmentIssueInputSchema.safeParse(req.body));
+    const result = await updateDepartmentIssue(issueId, actor, input);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listDepartmentConsumptionsHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const query = parseOrThrow(
+      departmentConsumptionListQuerySchema.safeParse(req.query),
+    );
+    const result = await listDepartmentConsumptions(actor, query);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listIncomingShipmentsHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const query = parseOrThrow(incomingShipmentListQuerySchema.safeParse(req.query));
+    const result = await listIncomingShipments(actor, query);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getIncomingShipmentHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const shipmentId = parseOrThrow(
+      itemIssueShipmentIdSchema.safeParse(req.params.shipmentId),
+    );
+    const result = await getIncomingShipment(shipmentId, actor);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function submitItemIssueReceiptHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const shipmentId = parseOrThrow(
+      itemIssueShipmentIdSchema.safeParse(req.params.shipmentId),
+    );
+    const input = parseOrThrow(submitItemIssueReceiptInputSchema.safeParse(req.body));
+    const result = await submitItemIssueReceipt(shipmentId, actor, input);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function confirmItemIssueReceiptHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const receiptId = parseOrThrow(
+      itemIssueReceiptIdSchema.safeParse(req.params.receiptId),
+    );
+    const input = parseOrThrow(confirmItemIssueReceiptInputSchema.safeParse(req.body));
+    const result = await confirmItemIssueReceipt(receiptId, actor, input);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function completeItemIssueReceiptWithDiscrepancyHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const receiptId = parseOrThrow(
+      itemIssueReceiptIdSchema.safeParse(req.params.receiptId),
+    );
+    const input = parseOrThrow(confirmItemIssueReceiptInputSchema.safeParse(req.body));
+    const result = await confirmItemIssueReceipt(receiptId, actor, {
+      ...input,
+      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function returnItemIssueReceiptHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const receiptId = parseOrThrow(
+      itemIssueReceiptIdSchema.safeParse(req.params.receiptId),
+    );
+    const input = parseOrThrow(returnItemIssueReceiptInputSchema.safeParse(req.body));
+    const result = await returnItemIssueReceipt(receiptId, actor, input);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listInTransitQuantitiesHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const actor = requireActor(req);
+    const result = await listInTransitQuantities(actor);
+    res.status(200).json({ items: result });
   } catch (error) {
     next(error);
   }

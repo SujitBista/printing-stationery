@@ -494,7 +494,11 @@ async function loadSubmittedIssueTotalsByRequestLine(
     .groupBy(itemIssueLines.requestLineId);
 
   return new Map(
-    rows.map((row) => [row.requestLineId, parseQuantityToScaled(row.totalQuantity)]),
+    rows
+      .filter((row): row is { requestLineId: string; totalQuantity: string } =>
+        Boolean(row.requestLineId),
+      )
+      .map((row) => [row.requestLineId, parseQuantityToScaled(row.totalQuantity)]),
   );
 }
 

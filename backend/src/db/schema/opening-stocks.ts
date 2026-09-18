@@ -55,12 +55,27 @@ export const stockLedgerMovementTypeEnum = pgEnum("stock_ledger_movement_type", 
   "OPENING_STOCK",
   "PURCHASE",
   "ITEM_ISSUE",
+  "ITEM_ISSUE_IN_TRANSIT",
+  "ITEM_ISSUE_RECEIPT",
+  "ITEM_ISSUE_DISCREPANCY",
+  "DEPARTMENT_CONSUMPTION",
 ]);
 
 export const stockLedgerReferenceTypeEnum = pgEnum("stock_ledger_reference_type", [
   "OPENING_STOCK",
   "PURCHASE",
   "ITEM_ISSUE",
+  "ITEM_ISSUE_IN_TRANSIT",
+  "ITEM_ISSUE_RECEIPT",
+  "ITEM_ISSUE_DISCREPANCY",
+  "DEPARTMENT_CONSUMPTION",
+]);
+
+export const stockLedgerCategoryEnum = pgEnum("stock_ledger_category", [
+  "AVAILABLE",
+  "IN_TRANSIT",
+  "DISCREPANCY",
+  "DAMAGED",
 ]);
 
 export const openingStockBatches = pgTable(
@@ -294,6 +309,9 @@ export const stockLedger = pgTable(
     unitId: uuid("unit_id").notNull(),
     rate: numeric("rate", { precision: 18, scale: 4 }).notNull(),
     movementType: stockLedgerMovementTypeEnum("movement_type").notNull(),
+    stockCategory: stockLedgerCategoryEnum("stock_category")
+      .notNull()
+      .default("AVAILABLE"),
     quantityIn: numeric("quantity_in", { precision: 18, scale: 4 }).notNull(),
     quantityOut: numeric("quantity_out", { precision: 18, scale: 4 }).notNull(),
     amountIn: numeric("amount_in", { precision: 18, scale: 2 }).notNull(),
@@ -302,16 +320,14 @@ export const stockLedger = pgTable(
     referenceType: stockLedgerReferenceTypeEnum("reference_type").notNull(),
     referenceId: uuid("reference_id").notNull(),
     referenceLineId: uuid("reference_line_id").notNull(),
+    sourceKey: varchar("source_key", { length: 180 }).notNull(),
     postedByApplicationUserId: uuid("posted_by_application_user_id").notNull(),
     postedAt: timestamp("posted_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("stock_ledger_reference_line_uidx").on(
-      table.referenceType,
-      table.referenceLineId,
-    ),
+    uniqueIndex("stock_ledger_source_key_uidx").on(table.sourceKey),
     index("stock_ledger_store_item_unit_idx").on(
       table.storeId,
       table.itemId,

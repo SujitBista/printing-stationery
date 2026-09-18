@@ -47,6 +47,7 @@ import { stores, type StoreRow } from "../db/schema/stores.js";
 import { units } from "../db/schema/units.js";
 import { AppError } from "../utils/errors.js";
 import { mapPurchaseDatabaseError } from "../utils/db-errors.js";
+import { stockLedgerSourceKey } from "./stock-ledger.js";
 
 const STALE_PURCHASE_MESSAGE =
   "This purchase was updated by someone else. Reload and try again.";
@@ -111,6 +112,7 @@ async function insertPurchaseLedger(
       unitId: line.unitId,
       rate: line.rate,
       movementType: "PURCHASE" as const,
+      stockCategory: "AVAILABLE" as const,
       quantityIn: line.quantity,
       quantityOut: "0",
       amountIn: line.amount,
@@ -119,6 +121,14 @@ async function insertPurchaseLedger(
       referenceType: "PURCHASE" as const,
       referenceId: params.purchaseId,
       referenceLineId: line.id,
+      sourceKey: stockLedgerSourceKey({
+        referenceType: "PURCHASE",
+        referenceLineId: line.id,
+        storeId: params.storeId,
+        movementType: "PURCHASE",
+        stockCategory: "AVAILABLE",
+        rate: line.rate,
+      }),
       postedByApplicationUserId: params.postedByApplicationUserId,
       postedAt,
     })),

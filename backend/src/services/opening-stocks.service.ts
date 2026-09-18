@@ -35,6 +35,7 @@ import {
 } from "../db/schema/index.js";
 import { AppError } from "../utils/errors.js";
 import { databaseUnavailableError, isDatabaseUnavailableError } from "../utils/db-errors.js";
+import { stockLedgerSourceKey } from "./stock-ledger.js";
 
 const MAX_IMPORT_FILE_BYTES = 3 * 1024 * 1024;
 const HISTORICAL_CUTOVER_WARNING =
@@ -1501,6 +1502,7 @@ export async function postOpeningStockBatch(
             unitId: line.unitId!,
             rate: line.itemRate,
             movementType: "OPENING_STOCK" as const,
+            stockCategory: "AVAILABLE" as const,
             quantityIn: line.openingQuantity,
             quantityOut: "0",
             amountIn: line.openingAmount,
@@ -1509,6 +1511,14 @@ export async function postOpeningStockBatch(
             referenceType: "OPENING_STOCK" as const,
             referenceId: batch.id,
             referenceLineId: line.id,
+            sourceKey: stockLedgerSourceKey({
+              referenceType: "OPENING_STOCK",
+              referenceLineId: line.id,
+              storeId: line.storeId!,
+              movementType: "OPENING_STOCK",
+              stockCategory: "AVAILABLE",
+              rate: line.itemRate,
+            }),
             postedByApplicationUserId: actor.id,
             postedAt: new Date(),
           })),
@@ -1622,7 +1632,7 @@ export async function getOperationalAvailableQuantities(
     return [];
   }
 
-  const conditions: SQL[] = [];
+  const conditions: SQL[] = [eq(stockLedger.stockCategory, "AVAILABLE")];
   if (params.storeId) {
     conditions.push(eq(stockLedger.storeId, params.storeId));
   }
@@ -1633,11 +1643,7 @@ export async function getOperationalAvailableQuantities(
   }
 
   const where =
-    conditions.length === 0
-      ? undefined
-      : conditions.length === 1
-        ? conditions[0]
-        : and(...conditions);
+    conditions.length === 1 ? conditions[0] : and(...conditions);
 
   const grouped = await executor
     .select({
@@ -1667,14 +1673,14 @@ export async function listStockBalances(
   query: StockBalanceListQuery,
 ): Promise<StockBalanceResponse> {
   requireOpeningStockAdmin(actor);
-  const conditions: SQL[] = [];
+  const conditions: SQL[] = [eq(stockLedger.stockCategory, "AVAILABLE")];
   if (query.storeId) {
     conditions.push(eq(stockLedger.storeId, query.storeId));
   }
   if (query.itemId) {
     conditions.push(eq(stockLedger.itemId, query.itemId));
   }
-  const where = conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions);
+  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
 
   const grouped = await getDb()
     .select({

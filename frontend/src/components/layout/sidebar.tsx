@@ -10,6 +10,10 @@ import {
 } from "@/lib/item-requests/queues";
 import { getItemIssueSidebarQueues } from "@/lib/item-issues/queues";
 import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
+import {
+  actorCanAccessDepartmentConsumption,
+  actorCanAccessIncomingItems,
+} from "@printing-stationery/shared";
 
 type NavItem = {
   label: string;
@@ -45,6 +49,8 @@ const ALL_ITEM_REQUEST_QUEUE_HREFS: readonly string[] = [
   "/requests/item-issues/pending",
   "/requests/item-issues/returned",
   "/requests/item-issues/posted",
+  "/requests/incoming-items",
+  "/requests/department-consumption",
 ];
 
 const NAV_SECTIONS: NavSection[] = [
@@ -306,6 +312,24 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             ? returnedIssueCount
             : undefined,
     })),
+    ...(actorCanAccessIncomingItems(workflowRoles)
+      ? [
+          {
+            label: "Incoming Items",
+            href: "/requests/incoming-items",
+            group: "fulfilment" as const,
+          },
+        ]
+      : []),
+    ...(actorCanAccessDepartmentConsumption(workflowRoles)
+      ? [
+          {
+            label: "Department Consumption",
+            href: "/requests/department-consumption",
+            group: "fulfilment" as const,
+          },
+        ]
+      : []),
   ];
 
   return (

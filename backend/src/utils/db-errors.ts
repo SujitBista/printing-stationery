@@ -45,6 +45,7 @@ const ITEM_ISSUES_ONE_OPEN_PER_REQUEST_INDEX =
   "item_issues_one_open_per_request_uidx";
 const STOCK_LEDGER_REFERENCE_LINE_UNIQUE_INDEX =
   "stock_ledger_reference_line_uidx";
+const STOCK_LEDGER_SOURCE_KEY_UNIQUE_INDEX = "stock_ledger_source_key_uidx";
 const PARTY_CODE_UNIQUE_INDEX = "parties_party_code_lower_uidx";
 const PURCHASES_PARTY_ID_FK = "purchases_party_id_fk";
 const PURCHASE_NUMBER_UNIQUE_INDEX = "purchases_purchase_number_uidx";
@@ -610,7 +611,10 @@ export function isStockLedgerReferenceLineUniqueViolation(
     return false;
   }
   const constraint = readErrorProperty(error, "constraint");
-  return constraint === STOCK_LEDGER_REFERENCE_LINE_UNIQUE_INDEX;
+  return (
+    constraint === STOCK_LEDGER_REFERENCE_LINE_UNIQUE_INDEX ||
+    constraint === STOCK_LEDGER_SOURCE_KEY_UNIQUE_INDEX
+  );
 }
 
 export function mapItemIssueDatabaseError(error: unknown): never {
@@ -643,7 +647,7 @@ export function mapItemIssueDatabaseError(error: unknown): never {
   }
 
   if (isStockLedgerReferenceLineUniqueViolation(error)) {
-    throw new AppError("This item issue has already been posted.", 409, {
+    throw new AppError("This item issue has already been dispatched.", 409, {
       cause: error,
     });
   }

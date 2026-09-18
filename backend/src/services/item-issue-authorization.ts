@@ -23,6 +23,15 @@ export const ADMIN_ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE =
 export const ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE =
   "You cannot verify an item issue that you created.";
 
+export const ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE =
+  "You are not assigned to the destination store.";
+
+export const ITEM_ISSUE_RECEIPT_SELF_VERIFY_FORBIDDEN_MESSAGE =
+  "You cannot verify your own transaction.";
+
+export const ITEM_ISSUE_MAKER_CHECKER_FORBIDDEN_MESSAGE =
+  "Maker cannot perform the Checker action.";
+
 export const INELIGIBLE_SUPPLYING_STORE_MESSAGE =
   "The supplying store is not allowed to transfer or issue stock.";
 

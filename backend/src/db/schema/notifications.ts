@@ -23,6 +23,12 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "ITEM_ISSUE_RETURNED",
   "ITEM_ISSUE_REJECTED",
   "ITEM_ISSUE_POSTED",
+  "ITEM_ISSUE_DISPATCHED",
+  "ITEM_ISSUE_RECEIPT_RECORDED",
+  "ITEM_ISSUE_RECEIPT_RETURNED",
+  "ITEM_ISSUE_RECEIPT_CONFIRMED",
+  "ITEM_ISSUE_DISCREPANCY_REPORTED",
+  "ITEM_ISSUE_DEPARTMENT_ISSUED",
 ]);
 
 export const notificationEntityTypeEnum = pgEnum("notification_entity_type", [

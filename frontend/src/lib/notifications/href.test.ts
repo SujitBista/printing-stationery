@@ -8,6 +8,7 @@ describe("itemRequestNotificationHref", () => {
       itemRequestNotificationHref({
         relatedEntityType: "ITEM_REQUEST",
         relatedEntityId: "55555555-5555-4555-8555-555555555555",
+        type: "ITEM_REQUEST_APPROVED",
       }),
       "/requests/item-requests/55555555-5555-4555-8555-555555555555",
     );
@@ -18,8 +19,20 @@ describe("itemRequestNotificationHref", () => {
       itemRequestNotificationHref({
         relatedEntityType: "ITEM_ISSUE",
         relatedEntityId: "55555555-5555-4555-8555-555555555555",
+        type: "ITEM_ISSUE_POSTED",
       }),
       "/requests/item-issues/55555555-5555-4555-8555-555555555555",
+    );
+  });
+
+  it("links dispatched issue notifications to Incoming Items", () => {
+    assert.equal(
+      itemRequestNotificationHref({
+        relatedEntityType: "ITEM_ISSUE",
+        relatedEntityId: "55555555-5555-4555-8555-555555555555",
+        type: "ITEM_ISSUE_DISPATCHED",
+      }),
+      "/requests/incoming-items",
     );
   });
 });

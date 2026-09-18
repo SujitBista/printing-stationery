@@ -1,20 +1,45 @@
 import type {
+  ItemIssueDeliveryStatus,
+  ItemIssueDestinationType,
   ItemIssueLineAvailability,
   ItemIssueStatus,
   ItemRequestPersonSummary,
 } from "@printing-stationery/shared";
+import { itemIssueBusinessStatusLabel } from "@printing-stationery/shared";
 
 export const ITEM_ISSUE_STATUS_LABELS: Record<ItemIssueStatus, string> = {
   DRAFT: "Draft",
-  PENDING_VERIFICATION: "Pending Verification",
+  PENDING_VERIFICATION: "Submitted",
   RETURNED: "Returned",
   REJECTED: "Rejected",
-  POSTED: "Posted",
+  POSTED: "Dispatched",
 };
+
+export const ITEM_ISSUE_DELIVERY_STATUS_LABELS: Record<
+  ItemIssueDeliveryStatus,
+  string
+> = {
+  IN_TRANSIT: "In Transit",
+  PARTIALLY_RECEIVED: "Partially Received",
+  RECEIVED: "Received",
+  RECEIVED_WITH_DISCREPANCY: "Received with Discrepancy",
+};
+
+export function itemIssueStatusDisplayLabel(params: {
+  status: ItemIssueStatus;
+  destinationType?: ItemIssueDestinationType | null;
+  deliveryStatus?: ItemIssueDeliveryStatus | null;
+}): string {
+  return itemIssueBusinessStatusLabel(params);
+}
 
 export function itemIssueStatusTone(
   status: ItemIssueStatus,
+  deliveryStatus?: ItemIssueDeliveryStatus | null,
 ): "success" | "warning" | "danger" | "neutral" | "info" {
+  if (status === "POSTED" && deliveryStatus === "RECEIVED_WITH_DISCREPANCY") {
+    return "warning";
+  }
   switch (status) {
     case "POSTED":
       return "success";
@@ -77,7 +102,8 @@ export function itemIssueRemainingColumnLabel(
 export function itemIssueQtyColumnLabel(
   status: ItemIssueStatus | undefined,
 ): string {
-  return status === "POSTED" ? "Qty Issued Now" : "Issue Qty";
+  void status;
+  return "Quantity Issued Now";
 }
 
 export function itemIssueDisplayedRemainingQuantity(
@@ -85,7 +111,7 @@ export function itemIssueDisplayedRemainingQuantity(
   status: ItemIssueStatus | undefined,
 ): string {
   if (status === "POSTED") {
-    return line.remainingAfterIssue ?? line.remainingQuantity;
+    return line.remainingAfterIssue ?? line.remainingQuantity ?? "—";
   }
-  return line.outstandingBeforeThisIssue ?? line.remainingQuantity;
+  return line.outstandingBeforeThisIssue ?? line.remainingQuantity ?? "—";
 }

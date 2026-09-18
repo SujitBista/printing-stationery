@@ -93,6 +93,8 @@ export {
 export {
   itemIssueStatusEnum,
   itemIssueActionEnum,
+  itemIssueDestinationTypeEnum,
+  itemIssueDeliveryStatusEnum,
   itemIssues,
   itemIssueLines,
   itemIssueActions,
@@ -103,6 +105,28 @@ export {
   type ItemIssueActionRow,
   type NewItemIssueActionRow,
 } from "./item-issues.js";
+
+export {
+  itemIssueReceiptStatusEnum,
+  itemIssueReceiptActionEnum,
+  itemIssueDiscrepancyReasonEnum,
+  itemIssueDiscrepancyResolutionEnum,
+  itemIssueDiscrepancyStatusEnum,
+  itemIssueShipments,
+  itemIssueShipmentLines,
+  itemIssueReceipts,
+  itemIssueReceiptLines,
+  itemIssueReceiptActions,
+  itemIssueDiscrepancies,
+  departmentConsumptions,
+  departmentConsumptionLines,
+  type ItemIssueShipmentRow,
+  type ItemIssueShipmentLineRow,
+  type ItemIssueReceiptRow,
+  type ItemIssueReceiptLineRow,
+  type DepartmentConsumptionRow,
+  type DepartmentConsumptionLineRow,
+} from "./item-issue-delivery.js";
 
 export {
   parties,
@@ -126,6 +150,7 @@ export {
   openingStockMappingEntityTypeEnum,
   stockLedgerMovementTypeEnum,
   stockLedgerReferenceTypeEnum,
+  stockLedgerCategoryEnum,
   openingStockBatches,
   openingStockLines,
   openingStockNameMappings,

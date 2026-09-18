@@ -1,5 +1,10 @@
 import type { ItemRequestStatus, ItemRequestWorkflowRole } from "./types/item-request.js";
-import type { ItemIssueQueue, ItemIssueStatus } from "./types/item-issue.js";
+import type {
+  ItemIssueDeliveryStatus,
+  ItemIssueDestinationType,
+  ItemIssueQueue,
+  ItemIssueStatus,
+} from "./types/item-issue.js";
 
 export const ITEM_ISSUE_POSTED_STATUS = "POSTED" satisfies ItemIssueStatus;
 
@@ -53,6 +58,36 @@ export const ITEM_ISSUE_ROLE_QUEUES = {
   CORPORATE_MAKER: ["returned", "posted"],
   CORPORATE_CHECKER: ["pending-verification", "posted"],
 } as const satisfies Record<ItemRequestWorkflowRole, readonly ItemIssueQueue[]>;
+
+export const ITEM_ISSUE_INCOMING_ROLES = [
+  "ADMIN",
+  "BRANCH_MAKER",
+  "BRANCH_CHECKER",
+] as const satisfies readonly ItemRequestWorkflowRole[];
+
+export const ITEM_ISSUE_DEPARTMENT_CONSUMPTION_ROLES = [
+  "ADMIN",
+  "CORPORATE_MAKER",
+  "CORPORATE_CHECKER",
+] as const satisfies readonly ItemRequestWorkflowRole[];
+
+export function actorCanAccessIncomingItems(
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): boolean {
+  return workflowRoles.some((role) =>
+    (ITEM_ISSUE_INCOMING_ROLES as readonly string[]).includes(role),
+  );
+}
+
+export function actorCanAccessDepartmentConsumption(
+  workflowRoles: readonly ItemRequestWorkflowRole[],
+): boolean {
+  return workflowRoles.some((role) =>
+    (ITEM_ISSUE_DEPARTMENT_CONSUMPTION_ROLES as readonly string[]).includes(
+      role,
+    ),
+  );
+}
 
 const ISSUE_QUEUE_ORDER: readonly ItemIssueQueue[] = [
   "pending-verification",
@@ -154,4 +189,47 @@ export function itemRequestIssueActionHref(params: {
     }
   }
   return `/requests/item-requests/${params.requestId}/issue`;
+}
+
+export const ITEM_ISSUE_STATUS_BUSINESS_LABELS: Record<ItemIssueStatus, string> =
+  {
+    DRAFT: "Draft",
+    PENDING_VERIFICATION: "Submitted",
+    RETURNED: "Returned",
+    REJECTED: "Rejected",
+    POSTED: "Posted",
+  };
+
+export function itemIssueBusinessStatusLabel(params: {
+  status: ItemIssueStatus;
+  destinationType?: ItemIssueDestinationType | null;
+  deliveryStatus?: ItemIssueDeliveryStatus | null;
+}): string {
+  if (params.status !== ITEM_ISSUE_POSTED_STATUS) {
+    return ITEM_ISSUE_STATUS_BUSINESS_LABELS[params.status];
+  }
+  if (params.destinationType === "CORPORATE_DEPARTMENT") {
+    return "Issued";
+  }
+  if (params.deliveryStatus === "IN_TRANSIT") {
+    return "In Transit";
+  }
+  if (params.deliveryStatus === "PARTIALLY_RECEIVED") {
+    return "Partially Received";
+  }
+  if (params.deliveryStatus === "RECEIVED") {
+    return "Received";
+  }
+  if (params.deliveryStatus === "RECEIVED_WITH_DISCREPANCY") {
+    return "Received with Discrepancy";
+  }
+  return "Dispatched";
+}
+
+export function itemIssueCheckerActionLabel(params: {
+  destinationType?: ItemIssueDestinationType | null;
+}): string {
+  return params.destinationType === "CORPORATE_DEPARTMENT"
+    ? "Issue to Department"
+    : "Dispatch";
 }

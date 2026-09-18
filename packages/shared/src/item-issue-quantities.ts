@@ -18,6 +18,21 @@ export function remainingRequestedQuantity(
   );
 }
 
+/**
+ * Remaining in-transit quantity is dispatched minus confirmed usable receipts.
+ * Pending, returned, rejected, or unverified receipts must not be included in
+ * `totalConfirmedReceivedQuantity`.
+ */
+export function remainingInTransitQuantity(
+  dispatchedQuantity: string,
+  totalConfirmedReceivedQuantity: string,
+): string {
+  return remainingNonNegativeDecimalString(
+    dispatchedQuantity,
+    totalConfirmedReceivedQuantity,
+  );
+}
+
 export type ItemIssueLineQuantities = {
   requestedQuantity: string;
   previouslyIssuedQuantity: string;

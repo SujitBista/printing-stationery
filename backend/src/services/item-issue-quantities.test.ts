@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   itemIssueLineQuantities,
   remainingRequestedQuantity,
+  remainingInTransitQuantity,
 } from "@printing-stationery/shared";
 
 describe("remainingRequestedQuantity", () => {
@@ -91,5 +92,17 @@ describe("itemIssueLineQuantities", () => {
     assert.equal(requestRemaining, "5");
     assert.equal(issueQuantities.remainingAfterIssue, requestRemaining);
     assert.equal(issueQuantities.remainingQuantity, requestRemaining);
+  });
+});
+
+describe("remainingInTransitQuantity", () => {
+  it("is dispatched minus confirmed usable receipts", () => {
+    assert.equal(remainingInTransitQuantity("5", "0"), "5");
+    assert.equal(remainingInTransitQuantity("5", "3"), "2");
+    assert.equal(remainingInTransitQuantity("5", "5"), "0");
+  });
+
+  it("does not count unverified receipts as received", () => {
+    assert.equal(remainingInTransitQuantity("5", "0"), "5");
   });
 });
