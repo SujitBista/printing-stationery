@@ -29,6 +29,12 @@ export const ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE =
 export const ITEM_ISSUE_RECEIPT_SELF_VERIFY_FORBIDDEN_MESSAGE =
   "You cannot verify your own transaction.";
 
+export const ADMIN_ITEM_ISSUE_RECEIPT_FORBIDDEN_MESSAGE =
+  "Administrators cannot confirm item issue receipts.";
+
+export const ITEM_ISSUE_RECEIPT_RETURN_RETIRED_MESSAGE =
+  "Receipt confirmation no longer uses return for verification.";
+
 export const ITEM_ISSUE_MAKER_CHECKER_FORBIDDEN_MESSAGE =
   "Maker cannot perform the Checker action.";
 
@@ -113,6 +119,26 @@ export function actorMayOperateItemIssue(params: {
     supplyingStoreId: params.supplyingStoreId,
     makerStoreIds: params.supervisedStoreIds,
   });
+}
+
+/**
+ * Destination-store receipt confirmation. Admin stays view-only.
+ * Either the active Maker or the active Checker assigned to the exact
+ * destination store may confirm. There is no separate verifier.
+ */
+export function actorMayConfirmDestinationReceipt(params: {
+  actor: Pick<AuthenticatedUser, "roles">;
+  destinationStoreId: string;
+  makerStoreIds: readonly string[];
+  checkerStoreIds: readonly string[];
+}): boolean {
+  if (userHasRole(params.actor.roles, "ADMIN")) {
+    return false;
+  }
+  return (
+    params.makerStoreIds.includes(params.destinationStoreId) ||
+    params.checkerStoreIds.includes(params.destinationStoreId)
+  );
 }
 
 export function requestAllowsItemIssueCreation(params: {

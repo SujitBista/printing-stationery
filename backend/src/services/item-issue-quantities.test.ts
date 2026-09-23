@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  destinationReceiptQuantityError,
   itemIssueLineQuantities,
   remainingRequestedQuantity,
   remainingInTransitQuantity,
@@ -140,6 +141,47 @@ describe("remainingInTransitQuantity", () => {
         finalizedDiscrepancyQuantity: "0",
       }),
       "5",
+    );
+  });
+});
+
+describe("destinationReceiptQuantityError", () => {
+  it("rejects an empty receipt and a quantity above the remaining in-transit amount", () => {
+    assert.equal(
+      destinationReceiptQuantityError({
+        lines: [
+          {
+            receivedQuantityNow: "0",
+            damagedQuantity: "0",
+            remainingInTransitQuantity: "5",
+          },
+        ],
+      }),
+      "Enter a received quantity greater than zero.",
+    );
+    assert.equal(
+      destinationReceiptQuantityError({
+        lines: [
+          {
+            receivedQuantityNow: "4",
+            damagedQuantity: "2",
+            remainingInTransitQuantity: "5",
+          },
+        ],
+      }),
+      "Receipt quantity exceeds remaining in-transit quantity.",
+    );
+    assert.equal(
+      destinationReceiptQuantityError({
+        lines: [
+          {
+            receivedQuantityNow: "4",
+            damagedQuantity: "1",
+            remainingInTransitQuantity: "5",
+          },
+        ],
+      }),
+      null,
     );
   });
 });

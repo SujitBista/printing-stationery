@@ -8,6 +8,8 @@ import {
   ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
   ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE,
   ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE,
+  ADMIN_ITEM_ISSUE_RECEIPT_FORBIDDEN_MESSAGE,
+  actorMayConfirmDestinationReceipt,
   actorMayCreateItemIssue,
   actorMayVerifyItemIssue,
   isCorporateSupplyingStore,
@@ -206,6 +208,67 @@ describe("item issue authorization", () => {
         actorUserId: userId,
       }),
       false,
+    );
+  });
+
+  it("allows either destination store assignee to confirm receipt and keeps admin out", () => {
+    assert.equal(
+      actorMayConfirmDestinationReceipt({
+        actor: actor(["MAKER"]),
+        destinationStoreId: BRANCH_STORE_ID,
+        makerStoreIds: [BRANCH_STORE_ID],
+        checkerStoreIds: [],
+      }),
+      true,
+    );
+    assert.equal(
+      actorMayConfirmDestinationReceipt({
+        actor: actor(["CHECKER"]),
+        destinationStoreId: BRANCH_STORE_ID,
+        makerStoreIds: [],
+        checkerStoreIds: [BRANCH_STORE_ID],
+      }),
+      true,
+    );
+    assert.equal(
+      actorMayConfirmDestinationReceipt({
+        actor: actor(["MAKER"]),
+        destinationStoreId: BRANCH_STORE_ID,
+        makerStoreIds: [OTHER_STORE_ID],
+        checkerStoreIds: [],
+      }),
+      false,
+    );
+    assert.equal(
+      actorMayConfirmDestinationReceipt({
+        actor: actor(["CHECKER"]),
+        destinationStoreId: BRANCH_STORE_ID,
+        makerStoreIds: [],
+        checkerStoreIds: [OTHER_STORE_ID],
+      }),
+      false,
+    );
+    assert.equal(
+      actorMayConfirmDestinationReceipt({
+        actor: actor(["ADMIN"]),
+        destinationStoreId: BRANCH_STORE_ID,
+        makerStoreIds: [BRANCH_STORE_ID],
+        checkerStoreIds: [BRANCH_STORE_ID],
+      }),
+      false,
+    );
+    assert.equal(
+      actorMayConfirmDestinationReceipt({
+        actor: actor(["HR"]),
+        destinationStoreId: BRANCH_STORE_ID,
+        makerStoreIds: [],
+        checkerStoreIds: [],
+      }),
+      false,
+    );
+    assert.match(
+      ADMIN_ITEM_ISSUE_RECEIPT_FORBIDDEN_MESSAGE,
+      /Administrators cannot confirm item issue receipts/,
     );
   });
 

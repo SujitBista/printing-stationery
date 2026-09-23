@@ -37,3 +37,18 @@ describe("imported opening in-transit cleanup migration", () => {
     assert.match(sql, /available_count_after IS DISTINCT FROM available_count/);
   });
 });
+
+describe("direct destination receipt migration", () => {
+  const sql = readFileSync(
+    join(drizzleDir, "0036_direct_destination_receipt_confirmation.sql"),
+    "utf8",
+  );
+
+  it("records the confirming role without posting open receipts", () => {
+    assert.match(sql, /confirmed_workflow_role/);
+    assert.match(sql, /status" = 'CONFIRMED'/);
+    assert.doesNotMatch(sql, /INSERT INTO "stock_ledger"/);
+    assert.doesNotMatch(sql, /opening_stock/);
+    assert.doesNotMatch(sql, /LEGACY_OPENING_IN_TRANSIT/);
+  });
+});

@@ -49,7 +49,9 @@ import {
     ITEM_ISSUE_CHECKER_CREATE_FORBIDDEN_MESSAGE,
     ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE,
     ITEM_ISSUE_OPERATOR_FORBIDDEN_MESSAGE,
+    ADMIN_ITEM_ISSUE_RECEIPT_FORBIDDEN_MESSAGE,
     ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE,
+    ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE,
 } from "./item-issue-authorization.js";
 import {
   confirmItemIssueReceipt,
@@ -304,6 +306,7 @@ function assertIssueAvailabilityQuantities(
           UNRELATED_CHECKER_USERNAME,
           CORP_MAKER_USERNAME,
           CORP_CHECKER_USERNAME,
+          "tiauth_hr",
         ]),
       );
     const leftoverUserIds = leftoverUsers.map((user) => user.id);
@@ -339,6 +342,7 @@ function assertIssueAvailabilityQuantities(
           UNRELATED_CHECKER_CODE,
           CORP_MAKER_CODE,
           CORP_CHECKER_CODE,
+          "TIAUTH-HR",
         ]),
       );
   }
@@ -1558,7 +1562,14 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         isAppError(error, 403, ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE),
     );
 
-    const submitted = await submitItemIssueReceipt(shipmentId, requestingMaker, {
+    await getIncomingShipment(shipmentId, requestingMaker);
+    const afterOpenBranch = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterOpenBranch, beforeConfirmBranch);
+
+    const confirmed = await submitItemIssueReceipt(shipmentId, requestingMaker, {
       receiptDate: new Date().toISOString(),
       remarks: "Physical count 3",
       discrepancyResolution: "KEEP_IN_TRANSIT",
@@ -1572,34 +1583,11 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         },
       ],
     });
-    const afterSubmitBranch = await getOperationalAvailableQuantities({
-      storeId: requesting.storeId,
-      itemIds: [itemId],
-    });
-    assert.deepEqual(afterSubmitBranch, beforeConfirmBranch);
-    const pendingReceipt = submitted.receipts.find(
-      (receipt) => receipt.status === "PENDING_VERIFICATION",
+    const confirmedReceipt = confirmed.receipts.find(
+      (receipt) => receipt.status === "CONFIRMED",
     );
-    assert.ok(pendingReceipt);
-
-    await assert.rejects(
-      () =>
-        confirmItemIssueReceipt(pendingReceipt.id, requestingMaker, {
-          expectedVersion: pendingReceipt.version,
-          remarks: null,
-        }),
-      (error: unknown) => error instanceof AppError && error.statusCode === 403,
-    );
-
-    const confirmed = await confirmItemIssueReceipt(
-      pendingReceipt.id,
-      requestingChecker,
-      {
-        expectedVersion: pendingReceipt.version,
-        remarks: null,
-        discrepancyResolution: "KEEP_IN_TRANSIT",
-      },
-    );
+    assert.ok(confirmedReceipt);
+    assert.equal(confirmedReceipt.confirmedWorkflowRole, "BRANCH_MAKER");
     assert.equal(confirmed.deliveryStatus, "PARTIALLY_RECEIVED");
     assert.equal(Number(confirmed.lines[0]?.confirmedReceivedQuantity), 3);
     assert.equal(Number(confirmed.lines[0]?.remainingInTransitQuantity), 1);
@@ -1620,8 +1608,8 @@ describe("item issue authorization integration", { concurrency: false }, () => {
 
     await assert.rejects(
       () =>
-        confirmItemIssueReceipt(pendingReceipt.id, requestingChecker, {
-          expectedVersion: pendingReceipt.version,
+        confirmItemIssueReceipt(confirmedReceipt.id, requestingChecker, {
+          expectedVersion: confirmedReceipt.version,
           remarks: null,
         }),
       (error: unknown) =>
@@ -1642,7 +1630,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       ),
     );
 
-    const secondSubmit = await submitItemIssueReceipt(shipmentId, requestingMaker, {
+    const received = await submitItemIssueReceipt(shipmentId, requestingChecker, {
       receiptDate: new Date().toISOString(),
       remarks: null,
       lines: [
@@ -1653,17 +1641,13 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         },
       ],
     });
-    const secondPending = secondSubmit.receipts.find(
-      (receipt) => receipt.status === "PENDING_VERIFICATION",
-    );
-    assert.ok(secondPending);
-    const received = await confirmItemIssueReceipt(
-      secondPending.id,
-      requestingChecker,
-      {
-        expectedVersion: secondPending.version,
-        remarks: null,
-      },
+    assert.equal(
+      received.receipts.some(
+        (receipt) =>
+          receipt.status === "CONFIRMED" &&
+          receipt.confirmedWorkflowRole === "BRANCH_CHECKER",
+      ),
+      true,
     );
     assert.equal(received.deliveryStatus, "RECEIVED");
     assert.equal(Number(received.lines[0]?.remainingInTransitQuantity), 0);
@@ -2207,7 +2191,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
       Number(beforeCorporate[0]?.availableQuantity ?? "0") - 5,
     );
 
-    const submittedReceipt = await submitItemIssueReceipt(shipmentId, requestingMaker, {
+    const confirmed = await submitItemIssueReceipt(shipmentId, requestingChecker, {
       receiptDate: new Date().toISOString(),
       remarks: "3 usable, 1 damaged, 1 missing",
       discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
@@ -2222,21 +2206,9 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         },
       ],
     });
-    const pending = submittedReceipt.receipts.find(
-      (receipt) => receipt.status === "PENDING_VERIFICATION",
-    );
+    const pending = confirmed.receipts.find((receipt) => receipt.status === "CONFIRMED");
     assert.ok(pending);
-    const afterSubmitBranch = await getOperationalAvailableQuantities({
-      storeId: requesting.storeId,
-      itemIds: [itemId],
-    });
-    assert.deepEqual(afterSubmitBranch, beforeBranch);
-
-    const confirmed = await confirmItemIssueReceipt(pending.id, requestingChecker, {
-      expectedVersion: pending.version,
-      remarks: null,
-      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
-    });
+    assert.equal(pending.confirmedWorkflowRole, "BRANCH_CHECKER");
     assert.equal(confirmed.deliveryStatus, "RECEIVED_WITH_DISCREPANCY");
     assert.equal(Number(confirmed.lines[0]?.confirmedReceivedQuantity), 3);
     assert.equal(Number(confirmed.lines[0]?.remainingInTransitQuantity), 0);
@@ -2313,35 +2285,20 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.ok(dispatched.shipment);
     const shipmentLineId = dispatched.shipment.lines[0]?.id;
     assert.ok(shipmentLineId);
-    const submittedReceipt = await submitItemIssueReceipt(
-      dispatched.shipment.id,
-      requestingMaker,
-      {
-        receiptDate: new Date().toISOString(),
-        remarks: null,
-        lines: [
-          {
-            shipmentLineId,
-            receivedQuantityNow: "2",
-            remarks: null,
-          },
-        ],
-      },
-    );
-    const pending = submittedReceipt.receipts.find(
-      (receipt) => receipt.status === "PENDING_VERIFICATION",
-    );
-    assert.ok(pending);
-
+    const receiptInput = {
+      receiptDate: new Date().toISOString(),
+      remarks: null,
+      lines: [
+        {
+          shipmentLineId,
+          receivedQuantityNow: "4",
+          remarks: null,
+        },
+      ],
+    };
     const results = await Promise.allSettled([
-      confirmItemIssueReceipt(pending.id, requestingChecker, {
-        expectedVersion: pending.version,
-        remarks: null,
-      }),
-      confirmItemIssueReceipt(pending.id, requestingChecker, {
-        expectedVersion: pending.version,
-        remarks: null,
-      }),
+      submitItemIssueReceipt(dispatched.shipment.id, requestingMaker, receiptInput),
+      submitItemIssueReceipt(dispatched.shipment.id, requestingChecker, receiptInput),
     ]);
     const fulfilled = results.filter((result) => result.status === "fulfilled");
     const rejected = results.filter((result) => result.status === "rejected");
@@ -2354,13 +2311,18 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     });
     assert.equal(
       Number(afterBranch[0]?.availableQuantity ?? "0"),
-      Number(beforeBranch[0]?.availableQuantity ?? "0") + 2,
+      Number(beforeBranch[0]?.availableQuantity ?? "0") + 4,
     );
     const winner =
       fulfilled[0]?.status === "fulfilled" ? fulfilled[0].value : null;
     assert.ok(winner);
-    assert.equal(winner.deliveryStatus, "PARTIALLY_RECEIVED");
-    assert.equal(Number(winner.lines[0]?.remainingInTransitQuantity), 2);
+    assert.equal(winner.deliveryStatus, "RECEIVED");
+    assert.equal(Number(winner.lines[0]?.remainingInTransitQuantity), 0);
+    const loser = rejected[0]?.status === "rejected" ? rejected[0].reason : null;
+    assert.equal(loser instanceof AppError, true);
+    if (loser instanceof AppError) {
+      assert.equal(loser.statusCode, 409);
+    }
   });
 
   it("finalizes 4 usable + 1 missing of 5 dispatched to remaining in transit 0", async () => {
@@ -2385,7 +2347,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     const shipmentLineId = dispatched.shipment.lines[0]?.id;
     assert.ok(shipmentLineId);
 
-    const submittedReceipt = await submitItemIssueReceipt(
+    const confirmed = await submitItemIssueReceipt(
       dispatched.shipment.id,
       requestingMaker,
       {
@@ -2404,15 +2366,8 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         ],
       },
     );
-    const pending = submittedReceipt.receipts.find(
-      (receipt) => receipt.status === "PENDING_VERIFICATION",
-    );
+    const pending = confirmed.receipts.find((receipt) => receipt.status === "CONFIRMED");
     assert.ok(pending);
-    const confirmed = await confirmItemIssueReceipt(pending.id, requestingChecker, {
-      expectedVersion: pending.version,
-      remarks: null,
-      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
-    });
     const line = confirmed.lines[0];
     assert.ok(line);
     assert.equal(Number(line.confirmedReceivedQuantity), 4);
@@ -2480,7 +2435,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.ok(dispatched.shipment);
     const shipmentLineId = dispatched.shipment.lines[0]?.id;
     assert.ok(shipmentLineId);
-    const submittedReceipt = await submitItemIssueReceipt(
+    const confirmed = await submitItemIssueReceipt(
       dispatched.shipment.id,
       requestingMaker,
       {
@@ -2497,15 +2452,6 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         ],
       },
     );
-    const pending = submittedReceipt.receipts.find(
-      (receipt) => receipt.status === "PENDING_VERIFICATION",
-    );
-    assert.ok(pending);
-    const confirmed = await confirmItemIssueReceipt(pending.id, requestingChecker, {
-      expectedVersion: pending.version,
-      remarks: null,
-      discrepancyResolution: "KEEP_IN_TRANSIT",
-    });
     const line = confirmed.lines[0];
     assert.ok(line);
     assert.equal(confirmed.deliveryStatus, "PARTIALLY_RECEIVED");
@@ -2543,44 +2489,73 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.ok(dispatched.shipment);
     const shipmentLineId = dispatched.shipment.lines[0]?.id;
     assert.ok(shipmentLineId);
-    const submittedReceipt = await submitItemIssueReceipt(
-      dispatched.shipment.id,
-      requestingMaker,
-      {
-        receiptDate: new Date().toISOString(),
-        remarks: "Reported missing, not yet verified",
+    const insertedReceipt = await getDb()
+      .insert(itemIssueReceipts)
+      .values({
+        shipmentId: dispatched.shipment.id,
+        status: "PENDING_VERIFICATION",
+        receiptDate: new Date(),
+        remarks: "Saved before direct confirmation",
         discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
-        lines: [
-          {
-            shipmentLineId,
-            receivedQuantityNow: "4",
-            missingQuantity: "1",
-            discrepancyReason: "MISSING",
-            remarks: null,
-          },
-        ],
-      },
-    );
-    const line = submittedReceipt.lines[0];
+        createdByApplicationUserId: requestingMaker.id,
+        submittedByApplicationUserId: requestingMaker.id,
+        submittedAt: new Date(),
+      })
+      .returning({ id: itemIssueReceipts.id });
+    const openReceiptId = insertedReceipt[0]?.id;
+    assert.ok(openReceiptId);
+    await getDb().insert(itemIssueReceiptLines).values({
+      receiptId: openReceiptId,
+      shipmentLineId,
+      receivedQuantityNow: "4",
+      missingQuantity: "1",
+      damagedQuantity: "0",
+      discrepancyReason: "MISSING",
+    });
+    await getDb().insert(itemIssueReceiptActions).values({
+      receiptId: openReceiptId,
+      action: "SUBMIT",
+      fromStatus: null,
+      toStatus: "PENDING_VERIFICATION",
+      actorApplicationUserId: requestingMaker.id,
+      actorWorkflowRole: "BRANCH_MAKER",
+      remarks: "Historical maker submission",
+    });
+
+    const opened = await getIncomingShipment(dispatched.shipment.id, requestingChecker);
+    const line = opened.lines[0];
     assert.ok(line);
     assert.equal(Number(line.remainingInTransitQuantity), 5);
     assert.equal(Number(line.confirmedReceivedQuantity), 0);
     assert.equal(Number(line.discrepancyQuantity), 0);
-    const afterBranch = await getOperationalAvailableQuantities({
+    assert.equal(
+      opened.receipts.some((receipt) => receipt.status === "PENDING_VERIFICATION"),
+      true,
+    );
+    const afterOpen = await getOperationalAvailableQuantities({
       storeId: requesting.storeId,
       itemIds: [itemId],
     });
-    assert.deepEqual(afterBranch, beforeBranch);
+    assert.deepEqual(afterOpen, beforeBranch);
     const discrepancyLedger = await getDb()
       .select({ id: stockLedger.id })
       .from(stockLedger)
       .where(
         and(
-          eq(stockLedger.referenceId, submittedReceipt.receipts[0]?.id ?? ""),
-          inArray(stockLedger.stockCategory, ["DISCREPANCY", "DAMAGED"]),
+          eq(stockLedger.referenceId, openReceiptId),
+          inArray(stockLedger.stockCategory, ["AVAILABLE", "DISCREPANCY", "DAMAGED"]),
         ),
       );
     assert.equal(discrepancyLedger.length, 0);
+
+    const confirmedByChecker = await confirmItemIssueReceipt(openReceiptId, requestingChecker, {
+      expectedVersion: 1,
+      remarks: "Checker confirms saved receipt",
+      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+    });
+    assert.equal(confirmedByChecker.deliveryStatus, "RECEIVED_WITH_DISCREPANCY");
+    assert.equal(Number(confirmedByChecker.lines[0]?.confirmedReceivedQuantity), 4);
+    assert.equal(Number(confirmedByChecker.lines[0]?.discrepancyQuantity), 1);
   });
 
   it("does not move stock twice when a discrepancy confirmation is repeated", async () => {
@@ -2604,7 +2579,7 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     assert.ok(dispatched.shipment);
     const shipmentLineId = dispatched.shipment.lines[0]?.id;
     assert.ok(shipmentLineId);
-    const submittedReceipt = await submitItemIssueReceipt(
+    const confirmed = await submitItemIssueReceipt(
       dispatched.shipment.id,
       requestingMaker,
       {
@@ -2622,15 +2597,8 @@ describe("item issue authorization integration", { concurrency: false }, () => {
         ],
       },
     );
-    const pending = submittedReceipt.receipts.find(
-      (receipt) => receipt.status === "PENDING_VERIFICATION",
-    );
+    const pending = confirmed.receipts.find((receipt) => receipt.status === "CONFIRMED");
     assert.ok(pending);
-    const confirmed = await confirmItemIssueReceipt(pending.id, requestingChecker, {
-      expectedVersion: pending.version,
-      remarks: null,
-      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
-    });
     await assert.rejects(
       () =>
         confirmItemIssueReceipt(pending.id, requestingChecker, {
@@ -2859,5 +2827,531 @@ describe("item issue authorization integration", { concurrency: false }, () => {
     });
     assert.deepEqual(afterCorporate, beforeCorporate);
     assert.deepEqual(afterBranch, beforeBranch);
+  });
+
+  async function dispatchQuantity(quantity: string) {
+    const requestId = await insertRequest("APPROVED");
+    const draft = await createItemIssueFromRequest(requestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId, issueQuantity: quantity }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    return verifyAndPostItemIssue(submitted.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+  }
+
+  it("lets the destination checker confirm first and the maker confirm the remainder", async () => {
+    const before = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const dispatched = await dispatchQuantity("10");
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    const first = await submitItemIssueReceipt(dispatched.shipment.id, requestingChecker, {
+      receiptDate: new Date().toISOString(),
+      remarks: "Checker counted 4",
+      discrepancyResolution: "KEEP_IN_TRANSIT",
+      lines: [{ shipmentLineId, receivedQuantityNow: "4", remarks: null }],
+    });
+    assert.equal(first.deliveryStatus, "PARTIALLY_RECEIVED");
+    assert.equal(
+      first.receipts.some(
+        (receipt) =>
+          receipt.status === "CONFIRMED" &&
+          receipt.confirmedWorkflowRole === "BRANCH_CHECKER",
+      ),
+      true,
+    );
+    const second = await submitItemIssueReceipt(dispatched.shipment.id, requestingMaker, {
+      receiptDate: new Date().toISOString(),
+      remarks: null,
+      lines: [{ shipmentLineId, receivedQuantityNow: "6", remarks: null }],
+    });
+    assert.equal(second.deliveryStatus, "RECEIVED");
+    assert.equal(Number(second.lines[0]?.confirmedReceivedQuantity), 10);
+    assert.equal(Number(second.lines[0]?.remainingInTransitQuantity), 0);
+    const after = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.equal(
+      Number(after[0]?.availableQuantity ?? "0"),
+      Number(before[0]?.availableQuantity ?? "0") + 10,
+    );
+  });
+
+  it("keeps dispatched FIFO cost on the destination available layer and keeps damaged out of available stock", async () => {
+    const dispatched = await dispatchQuantity("5");
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    const issueLineId = dispatched.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    assert.ok(issueLineId);
+    const confirmed = await submitItemIssueReceipt(dispatched.shipment.id, requestingMaker, {
+      receiptDate: new Date().toISOString(),
+      remarks: "Wrong item and damage",
+      discrepancyResolution: "COMPLETE_WITH_DISCREPANCY",
+      lines: [
+        {
+          shipmentLineId,
+          receivedQuantityNow: "3",
+          missingQuantity: "1",
+          damagedQuantity: "1",
+          discrepancyReason: "WRONG_ITEM",
+          remarks: null,
+        },
+      ],
+    });
+    const receipt = confirmed.receipts.find((item) => item.status === "CONFIRMED");
+    assert.ok(receipt);
+    const dispatchLayers = await getDb()
+      .select({
+        rate: stockLedger.rate,
+        quantityOut: stockLedger.quantityOut,
+        amountOut: stockLedger.amountOut,
+      })
+      .from(stockLedger)
+      .where(
+        and(
+          eq(stockLedger.referenceLineId, issueLineId),
+          eq(stockLedger.movementType, "ITEM_ISSUE"),
+          eq(stockLedger.stockCategory, "AVAILABLE"),
+        ),
+      );
+    const receiptLayers = await getDb()
+      .select({
+        rate: stockLedger.rate,
+        quantityIn: stockLedger.quantityIn,
+        amountIn: stockLedger.amountIn,
+        stockCategory: stockLedger.stockCategory,
+      })
+      .from(stockLedger)
+      .where(eq(stockLedger.referenceId, receipt.id));
+    const available = receiptLayers.filter((row) => row.stockCategory === "AVAILABLE");
+    const damaged = receiptLayers.filter((row) => row.stockCategory === "DAMAGED");
+    const discrepancy = receiptLayers.filter((row) => row.stockCategory === "DISCREPANCY");
+    assert.ok(available.length > 0);
+    assert.equal(
+      available.reduce((sum, row) => sum + Number(row.quantityIn), 0),
+      3,
+    );
+    for (const layer of available) {
+      const source = dispatchLayers.find(
+        (row) => String(row.rate) === String(layer.rate),
+      );
+      assert.ok(source);
+      assert.equal(Number(layer.rate), Number(source.rate));
+      if (Number(layer.rate) !== 0) {
+        assert.ok(Number(layer.amountIn) > 0);
+      }
+    }
+    assert.equal(damaged.length, 1);
+    assert.equal(Number(damaged[0]?.quantityIn), 1);
+    assert.equal(discrepancy.length, 1);
+    assert.equal(Number(discrepancy[0]?.quantityIn), 1);
+    const discrepancyRow = await getDb()
+      .select({ reason: itemIssueDiscrepancies.reason })
+      .from(itemIssueDiscrepancies)
+      .where(eq(itemIssueDiscrepancies.receiptId, receipt.id));
+    assert.equal(discrepancyRow[0]?.reason, "WRONG_ITEM");
+    const note = await listNotifications(corporateChecker.id, { page: 1, pageSize: 50 });
+    const message = note.items.find(
+      (item) =>
+        item.type === "ITEM_ISSUE_DISCREPANCY_REPORTED" &&
+        item.relatedEntityId === dispatched.id,
+    );
+    assert.ok(message);
+    assert.match(message.message, /discrepancy/i);
+    const confirmerName =
+      requestingMaker.employee?.employeeName ?? requestingMaker.username;
+    assert.match(message.message, new RegExp(confirmerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+
+  it("rejects receipt confirmation from another store, corporate users, HR, inactive assignments, and admin", async () => {
+    const dispatched = await dispatchQuantity("2");
+    assert.ok(dispatched.shipment);
+    const shipmentId = dispatched.shipment.id;
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    const input = {
+      receiptDate: new Date().toISOString(),
+      remarks: null,
+      lines: [{ shipmentLineId, receivedQuantityNow: "2", remarks: null }],
+    };
+    await assert.rejects(
+      () => submitItemIssueReceipt(shipmentId, unrelatedMaker, input),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE),
+    );
+    await assert.rejects(
+      () => submitItemIssueReceipt(shipmentId, unrelatedChecker, input),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE),
+    );
+    await assert.rejects(
+      () => submitItemIssueReceipt(shipmentId, corporateMaker, input),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE),
+    );
+    await assert.rejects(
+      () => submitItemIssueReceipt(shipmentId, corporateChecker, input),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE),
+    );
+
+    const adminRole = await getDb()
+      .select({ userId: userRoles.userId })
+      .from(userRoles)
+      .where(eq(userRoles.role, "ADMIN"))
+      .limit(1);
+    const adminUserId = adminRole[0]?.userId;
+    assert.ok(adminUserId);
+    const admin = await loadActor(adminUserId);
+    await assert.rejects(
+      () => submitItemIssueReceipt(shipmentId, admin, input),
+      (error: unknown) =>
+        isAppError(error, 403, ADMIN_ITEM_ISSUE_RECEIPT_FORBIDDEN_MESSAGE),
+    );
+    const adminView = await listIncomingShipments(admin, {
+      page: 1,
+      pageSize: 20,
+      queue: "in-transit",
+    });
+    assert.equal(
+      adminView.items.some((item) => item.id === shipmentId && item.canConfirmReceipt === false),
+      true,
+    );
+
+    const passwordHash = await hashPassword("TestIssueAuth!1a");
+    const hrEmployee = await getDb()
+      .insert(employees)
+      .values({
+        employeeCode: "TIAUTH-HR",
+        employeeName: "Issue Auth HR",
+        branchId: (
+          await getDb()
+            .select({ branchId: stores.branchId })
+            .from(stores)
+            .where(eq(stores.id, requesting.storeId))
+            .limit(1)
+        )[0]!.branchId,
+        isActive: true,
+      })
+      .returning({ id: employees.id });
+    const hrUser = await getDb()
+      .insert(applicationUsers)
+      .values({
+        employeeId: hrEmployee[0]!.id,
+        username: "tiauth_hr",
+        passwordHash,
+        mustChangePassword: false,
+        isActive: true,
+      })
+      .returning({ id: applicationUsers.id });
+    await getDb().insert(userRoles).values({ userId: hrUser[0]!.id, role: "HR" });
+    const hr = await loadActor(hrUser[0]!.id);
+    const hrToken = await createSession(hr.id);
+    try {
+      await assert.rejects(
+        () => submitItemIssueReceipt(shipmentId, hr, input),
+        (error: unknown) =>
+          isAppError(error, 403, ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE),
+      );
+      const httpDenied = await api(
+        `/api/item-issues/incoming/${shipmentId}/receipts`,
+        {
+          method: "POST",
+          token: hrToken,
+          origin: env.FRONTEND_ORIGIN,
+          body: input,
+        },
+      );
+      assert.equal(httpDenied.status, 403);
+    } finally {
+      await getDb().delete(userRoles).where(eq(userRoles.userId, hr.id));
+      await getDb().delete(authSessions).where(eq(authSessions.userId, hr.id));
+      await getDb().delete(applicationUsers).where(eq(applicationUsers.id, hr.id));
+      await getDb().delete(employees).where(eq(employees.id, hrEmployee[0]!.id));
+    }
+
+    const assignment = await getDb()
+      .select({ id: storeUsers.id })
+      .from(storeUsers)
+      .where(eq(storeUsers.storeId, requesting.storeId))
+      .limit(1);
+    assert.ok(assignment[0]);
+    await getDb()
+      .update(storeUsers)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(storeUsers.id, assignment[0].id));
+    try {
+      await assert.rejects(
+        () => submitItemIssueReceipt(shipmentId, requestingMaker, input),
+        (error: unknown) =>
+          isAppError(error, 403, ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE),
+      );
+    } finally {
+      await getDb()
+        .update(storeUsers)
+        .set({ isActive: true, updatedAt: new Date() })
+        .where(eq(storeUsers.id, assignment[0].id));
+    }
+
+    const makerToken = await createSession(requestingMaker.id);
+    const otherToken = await createSession(unrelatedMaker.id);
+    const denied = await api(`/api/item-issues/incoming/${shipmentId}/receipts`, {
+      method: "POST",
+      token: otherToken,
+      origin: env.FRONTEND_ORIGIN,
+      body: input,
+    });
+    assert.equal(denied.status, 403);
+    const allowed = await api(`/api/item-issues/incoming/${shipmentId}/receipts`, {
+      method: "POST",
+      token: makerToken,
+      origin: env.FRONTEND_ORIGIN,
+      body: input,
+    });
+    assert.equal(allowed.status, 200);
+    const duplicate = await api(`/api/item-issues/incoming/${shipmentId}/receipts`, {
+      method: "POST",
+      token: makerToken,
+      origin: env.FRONTEND_ORIGIN,
+      body: input,
+    });
+    assert.equal(duplicate.status, 409);
+
+    const notes = await listNotifications(corporateChecker.id, { page: 1, pageSize: 80 });
+    const matches = notes.items.filter(
+      (item) =>
+        item.relatedEntityId === dispatched.id &&
+        (item.type === "ITEM_ISSUE_RECEIPT_CONFIRMED" ||
+          item.type === "ITEM_ISSUE_DISCREPANCY_REPORTED"),
+    );
+    assert.equal(matches.length, 1);
+    assert.match(matches[0]?.message ?? "", /full receipt/i);
+  });
+
+  it("rolls back a failed confirmation without posting stock, receipts, or notifications", async () => {
+    const before = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const dispatched = await dispatchQuantity("3");
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    const notesBefore = await listNotifications(corporateChecker.id, {
+      page: 1,
+      pageSize: 100,
+    });
+    await assert.rejects(
+      () =>
+        submitItemIssueReceipt(dispatched.shipment!.id, requestingMaker, {
+          receiptDate: new Date().toISOString(),
+          remarks: null,
+          lines: [{ shipmentLineId, receivedQuantityNow: "9", remarks: null }],
+        }),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+    const after = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(after, before);
+    const receipts = await getDb()
+      .select({ id: itemIssueReceipts.id })
+      .from(itemIssueReceipts)
+      .where(eq(itemIssueReceipts.shipmentId, dispatched.shipment.id));
+    assert.equal(receipts.length, 0);
+    const ledger = await getDb()
+      .select({ id: stockLedger.id })
+      .from(stockLedger)
+      .where(
+        and(
+          eq(stockLedger.referenceType, "ITEM_ISSUE_RECEIPT"),
+          eq(stockLedger.referenceLineId, shipmentLineId),
+        ),
+      );
+    assert.equal(ledger.length, 0);
+    assert.equal(dispatched.deliveryStatus, "IN_TRANSIT");
+    const shipment = await getDb()
+      .select({ deliveryStatus: itemIssueShipments.deliveryStatus })
+      .from(itemIssueShipments)
+      .where(eq(itemIssueShipments.id, dispatched.shipment.id));
+    assert.equal(shipment[0]?.deliveryStatus, "IN_TRANSIT");
+    const notesAfter = await listNotifications(corporateChecker.id, {
+      page: 1,
+      pageSize: 100,
+    });
+    assert.equal(
+      notesAfter.items.filter((item) => item.relatedEntityId === dispatched.id).length,
+      notesBefore.items.filter((item) => item.relatedEntityId === dispatched.id).length,
+    );
+  });
+
+  it("lets either destination role confirm a previously saved receipt without posting it on read", async () => {
+    const dispatched = await dispatchQuantity("4");
+    assert.ok(dispatched.shipment);
+    const shipmentLineId = dispatched.shipment.lines[0]?.id;
+    assert.ok(shipmentLineId);
+    const inserted = await getDb()
+      .insert(itemIssueReceipts)
+      .values({
+        shipmentId: dispatched.shipment.id,
+        status: "RETURNED",
+        receiptDate: new Date(),
+        remarks: "Returned under the old workflow",
+        createdByApplicationUserId: requestingMaker.id,
+      })
+      .returning({ id: itemIssueReceipts.id });
+    const receiptId = inserted[0]?.id;
+    assert.ok(receiptId);
+    await getDb().insert(itemIssueReceiptLines).values({
+      receiptId,
+      shipmentLineId,
+      receivedQuantityNow: "4",
+    });
+    const before = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    const opened = await getIncomingShipment(dispatched.shipment.id, requestingMaker);
+    assert.equal(opened.canConfirmReceipt, true);
+    const afterOpen = await getOperationalAvailableQuantities({
+      storeId: requesting.storeId,
+      itemIds: [itemId],
+    });
+    assert.deepEqual(afterOpen, before);
+    const confirmed = await submitItemIssueReceipt(dispatched.shipment.id, requestingMaker, {
+      receiptDate: new Date().toISOString(),
+      remarks: "Maker confirms the saved receipt",
+      lines: [{ shipmentLineId, receivedQuantityNow: "4", remarks: null }],
+    });
+    assert.equal(confirmed.deliveryStatus, "RECEIVED");
+    assert.equal(
+      confirmed.receipts.filter((receipt) => receipt.status === "CONFIRMED").length,
+      1,
+    );
+  });
+
+  it("keeps dispatch and department consumption maker-checker controls", async () => {
+    const requestId = await insertRequest("APPROVED");
+    const draft = await createItemIssueFromRequest(requestId, corporateMaker, {
+      remarks: null,
+      lines: [{ requestLineId, issueQuantity: "1" }],
+    });
+    const submitted = await submitItemIssue(draft.id, corporateMaker, {
+      expectedVersion: draft.version,
+    });
+    await assert.rejects(
+      () =>
+        verifyAndPostItemIssue(draft.id, corporateMaker, {
+          expectedVersion: submitted.version,
+          remarks: null,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE) ||
+        isAppError(error, 403, ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE),
+    );
+    const posted = await verifyAndPostItemIssue(draft.id, corporateChecker, {
+      expectedVersion: submitted.version,
+      remarks: null,
+    });
+    assert.equal(posted.status, "POSTED");
+    assert.equal(posted.deliveryStatus, "IN_TRANSIT");
+
+    const department = await getDb()
+      .insert(departments)
+      .values({
+        departmentCode: "TIAUTH-D2",
+        departmentName: "Receipt Control Department",
+        isActive: true,
+      })
+      .returning({ id: departments.id });
+    const departmentId = department[0]?.id;
+    assert.ok(departmentId);
+    try {
+      const departmentDraft = await createDepartmentIssue(corporateMaker, {
+        fromStoreId: corporate.storeId,
+        departmentId,
+        consumptionDescription: "Stationery used while checking maker-checker separation.",
+        remarks: null,
+        lines: [{ itemId, issueQuantity: "1" }],
+      });
+      const departmentSubmitted = await submitItemIssue(departmentDraft.id, corporateMaker, {
+        expectedVersion: departmentDraft.version,
+      });
+      await assert.rejects(
+        () =>
+          verifyAndPostItemIssue(departmentDraft.id, corporateMaker, {
+            expectedVersion: departmentSubmitted.version,
+            remarks: null,
+          }),
+        (error: unknown) =>
+          isAppError(error, 403, ITEM_ISSUE_SELF_VERIFY_FORBIDDEN_MESSAGE) ||
+          isAppError(error, 403, ITEM_ISSUE_VERIFIER_FORBIDDEN_MESSAGE),
+      );
+      const issued = await verifyAndPostItemIssue(
+        departmentDraft.id,
+        corporateChecker,
+        {
+          expectedVersion: departmentSubmitted.version,
+          remarks: null,
+        },
+      );
+      assert.equal(issued.status, "POSTED");
+      assert.equal(issued.destinationType, "CORPORATE_DEPARTMENT");
+      assert.equal(issued.shipment, null);
+    } finally {
+      const issueRows = await getDb()
+        .select({ id: itemIssues.id })
+        .from(itemIssues)
+        .where(eq(itemIssues.departmentId, departmentId));
+      const issueIds = issueRows.map((row) => row.id);
+      if (issueIds.length > 0) {
+        const consumptionRows = await getDb()
+          .select({ id: departmentConsumptions.id })
+          .from(departmentConsumptions)
+          .where(inArray(departmentConsumptions.itemIssueId, issueIds));
+        const consumptionIds = consumptionRows.map((row) => row.id);
+        if (consumptionIds.length > 0) {
+          await getDb()
+            .delete(departmentConsumptionLines)
+            .where(
+              inArray(
+                departmentConsumptionLines.departmentConsumptionId,
+                consumptionIds,
+              ),
+            );
+          await getDb()
+            .delete(departmentConsumptions)
+            .where(inArray(departmentConsumptions.id, consumptionIds));
+        }
+        await getDb().delete(stockLedger).where(inArray(stockLedger.referenceId, issueIds));
+        await getDb()
+          .delete(notifications)
+          .where(
+            and(
+              eq(notifications.relatedEntityType, "ITEM_ISSUE"),
+              inArray(notifications.relatedEntityId, issueIds),
+            ),
+          );
+        await getDb()
+          .delete(itemIssueActions)
+          .where(inArray(itemIssueActions.itemIssueId, issueIds));
+        await getDb()
+          .delete(itemIssueLines)
+          .where(inArray(itemIssueLines.itemIssueId, issueIds));
+        await getDb().delete(itemIssues).where(inArray(itemIssues.id, issueIds));
+      }
+      await getDb().delete(departments).where(eq(departments.id, departmentId));
+    }
   });
 });

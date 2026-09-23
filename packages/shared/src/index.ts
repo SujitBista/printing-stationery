@@ -634,6 +634,11 @@ export {
   itemRequestIssueActionHref,
   itemIssueBusinessStatusLabel,
   itemIssueCheckerActionLabel,
+  ITEM_ISSUE_OPEN_RECEIPT_STATUSES,
+  ITEM_ISSUE_RECEIPT_STATUS_LABELS,
+  itemIssueReceiptStatusLabel,
+  destinationReceiptRoleLabel,
+  itemIssueReceiptIsOpen,
 } from "./item-issue-workflow.js";
 export type {
   ItemRequestIssueActionKind,
@@ -829,6 +834,7 @@ export {
   remainingInTransitQuantity,
   shipmentLineQuantityBalance,
   itemIssueLineQuantities,
+  destinationReceiptQuantityError,
 } from "./item-issue-quantities.js";
 export type { ItemIssueLineQuantities } from "./item-issue-quantities.js";
 export {

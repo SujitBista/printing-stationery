@@ -468,6 +468,7 @@ export const itemIssueReceiptSchema = z.object({
   createdBy: itemRequestPersonSummarySchema,
   submittedBy: itemRequestPersonSummarySchema.nullable(),
   verifiedBy: itemRequestPersonSummarySchema.nullable(),
+  confirmedWorkflowRole: itemRequestWorkflowRoleSchema.nullable(),
   canSubmit: z.boolean(),
   canConfirm: z.boolean(),
   canReturn: z.boolean(),

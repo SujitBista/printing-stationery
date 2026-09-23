@@ -539,7 +539,7 @@ export async function submitItemIssueReceipt(
       }
       return { success: true, data: parsed.data };
     },
-    "Failed to submit receipt",
+    "Failed to confirm receipt",
   );
 }
 

@@ -253,6 +253,13 @@
       "when": 1788850000000,
       "tag": "0035_ignore_imported_opening_in_transit",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788855000000,
+      "tag": "0036_direct_destination_receipt_confirmation",
+      "breakpoints": true
     }
   ]
 }

@@ -21,7 +21,6 @@ const PAGE_SIZE = 20;
 const QUEUES: Array<{ key: IncomingShipmentQueue; label: string }> = [
   { key: "in-transit", label: "In Transit" },
   { key: "partially-received", label: "Partially Received" },
-  { key: "awaiting-receipt-verification", label: "Awaiting Receipt Verification" },
   { key: "received", label: "Received" },
   { key: "received-with-discrepancy", label: "Received with Discrepancy" },
 ];
@@ -86,8 +85,9 @@ export function IncomingItemsPage() {
         Incoming Items
       </h1>
       <p className="mt-2 text-sm text-ink-muted">
-        Shipments dispatched to your assigned store. Branch stock increases only after
-        receipt is confirmed.
+        Shipments dispatched to your assigned store. Destination Store Maker or
+        Checker can confirm receipt directly. Stock changes only when receipt is
+        confirmed.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -189,11 +189,7 @@ export function IncomingItemsPage() {
                         href={`/requests/incoming-items/${item.id}`}
                         className="font-medium text-accent hover:underline"
                       >
-                        {item.canConfirmReceipt
-                          ? "Confirm Receipt"
-                          : item.canRecordReceipt
-                            ? "Record Receipt"
-                            : "View"}
+                        {item.canConfirmReceipt ? "Confirm Receipt" : "View"}
                       </Link>
                     </td>
                   </tr>

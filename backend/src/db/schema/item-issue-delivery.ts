@@ -234,6 +234,9 @@ export const itemIssueReceipts = pgTable(
       .defaultNow(),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    confirmedWorkflowRole: itemRequestWorkflowRoleEnum(
+      "confirmed_workflow_role",
+    ),
   },
   (table) => [
     index("item_issue_receipts_shipment_id_idx").on(table.shipmentId),

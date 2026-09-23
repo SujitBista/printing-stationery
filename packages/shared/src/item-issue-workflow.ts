@@ -3,6 +3,7 @@ import type {
   ItemIssueDeliveryStatus,
   ItemIssueDestinationType,
   ItemIssueQueue,
+  ItemIssueReceiptStatus,
   ItemIssueStatus,
 } from "./types/item-issue.js";
 
@@ -58,6 +59,45 @@ export const ITEM_ISSUE_ROLE_QUEUES = {
   CORPORATE_MAKER: ["returned", "posted"],
   CORPORATE_CHECKER: ["pending-verification", "posted"],
 } as const satisfies Record<ItemRequestWorkflowRole, readonly ItemIssueQueue[]>;
+
+export const ITEM_ISSUE_OPEN_RECEIPT_STATUSES = [
+  "DRAFT",
+  "PENDING_VERIFICATION",
+  "RETURNED",
+] as const satisfies readonly ItemIssueReceiptStatus[];
+
+/** Historical verification statuses stay in the database, but the UI does not present them as a checker queue. */
+export const ITEM_ISSUE_RECEIPT_STATUS_LABELS = {
+  DRAFT: "Pending confirmation",
+  PENDING_VERIFICATION: "Pending confirmation",
+  RETURNED: "Pending confirmation",
+  CONFIRMED: "Confirmed",
+  REJECTED: "Rejected",
+} as const satisfies Record<ItemIssueReceiptStatus, string>;
+
+export function itemIssueReceiptStatusLabel(
+  status: ItemIssueReceiptStatus,
+): string {
+  return ITEM_ISSUE_RECEIPT_STATUS_LABELS[status];
+}
+
+export function destinationReceiptRoleLabel(
+  role: string | null | undefined,
+): string {
+  if (role === "BRANCH_MAKER") {
+    return "Destination Store Maker";
+  }
+  if (role === "BRANCH_CHECKER") {
+    return "Destination Store Checker";
+  }
+  return "—";
+}
+
+export function itemIssueReceiptIsOpen(status: ItemIssueReceiptStatus): boolean {
+  return (ITEM_ISSUE_OPEN_RECEIPT_STATUSES as readonly string[]).includes(
+    status,
+  );
+}
 
 export const ITEM_ISSUE_INCOMING_ROLES = [
   "ADMIN",

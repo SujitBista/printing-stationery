@@ -44,6 +44,43 @@ export function remainingInTransitQuantity(
   );
 }
 
+/**
+ * Client-side guard before Confirm Receipt. The backend repeats this check
+ * inside the posting transaction.
+ */
+export function destinationReceiptQuantityError(params: {
+  lines: Array<{
+    receivedQuantityNow: string;
+    damagedQuantity?: string;
+    remainingInTransitQuantity: string;
+  }>;
+}): string | null {
+  const active = params.lines.filter((line) =>
+    /[1-9]/.test(line.receivedQuantityNow.trim()),
+  );
+  if (active.length === 0) {
+    return "Enter a received quantity greater than zero.";
+  }
+  for (const line of active) {
+    const received = Number(line.receivedQuantityNow);
+    const damaged = Number(line.damagedQuantity?.trim() || "0");
+    const remaining = Number(line.remainingInTransitQuantity);
+    if (
+      !Number.isFinite(received) ||
+      !Number.isFinite(damaged) ||
+      !Number.isFinite(remaining) ||
+      received < 0 ||
+      damaged < 0
+    ) {
+      return "Quantities must be zero or greater.";
+    }
+    if (received + damaged > remaining + 0.0000001) {
+      return "Receipt quantity exceeds remaining in-transit quantity.";
+    }
+  }
+  return null;
+}
+
 export function shipmentLineQuantityBalance(params: {
   dispatchedQuantity: string;
   confirmedUsableReceivedQuantity: string;

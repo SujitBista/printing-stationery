@@ -5,7 +5,13 @@ import type {
   ItemIssueStatus,
   ItemRequestPersonSummary,
 } from "@printing-stationery/shared";
-import { itemIssueBusinessStatusLabel } from "@printing-stationery/shared";
+import {
+  destinationReceiptRoleLabel,
+  itemIssueBusinessStatusLabel,
+  itemIssueReceiptStatusLabel,
+} from "@printing-stationery/shared";
+
+export { destinationReceiptRoleLabel, itemIssueReceiptStatusLabel };
 
 export const ITEM_ISSUE_STATUS_LABELS: Record<ItemIssueStatus, string> = {
   DRAFT: "Draft",

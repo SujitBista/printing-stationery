@@ -14,7 +14,11 @@ export function itemRequestNotificationHref(
     ) {
       return "/requests/incoming-items";
     }
-    if (notification.type === "ITEM_ISSUE_DEPARTMENT_ISSUED") {
+    if (
+      notification.type === "ITEM_ISSUE_RECEIPT_CONFIRMED" ||
+      notification.type === "ITEM_ISSUE_DISCREPANCY_REPORTED" ||
+      notification.type === "ITEM_ISSUE_DEPARTMENT_ISSUED"
+    ) {
       return `/requests/item-issues/${notification.relatedEntityId}`;
     }
     return `/requests/item-issues/${notification.relatedEntityId}`;

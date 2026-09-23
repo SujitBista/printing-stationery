@@ -146,6 +146,68 @@ export async function allocateFifoCost(
   return { allocations, totalAmount, averageRate };
 }
 
+/**
+ * Usable receipt quantity takes the next unconsumed slice of the dispatched
+ * FIFO layers, so a later partial receipt does not reuse cost already applied.
+ */
+export function fifoAllocationsForReceiptSlice(params: {
+  dispatchLayers: FifoAllocation[];
+  previouslyConsumedQuantity: string;
+  receivedQuantity: string;
+}): FifoAllocation[] {
+  if (params.dispatchLayers.length === 0) {
+    return copyFifoAllocationsForReceipt(
+      [
+        {
+          rate: "0",
+          quantity: params.receivedQuantity,
+          amount: "0",
+        },
+      ],
+      params.receivedQuantity,
+    );
+  }
+
+  let skip = parseQuantityToScaled(params.previouslyConsumedQuantity);
+  const remainingLayers: FifoAllocation[] = [];
+  for (const layer of params.dispatchLayers) {
+    let available = parseQuantityToScaled(layer.quantity);
+    if (available <= 0n) {
+      continue;
+    }
+    if (skip > 0n) {
+      if (available <= skip) {
+        skip -= available;
+        continue;
+      }
+      available -= skip;
+      skip = 0n;
+    }
+    const quantity = scaledToQuantity(available);
+    remainingLayers.push({
+      rate: layer.rate,
+      quantity,
+      amount: multiplyDecimalStrings(quantity, layer.rate, 2),
+    });
+  }
+
+  if (remainingLayers.length === 0) {
+    const last = params.dispatchLayers[params.dispatchLayers.length - 1]!;
+    return copyFifoAllocationsForReceipt(
+      [
+        {
+          rate: last.rate,
+          quantity: params.receivedQuantity,
+          amount: "0",
+        },
+      ],
+      params.receivedQuantity,
+    );
+  }
+
+  return copyFifoAllocationsForReceipt(remainingLayers, params.receivedQuantity);
+}
+
 export function copyFifoAllocationsForReceipt(
   allocations: FifoAllocation[],
   quantity: string,

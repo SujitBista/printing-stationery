@@ -13,24 +13,23 @@ import type {
   SubmitItemIssueReceiptInput,
 } from "@printing-stationery/shared";
 import {
+  ITEM_ISSUE_OPEN_RECEIPT_STATUSES,
   ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES,
-  remainingInTransitQuantity,
   userHasRole,
 } from "@printing-stationery/shared";
 import { AppError } from "../utils/errors.js";
-import { mapItemIssueDatabaseError } from "../utils/db-errors.js";
 import {
+  isStockLedgerReferenceLineUniqueViolation,
+  mapItemIssueDatabaseError,
+} from "../utils/db-errors.js";
+import {
+  ADMIN_ITEM_ISSUE_RECEIPT_FORBIDDEN_MESSAGE,
   ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE,
   ITEM_ISSUE_MAKER_CHECKER_FORBIDDEN_MESSAGE,
-  ITEM_ISSUE_RECEIPT_SELF_VERIFY_FORBIDDEN_MESSAGE,
+  ITEM_ISSUE_RECEIPT_RETURN_RETIRED_MESSAGE,
+  actorMayConfirmDestinationReceipt,
 } from "./item-issue-authorization.js";
-import { insertItemIssueWorkflowNotifications } from "./item-issue-notifications.js";
-import { lockStoreStockForUpdate } from "./opening-stocks.service.js";
-import {
-  copyFifoAllocationsForReceipt,
-  stockLedgerSourceKey,
-  type FifoAllocation,
-} from "./stock-ledger.js";
+import { postDestinationReceiptConfirmation } from "./item-issue-receipt-posting.js";
 import { getDb } from "../db/client.js";
 import {
   applicationUsers,
@@ -39,8 +38,6 @@ import {
 import { branches, type BranchRow } from "../db/schema/branches.js";
 import { employees, type EmployeeRow } from "../db/schema/employees.js";
 import {
-  itemIssueDiscrepancies,
-  itemIssueReceiptActions,
   itemIssueReceiptLines,
   itemIssueReceipts,
   itemIssueShipmentLines,
@@ -49,7 +46,6 @@ import {
 import { itemIssues } from "../db/schema/item-issues.js";
 import { itemRequests } from "../db/schema/item-requests.js";
 import { items } from "../db/schema/items.js";
-import { stockLedger } from "../db/schema/opening-stocks.js";
 import { stores, type StoreRow } from "../db/schema/stores.js";
 import { storeUsers } from "../db/schema/store-users.js";
 import { units } from "../db/schema/units.js";
@@ -80,17 +76,6 @@ function parseQuantityToScaled(value: string): bigint {
   const normalizedWhole = wholePart.replace(/^0+(?=\d)/, "") || "0";
   const normalizedFraction = fractionPart.padEnd(4, "0");
   return BigInt(normalizedWhole) * 10_000n + BigInt(normalizedFraction);
-}
-
-function scaledToQuantity(value: bigint): string {
-  const sign = value < 0n ? "-" : "";
-  const absolute = value < 0n ? -value : value;
-  const whole = absolute / 10_000n;
-  const fraction = (absolute % 10_000n).toString().padStart(4, "0");
-  const trimmedFraction = fraction.replace(/0+$/, "");
-  return trimmedFraction.length > 0
-    ? `${sign}${whole.toString()}.${trimmedFraction}`
-    : `${sign}${whole.toString()}`;
 }
 
 function toStoreSummary(store: StoreRow, branch: BranchRow) {
@@ -201,6 +186,57 @@ function assertDestinationAccess(
   }
 }
 
+const OPEN_RECEIPT_STATUSES = ITEM_ISSUE_OPEN_RECEIPT_STATUSES;
+
+function destinationReceiptWorkflowRole(
+  access: AccessContext,
+  toStoreId: string,
+): "BRANCH_MAKER" | "BRANCH_CHECKER" {
+  if (access.supervisedStoreIds.includes(toStoreId)) {
+    return "BRANCH_CHECKER";
+  }
+  return "BRANCH_MAKER";
+}
+
+function actorCanConfirmDestination(
+  actor: AuthenticatedUser,
+  access: AccessContext,
+  toStoreId: string,
+): boolean {
+  return actorMayConfirmDestinationReceipt({
+    actor,
+    destinationStoreId: toStoreId,
+    makerStoreIds: access.makerStoreIds,
+    checkerStoreIds: access.supervisedStoreIds,
+  });
+}
+
+function assertCanConfirmDestinationReceipt(
+  actor: AuthenticatedUser,
+  access: AccessContext,
+  toStoreId: string,
+): "BRANCH_MAKER" | "BRANCH_CHECKER" {
+  if (isAdminUser(actor)) {
+    throw new AppError(ADMIN_ITEM_ISSUE_RECEIPT_FORBIDDEN_MESSAGE, 403);
+  }
+  if (!actorCanConfirmDestination(actor, access, toStoreId)) {
+    throw new AppError(ITEM_ISSUE_DESTINATION_FORBIDDEN_MESSAGE, 403);
+  }
+  return destinationReceiptWorkflowRole(access, toStoreId);
+}
+
+function rethrowReceiptConfirmationError(error: unknown): never {
+  if (error instanceof AppError) {
+    throw error;
+  }
+  if (isStockLedgerReferenceLineUniqueViolation(error)) {
+    throw new AppError("Receipt has already been confirmed.", 409, {
+      cause: error,
+    });
+  }
+  mapItemIssueDatabaseError(error);
+}
+
 export async function getShipmentDetailForIssue(
   issueId: string,
   actor: AuthenticatedUser,
@@ -272,16 +308,10 @@ async function mapShipment(
     .orderBy(asc(items.itemName), asc(itemIssueShipmentLines.id));
 
   const receipts = await listReceiptsForShipment(row.shipment.id, actor, access, row.shipment.toStoreId);
-  const canRecordReceipt =
+  const canConfirmReceipt =
     (ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES as readonly string[]).includes(
       row.shipment.deliveryStatus,
-    ) &&
-    (isAdminUser(actor)
-      ? false
-      : access.makerStoreIds.includes(row.shipment.toStoreId));
-  const pendingReceipt = receipts.find(
-    (receipt) => receipt.status === "PENDING_VERIFICATION",
-  );
+    ) && actorCanConfirmDestination(actor, access, row.shipment.toStoreId);
 
   return {
     id: row.shipment.id,
@@ -308,10 +338,8 @@ async function mapShipment(
       discrepancyQuantity: String(line.line.discrepancyQuantity),
     })),
     receipts,
-    canRecordReceipt: canRecordReceipt && !pendingReceipt,
-    canConfirmReceipt: Boolean(
-      pendingReceipt && access.supervisedStoreIds.includes(row.shipment.toStoreId),
-    ),
+    canRecordReceipt: false,
+    canConfirmReceipt,
   };
 }
 
@@ -379,11 +407,11 @@ async function listReceiptsForShipment(
   }
 
   return rows.map((row) => {
-    const pending = row.receipt.status === "PENDING_VERIFICATION";
+    const open = (OPEN_RECEIPT_STATUSES as readonly string[]).includes(
+      row.receipt.status,
+    );
     const canConfirm =
-      pending &&
-      access.supervisedStoreIds.includes(toStoreId) &&
-      row.receipt.createdByApplicationUserId !== actor.id;
+      open && actorCanConfirmDestination(actor, access, toStoreId);
     return {
       id: row.receipt.id,
       shipmentId: row.receipt.shipmentId,
@@ -398,11 +426,10 @@ async function listReceiptsForShipment(
       createdBy: toPersonSummary(row.createdByUser, row.createdByEmployee)!,
       submittedBy: toPersonSummary(row.submittedByUser, row.submittedByEmployee),
       verifiedBy: toPersonSummary(row.verifiedByUser, row.verifiedByEmployee),
-      canSubmit:
-        ["DRAFT", "RETURNED"].includes(row.receipt.status) &&
-        access.makerStoreIds.includes(toStoreId),
+      confirmedWorkflowRole: row.receipt.confirmedWorkflowRole ?? null,
+      canSubmit: false,
       canConfirm,
-      canReturn: pending && access.supervisedStoreIds.includes(toStoreId),
+      canReturn: false,
       lines: (linesByReceipt.get(row.receipt.id) ?? []).map((line) => ({
         id: line.id,
         shipmentLineId: line.shipmentLineId,
@@ -555,15 +582,11 @@ export async function listIncomingShipments(
           confirmedReceivedQuantity: String(line.confirmedReceivedQuantity),
           remainingInTransitQuantity: String(line.remainingInTransitQuantity),
         })),
-      canRecordReceipt:
+      canRecordReceipt: false,
+      canConfirmReceipt:
         (ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES as readonly string[]).includes(
           row.shipment.deliveryStatus,
-        ) &&
-        access.makerStoreIds.includes(row.shipment.toStoreId) &&
-        !pending.has(row.shipment.id),
-      canConfirmReceipt:
-        pending.has(row.shipment.id) &&
-        access.supervisedStoreIds.includes(row.shipment.toStoreId),
+        ) && actorCanConfirmDestination(actor, access, row.shipment.toStoreId),
     }));
 
     return {
@@ -640,7 +663,11 @@ export async function submitItemIssueReceipt(
       ) {
         throw new AppError("Shipment is not awaiting receipt.", 409);
       }
-      assertDestinationAccess(actor, access, shipment.toStoreId, "maker");
+      const workflowRole = assertCanConfirmDestinationReceipt(
+        actor,
+        access,
+        shipment.toStoreId,
+      );
 
       const shipmentLines = await tx
         .select()
@@ -648,7 +675,6 @@ export async function submitItemIssueReceipt(
         .where(eq(itemIssueShipmentLines.shipmentId, shipmentId))
         .for("update");
       const lineById = new Map(shipmentLines.map((line) => [line.id, line]));
-
       for (const line of input.lines) {
         const shipmentLine = lineById.get(line.shipmentLineId);
         if (!shipmentLine) {
@@ -659,7 +685,7 @@ export async function submitItemIssueReceipt(
         const remaining = parseQuantityToScaled(
           String(shipmentLine.remainingInTransitQuantity),
         );
-        if (received + damaged > remaining) {
+        if (received <= 0n || received + damaged > remaining) {
           throw new AppError(
             "Receipt quantity exceeds remaining in-transit quantity.",
             409,
@@ -667,51 +693,119 @@ export async function submitItemIssueReceipt(
         }
       }
 
-      const inserted = await tx
-        .insert(itemIssueReceipts)
-        .values({
-          shipmentId,
-          status: "PENDING_VERIFICATION",
-          receiptDate: new Date(input.receiptDate),
-          remarks: input.remarks,
-          discrepancyResolution: input.discrepancyResolution,
-          createdByApplicationUserId: actor.id,
-          submittedByApplicationUserId: actor.id,
-          submittedAt: new Date(),
-        })
-        .returning({ id: itemIssueReceipts.id });
-      const receiptId = inserted[0]?.id;
-      if (!receiptId) {
-        throw new AppError("Failed to record receipt.", 500);
+      const openRows = await tx
+        .select()
+        .from(itemIssueReceipts)
+        .where(
+          and(
+            eq(itemIssueReceipts.shipmentId, shipmentId),
+            inArray(itemIssueReceipts.status, [...OPEN_RECEIPT_STATUSES]),
+          ),
+        )
+        .for("update");
+      const openReceipt = openRows[0];
+      let receiptId = openReceipt?.id;
+      let expectedVersion = openReceipt?.version ?? 1;
+      if (openReceipt) {
+        await tx
+          .update(itemIssueReceipts)
+          .set({
+            receiptDate: new Date(input.receiptDate),
+            remarks: input.remarks,
+            discrepancyResolution: input.discrepancyResolution ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(itemIssueReceipts.id, openReceipt.id));
+        await replaceOpenReceiptLines(tx, openReceipt.id, input.lines);
+      } else {
+        const inserted = await tx
+          .insert(itemIssueReceipts)
+          .values({
+            shipmentId,
+            status: "PENDING_VERIFICATION",
+            receiptDate: new Date(input.receiptDate),
+            remarks: input.remarks,
+            discrepancyResolution: input.discrepancyResolution,
+            createdByApplicationUserId: actor.id,
+            submittedByApplicationUserId: actor.id,
+            submittedAt: new Date(),
+          })
+          .returning({ id: itemIssueReceipts.id, version: itemIssueReceipts.version });
+        receiptId = inserted[0]?.id;
+        expectedVersion = inserted[0]?.version ?? 1;
+        if (!receiptId) {
+          throw new AppError("Failed to record receipt.", 500);
+        }
+        await tx.insert(itemIssueReceiptLines).values(
+          input.lines.map((line) => ({
+            receiptId: receiptId!,
+            shipmentLineId: line.shipmentLineId,
+            receivedQuantityNow: line.receivedQuantityNow,
+            missingQuantity: line.missingQuantity ?? "0",
+            damagedQuantity: line.damagedQuantity ?? "0",
+            excessQuantity: line.excessQuantity ?? "0",
+            discrepancyReason: line.discrepancyReason ?? null,
+            remarks: line.remarks,
+          })),
+        );
       }
-      await tx.insert(itemIssueReceiptLines).values(
-        input.lines.map((line) => ({
-          receiptId,
-          shipmentLineId: line.shipmentLineId,
-          receivedQuantityNow: line.receivedQuantityNow,
-          missingQuantity: line.missingQuantity ?? "0",
-          damagedQuantity: line.damagedQuantity ?? "0",
-          excessQuantity: line.excessQuantity ?? "0",
-          discrepancyReason: line.discrepancyReason ?? null,
-          remarks: line.remarks,
-        })),
-      );
-      await tx.insert(itemIssueReceiptActions).values({
-        receiptId,
-        action: "SUBMIT",
-        fromStatus: null,
-        toStatus: "PENDING_VERIFICATION",
-        actorApplicationUserId: actor.id,
-        actorWorkflowRole: "BRANCH_MAKER",
+
+      await postDestinationReceiptConfirmation(tx, {
+        receiptId: receiptId!,
+        expectedVersion,
+        actor,
+        workflowRole,
+        resolution: input.discrepancyResolution ?? "KEEP_IN_TRANSIT",
         remarks: input.remarks,
       });
     });
     return getIncomingShipment(shipmentId, actor);
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
+    rethrowReceiptConfirmationError(error);
+  }
+}
+
+async function replaceOpenReceiptLines(
+  tx: Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "delete">,
+  receiptId: string,
+  lines: SubmitItemIssueReceiptInput["lines"],
+): Promise<void> {
+  const existing = await tx
+    .select()
+    .from(itemIssueReceiptLines)
+    .where(eq(itemIssueReceiptLines.receiptId, receiptId))
+    .for("update");
+  const incomingIds = new Set(lines.map((line) => line.shipmentLineId));
+  for (const line of existing) {
+    if (!incomingIds.has(line.shipmentLineId)) {
+      await tx
+        .delete(itemIssueReceiptLines)
+        .where(eq(itemIssueReceiptLines.id, line.id));
     }
-    mapItemIssueDatabaseError(error);
+  }
+  for (const line of lines) {
+    const current = existing.find((row) => row.shipmentLineId === line.shipmentLineId);
+    const values = {
+      receivedQuantityNow: line.receivedQuantityNow,
+      missingQuantity: line.missingQuantity ?? "0",
+      damagedQuantity: line.damagedQuantity ?? "0",
+      excessQuantity: line.excessQuantity ?? "0",
+      discrepancyReason: line.discrepancyReason ?? null,
+      remarks: line.remarks,
+      updatedAt: new Date(),
+    };
+    if (current) {
+      await tx
+        .update(itemIssueReceiptLines)
+        .set(values)
+        .where(eq(itemIssueReceiptLines.id, current.id));
+    } else {
+      await tx.insert(itemIssueReceiptLines).values({
+        receiptId,
+        shipmentLineId: line.shipmentLineId,
+        ...values,
+      });
+    }
   }
 }
 
@@ -721,61 +815,29 @@ export async function returnItemIssueReceipt(
   input: ReturnItemIssueReceiptInput,
 ): Promise<ItemIssueShipment> {
   const access = await loadIncomingAccess(actor);
-  let shipmentId = "";
-  try {
-    await getDb().transaction(async (tx) => {
-      const receiptRows = await tx
-        .select()
-        .from(itemIssueReceipts)
-        .where(eq(itemIssueReceipts.id, receiptId))
-        .for("update");
-      const receipt = receiptRows[0];
-      if (!receipt) {
-        throw new AppError("Receipt not found", 404);
-      }
-      if (receipt.status !== "PENDING_VERIFICATION") {
-        throw new AppError("Shipment is not awaiting receipt.", 409);
-      }
-      if (receipt.version !== input.expectedVersion) {
-        throw new AppError(STALE_RECEIPT_MESSAGE, 409);
-      }
-      const shipmentRows = await tx
-        .select()
-        .from(itemIssueShipments)
-        .where(eq(itemIssueShipments.id, receipt.shipmentId))
-        .for("update");
-      const shipment = shipmentRows[0];
-      if (!shipment) {
-        throw new AppError("Shipment is not awaiting receipt.", 404);
-      }
-      assertDestinationAccess(actor, access, shipment.toStoreId, "checker");
-      shipmentId = shipment.id;
-      await tx
-        .update(itemIssueReceipts)
-        .set({
-          status: "RETURNED",
-          version: receipt.version + 1,
-          updatedAt: new Date(),
-          remarks: input.remarks,
-        })
-        .where(eq(itemIssueReceipts.id, receiptId));
-      await tx.insert(itemIssueReceiptActions).values({
-        receiptId,
-        action: "RETURN",
-        fromStatus: "PENDING_VERIFICATION",
-        toStatus: "RETURNED",
-        actorApplicationUserId: actor.id,
-        actorWorkflowRole: "BRANCH_CHECKER",
-        remarks: input.remarks,
-      });
-    });
-    return getIncomingShipment(shipmentId, actor);
-  } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    mapItemIssueDatabaseError(error);
+  const receiptRows = await getDb()
+    .select()
+    .from(itemIssueReceipts)
+    .where(eq(itemIssueReceipts.id, receiptId))
+    .limit(1);
+  const receipt = receiptRows[0];
+  if (!receipt) {
+    throw new AppError("Receipt not found", 404);
   }
+  if (receipt.version !== input.expectedVersion) {
+    throw new AppError(STALE_RECEIPT_MESSAGE, 409);
+  }
+  const shipmentRows = await getDb()
+    .select()
+    .from(itemIssueShipments)
+    .where(eq(itemIssueShipments.id, receipt.shipmentId))
+    .limit(1);
+  const shipment = shipmentRows[0];
+  if (!shipment) {
+    throw new AppError("Shipment is not awaiting receipt.", 404);
+  }
+  assertCanConfirmDestinationReceipt(actor, access, shipment.toStoreId);
+  throw new AppError(ITEM_ISSUE_RECEIPT_RETURN_RETIRED_MESSAGE, 409);
 }
 
 export async function confirmItemIssueReceipt(
@@ -784,403 +846,46 @@ export async function confirmItemIssueReceipt(
   input: ConfirmItemIssueReceiptInput,
 ): Promise<ItemIssueShipment> {
   const access = await loadIncomingAccess(actor);
-  if (userHasRole(actor.roles, "MAKER") && !userHasRole(actor.roles, "CHECKER")) {
-    throw new AppError(ITEM_ISSUE_MAKER_CHECKER_FORBIDDEN_MESSAGE, 403);
+  const previewRows = await getDb()
+    .select()
+    .from(itemIssueReceipts)
+    .where(eq(itemIssueReceipts.id, receiptId))
+    .limit(1);
+  const preview = previewRows[0];
+  if (!preview) {
+    throw new AppError("Receipt not found", 404);
   }
-  let shipmentId = "";
+  const shipmentRows = await getDb()
+    .select()
+    .from(itemIssueShipments)
+    .where(eq(itemIssueShipments.id, preview.shipmentId))
+    .limit(1);
+  const shipment = shipmentRows[0];
+  if (!shipment) {
+    throw new AppError("Shipment is not awaiting receipt.", 404);
+  }
+  const workflowRole = assertCanConfirmDestinationReceipt(
+    actor,
+    access,
+    shipment.toStoreId,
+  );
   try {
     await getDb().transaction(async (tx) => {
-      const receiptRows = await tx
-        .select()
-        .from(itemIssueReceipts)
-        .where(eq(itemIssueReceipts.id, receiptId))
-        .for("update");
-      const receipt = receiptRows[0];
-      if (!receipt) {
-        throw new AppError("Receipt not found", 404);
-      }
-      if (receipt.status === "CONFIRMED") {
-        throw new AppError("Receipt has already been confirmed.", 409);
-      }
-      if (receipt.status !== "PENDING_VERIFICATION") {
-        throw new AppError("Shipment is not awaiting receipt.", 409);
-      }
-      if (receipt.version !== input.expectedVersion) {
-        throw new AppError(STALE_RECEIPT_MESSAGE, 409);
-      }
-      if (receipt.createdByApplicationUserId === actor.id) {
-        throw new AppError(ITEM_ISSUE_RECEIPT_SELF_VERIFY_FORBIDDEN_MESSAGE, 403);
-      }
-
-      const shipmentRows = await tx
-        .select()
-        .from(itemIssueShipments)
-        .where(eq(itemIssueShipments.id, receipt.shipmentId))
-        .for("update");
-      const shipment = shipmentRows[0];
-      if (!shipment) {
-        throw new AppError("Shipment is not awaiting receipt.", 404);
-      }
-      assertDestinationAccess(actor, access, shipment.toStoreId, "checker");
-      shipmentId = shipment.id;
-
-      const issueRows = await tx
-        .select()
-        .from(itemIssues)
-        .where(eq(itemIssues.id, shipment.itemIssueId))
-        .for("update");
-      const issue = issueRows[0];
-      if (!issue) {
-        throw new AppError("Item issue not found", 404);
-      }
-
-      await lockStoreStockForUpdate(tx, shipment.toStoreId, []);
-
-      const receiptLines = await tx
-        .select()
-        .from(itemIssueReceiptLines)
-        .where(eq(itemIssueReceiptLines.receiptId, receiptId));
-      const shipmentLines = await tx
-        .select()
-        .from(itemIssueShipmentLines)
-        .where(eq(itemIssueShipmentLines.shipmentId, shipment.id))
-        .for("update");
-      const shipmentLineById = new Map(shipmentLines.map((line) => [line.id, line]));
-
-      const confirmedAt = new Date();
-      const resolution =
-        input.discrepancyResolution ?? receipt.discrepancyResolution ?? "KEEP_IN_TRANSIT";
-
-      for (const line of receiptLines) {
-        const shipmentLine = shipmentLineById.get(line.shipmentLineId);
-        if (!shipmentLine) {
-          throw new AppError("Receipt quantity exceeds remaining in-transit quantity.", 409);
-        }
-        const received = parseQuantityToScaled(String(line.receivedQuantityNow));
-        const damaged = parseQuantityToScaled(String(line.damagedQuantity ?? "0"));
-        const remaining = parseQuantityToScaled(
-          String(shipmentLine.remainingInTransitQuantity),
-        );
-        if (received + damaged > remaining) {
-          throw new AppError(
-            "Receipt quantity exceeds remaining in-transit quantity.",
-            409,
-          );
-        }
-        const nextConfirmed =
-          parseQuantityToScaled(String(shipmentLine.confirmedReceivedQuantity)) +
-          received;
-        const prevDiscrepancy = parseQuantityToScaled(
-          String(shipmentLine.discrepancyQuantity),
-        );
-        const completeWithDiscrepancy =
-          resolution === "COMPLETE_WITH_DISCREPANCY";
-        const newlyFinalizedDiscrepancy = completeWithDiscrepancy
-          ? remaining - received
-          : 0n;
-        const nextDiscrepancy = prevDiscrepancy + newlyFinalizedDiscrepancy;
-        const nextRemaining = parseQuantityToScaled(
-          remainingInTransitQuantity(
-            String(shipmentLine.dispatchedQuantity),
-            scaledToQuantity(nextConfirmed),
-            scaledToQuantity(nextDiscrepancy),
-          ),
-        );
-        const inTransitOut = completeWithDiscrepancy
-          ? remaining
-          : received;
-        const damagedFinalized = completeWithDiscrepancy ? damaged : 0n;
-        const discrepancyFinalized =
-          completeWithDiscrepancy && remaining - received - damaged > 0n
-            ? remaining - received - damaged
-            : 0n;
-        await tx
-          .update(itemIssueShipmentLines)
-          .set({
-            confirmedReceivedQuantity: scaledToQuantity(nextConfirmed),
-            remainingInTransitQuantity: scaledToQuantity(nextRemaining),
-            discrepancyQuantity: scaledToQuantity(nextDiscrepancy),
-            updatedAt: confirmedAt,
-          })
-          .where(eq(itemIssueShipmentLines.id, shipmentLine.id));
-
-        const dispatchLayers = await tx
-          .select({
-            rate: stockLedger.rate,
-            quantityOut: stockLedger.quantityOut,
-            amountOut: stockLedger.amountOut,
-          })
-          .from(stockLedger)
-          .where(
-            and(
-              eq(stockLedger.referenceLineId, shipmentLine.itemIssueLineId),
-              eq(stockLedger.movementType, "ITEM_ISSUE"),
-              eq(stockLedger.stockCategory, "AVAILABLE"),
-            ),
-          );
-        const fifoSource: FifoAllocation[] =
-          dispatchLayers.length > 0
-            ? dispatchLayers.map((layer) => ({
-                rate: String(layer.rate),
-                quantity: String(layer.quantityOut),
-                amount: String(layer.amountOut),
-              }))
-            : [
-                {
-                  rate: "0",
-                  quantity: String(line.receivedQuantityNow),
-                  amount: "0",
-                },
-              ];
-        const receiptAllocations = copyFifoAllocationsForReceipt(
-          fifoSource,
-          String(line.receivedQuantityNow),
-        );
-
-        for (const allocation of receiptAllocations) {
-          await tx.insert(stockLedger).values({
-            storeId: shipment.toStoreId,
-            itemId: shipmentLine.itemId,
-            unitId: shipmentLine.unitId,
-            rate: allocation.rate,
-            movementType: "ITEM_ISSUE_RECEIPT",
-            stockCategory: "AVAILABLE",
-            quantityIn: allocation.quantity,
-            quantityOut: "0",
-            amountIn: allocation.amount,
-            amountOut: "0",
-            transactionDate: confirmedAt,
-            referenceType: "ITEM_ISSUE_RECEIPT",
-            referenceId: receipt.id,
-            referenceLineId: line.id,
-            sourceKey: stockLedgerSourceKey({
-              referenceType: "ITEM_ISSUE_RECEIPT",
-              referenceLineId: line.id,
-              storeId: shipment.toStoreId,
-              movementType: "ITEM_ISSUE_RECEIPT",
-              stockCategory: "AVAILABLE",
-              rate: allocation.rate,
-            }),
-            postedByApplicationUserId: actor.id,
-            postedAt: confirmedAt,
-          });
-        }
-
-        if (inTransitOut > 0n) {
-          await tx.insert(stockLedger).values({
-            storeId: shipment.toStoreId,
-            itemId: shipmentLine.itemId,
-            unitId: shipmentLine.unitId,
-            rate: "0",
-            movementType: "ITEM_ISSUE_IN_TRANSIT",
-            stockCategory: "IN_TRANSIT",
-            quantityIn: "0",
-            quantityOut: scaledToQuantity(inTransitOut),
-            amountIn: "0",
-            amountOut: "0",
-            transactionDate: confirmedAt,
-            referenceType: "ITEM_ISSUE_IN_TRANSIT",
-            referenceId: receipt.id,
-            referenceLineId: line.id,
-            sourceKey: stockLedgerSourceKey({
-              referenceType: "ITEM_ISSUE_IN_TRANSIT",
-              referenceLineId: line.id,
-              storeId: shipment.toStoreId,
-              movementType: "ITEM_ISSUE_IN_TRANSIT",
-              stockCategory: "IN_TRANSIT",
-              rate: "0",
-            }),
-            postedByApplicationUserId: actor.id,
-            postedAt: confirmedAt,
-          });
-        }
-
-        if (damagedFinalized > 0n) {
-          await tx.insert(stockLedger).values({
-            storeId: shipment.toStoreId,
-            itemId: shipmentLine.itemId,
-            unitId: shipmentLine.unitId,
-            rate: "0",
-            movementType: "ITEM_ISSUE_DISCREPANCY",
-            stockCategory: "DAMAGED",
-            quantityIn: scaledToQuantity(damagedFinalized),
-            quantityOut: "0",
-            amountIn: "0",
-            amountOut: "0",
-            transactionDate: confirmedAt,
-            referenceType: "ITEM_ISSUE_DISCREPANCY",
-            referenceId: receipt.id,
-            referenceLineId: line.id,
-            sourceKey: stockLedgerSourceKey({
-              referenceType: "ITEM_ISSUE_DISCREPANCY",
-              referenceLineId: line.id,
-              storeId: shipment.toStoreId,
-              movementType: "ITEM_ISSUE_DISCREPANCY",
-              stockCategory: "DAMAGED",
-              rate: "0",
-            }),
-            postedByApplicationUserId: actor.id,
-            postedAt: confirmedAt,
-          });
-        }
-
-        if (discrepancyFinalized > 0n) {
-          await tx.insert(itemIssueDiscrepancies).values({
-            shipmentLineId: shipmentLine.id,
-            receiptId: receipt.id,
-            itemIssueId: issue.id,
-            quantity: scaledToQuantity(discrepancyFinalized),
-            reason: line.discrepancyReason ?? "MISSING",
-            status: "OPEN",
-            remarks: line.remarks,
-          });
-          await tx.insert(stockLedger).values({
-            storeId: shipment.toStoreId,
-            itemId: shipmentLine.itemId,
-            unitId: shipmentLine.unitId,
-            rate: "0",
-            movementType: "ITEM_ISSUE_DISCREPANCY",
-            stockCategory: "DISCREPANCY",
-            quantityIn: scaledToQuantity(discrepancyFinalized),
-            quantityOut: "0",
-            amountIn: "0",
-            amountOut: "0",
-            transactionDate: confirmedAt,
-            referenceType: "ITEM_ISSUE_DISCREPANCY",
-            referenceId: receipt.id,
-            referenceLineId: line.id,
-            sourceKey: stockLedgerSourceKey({
-              referenceType: "ITEM_ISSUE_DISCREPANCY",
-              referenceLineId: line.id,
-              storeId: shipment.toStoreId,
-              movementType: "ITEM_ISSUE_DISCREPANCY",
-              stockCategory: "DISCREPANCY",
-              rate: "0",
-            }),
-            postedByApplicationUserId: actor.id,
-            postedAt: confirmedAt,
-          });
-        }
-      }
-
-      const refreshed = await tx
-        .select()
-        .from(itemIssueShipmentLines)
-        .where(eq(itemIssueShipmentLines.shipmentId, shipment.id));
-      const remainingTotal = refreshed.reduce(
-        (sum, line) => sum + parseQuantityToScaled(String(line.remainingInTransitQuantity)),
-        0n,
-      );
-      const discrepancyTotal = refreshed.reduce(
-        (sum, line) => sum + parseQuantityToScaled(String(line.discrepancyQuantity)),
-        0n,
-      );
-      const nextStatus =
-        remainingTotal > 0n
-          ? "PARTIALLY_RECEIVED"
-          : discrepancyTotal > 0n
-            ? "RECEIVED_WITH_DISCREPANCY"
-            : "RECEIVED";
-
-      await tx
-        .update(itemIssueShipments)
-        .set({
-          deliveryStatus: nextStatus,
-          receivedAt: remainingTotal > 0n ? shipment.receivedAt : confirmedAt,
-          updatedAt: confirmedAt,
-        })
-        .where(eq(itemIssueShipments.id, shipment.id));
-      await tx
-        .update(itemIssues)
-        .set({
-          deliveryStatus: nextStatus,
-          updatedAt: confirmedAt,
-        })
-        .where(eq(itemIssues.id, issue.id));
-
-      const confirmed = await tx
-        .update(itemIssueReceipts)
-        .set({
-          status: "CONFIRMED",
-          verifiedByApplicationUserId: actor.id,
-          verifiedAt: confirmedAt,
-          discrepancyResolution: resolution,
-          version: receipt.version + 1,
-          updatedAt: confirmedAt,
-        })
-        .where(
-          and(
-            eq(itemIssueReceipts.id, receiptId),
-            eq(itemIssueReceipts.status, "PENDING_VERIFICATION"),
-            eq(itemIssueReceipts.version, input.expectedVersion),
-          ),
-        )
-        .returning({ id: itemIssueReceipts.id });
-      if (!confirmed[0]) {
-        throw new AppError("Receipt has already been confirmed.", 409);
-      }
-
-      await tx.insert(itemIssueReceiptActions).values({
+      await postDestinationReceiptConfirmation(tx, {
         receiptId,
-        action:
-          resolution === "COMPLETE_WITH_DISCREPANCY"
-            ? "COMPLETE_WITH_DISCREPANCY"
-            : "CONFIRM",
-        fromStatus: "PENDING_VERIFICATION",
-        toStatus: "CONFIRMED",
-        actorApplicationUserId: actor.id,
-        actorWorkflowRole: "BRANCH_CHECKER",
+        expectedVersion: input.expectedVersion,
+        actor,
+        workflowRole,
+        resolution:
+          input.discrepancyResolution ??
+          preview.discrepancyResolution ??
+          "KEEP_IN_TRANSIT",
         remarks: input.remarks,
-      });
-
-      const toStoreName = (
-        await tx
-          .select({ storeName: stores.storeName })
-          .from(stores)
-          .where(eq(stores.id, shipment.toStoreId))
-          .limit(1)
-      )[0]?.storeName;
-      const requestNumber = issue.requestId
-        ? (
-            await tx
-              .select({ requestNumber: itemRequests.requestNumber })
-              .from(itemRequests)
-              .where(eq(itemRequests.id, issue.requestId))
-              .limit(1)
-          )[0]?.requestNumber ?? ""
-        : "";
-      const receivedNow = receiptLines.reduce(
-        (sum, line) => sum + parseQuantityToScaled(String(line.receivedQuantityNow)),
-        0n,
-      );
-      const customMessage = `${toStoreName ?? "Branch Store"} confirmed receipt of ${scaledToQuantity(receivedNow)} for issue ${issue.issueNumber}.`;
-      await insertItemIssueWorkflowNotifications(tx, {
-        type:
-          nextStatus === "RECEIVED_WITH_DISCREPANCY"
-            ? "ITEM_ISSUE_DISCREPANCY_REPORTED"
-            : "ITEM_ISSUE_RECEIPT_CONFIRMED",
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        requestNumber,
-        actorUserId: actor.id,
-        actorName: actor.username,
-        remarks: input.remarks,
-        createdByApplicationUserId: receipt.createdByApplicationUserId,
-        corporateCheckerApplicationUserId: issue.verifiedByApplicationUserId,
-        branchMakerApplicationUserId: receipt.createdByApplicationUserId,
-        branchCheckerApplicationUserId: actor.id,
-        extraRecipientIds: issue.verifiedByApplicationUserId
-          ? [issue.verifiedByApplicationUserId]
-          : [],
-        customMessage,
       });
     });
-    return getIncomingShipment(shipmentId, actor);
+    return getIncomingShipment(shipment.id, actor);
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    mapItemIssueDatabaseError(error);
+    rethrowReceiptConfirmationError(error);
   }
 }
 
