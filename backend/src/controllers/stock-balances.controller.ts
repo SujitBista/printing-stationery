@@ -1,8 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
 import {
-  confirmLegacyOpeningInTransitInputSchema,
-  openingStockLineIdSchema,
   stockBalanceListQuerySchema,
   stockLedgerListQuerySchema,
 } from "@printing-stationery/shared";
@@ -10,7 +8,6 @@ import {
   listStockBalances,
   listStockLedgerEntries,
 } from "../services/stock-balances.service.js";
-import { confirmLegacyOpeningInTransitReceipt } from "../services/opening-stock-in-transit.service.js";
 import { AppError } from "../utils/errors.js";
 
 function validationMessage(error: ZodError): string {
@@ -62,26 +59,6 @@ export async function listStockLedgerHandler(
     const actor = requireActor(req);
     const query = parseOrThrow(stockLedgerListQuerySchema.safeParse(req.query));
     const result = await listStockLedgerEntries(actor, query);
-    res.status(200).json(result);
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function confirmLegacyOpeningInTransitHandler(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  try {
-    const actor = requireActor(req);
-    const lineId = parseOrThrow(
-      openingStockLineIdSchema.safeParse(req.params.lineId),
-    );
-    const input = parseOrThrow(
-      confirmLegacyOpeningInTransitInputSchema.safeParse(req.body),
-    );
-    const result = await confirmLegacyOpeningInTransitReceipt(actor, lineId, input);
     res.status(200).json(result);
   } catch (error) {
     next(error);

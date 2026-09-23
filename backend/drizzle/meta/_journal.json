@@ -239,6 +239,21 @@
       "when": 1788840000000,
       "tag": "0033_legacy_opening_in_transit",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788845000000,
+      "tag": "0034_legacy_opening_in_transit_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1788850000000,
+      "tag": "0035_ignore_imported_opening_in_transit",
+      "breakpoints": true
     }
   ]
 }
+

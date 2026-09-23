@@ -93,5 +93,27 @@ describe("parseLegacyOpeningStockHtml", () => {
 
     const result = parseLegacyOpeningStockHtml(file);
     assert.equal(result.rows[0]?.legacyUnitName, "Cartoon");
+    assert.equal(result.rows[0]?.inTransitQuantity, "1");
+    assert.equal(result.rows[0]?.inTransitAmount, "50");
+  });
+
+  it("reads a non-zero in-transit column without rejecting the file", () => {
+    const file = buildReport(`
+      <tr>
+        <td>1</td><td>Register Book</td><td>PCS</td><td>10</td>
+        <td>100</td><td>1000</td><td>0</td><td>0</td>
+        <td>0</td><td>0</td><td>0</td><td>0</td>
+        <td>0</td><td>0</td><td>20</td><td>200</td><td>100</td><td>1000</td>
+      </tr>
+    `);
+
+    const result = parseLegacyOpeningStockHtml(file);
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0]?.openingQuantity, "100");
+    assert.equal(result.rows[0]?.openingAmount, "1000");
+    assert.equal(result.rows[0]?.inTransitQuantity, "20");
+    assert.equal(result.rows[0]?.inTransitAmount, "200");
+    assert.equal(result.rows[0]?.closingQuantity, "100");
+    assert.equal(result.rows[0]?.closingAmount, "1000");
   });
 });

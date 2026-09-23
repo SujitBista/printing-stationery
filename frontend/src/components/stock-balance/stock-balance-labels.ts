@@ -84,13 +84,7 @@ export function ledgerSourceStoreDisplay(entry: {
   if (entry.sourceStore?.storeName) {
     return entry.sourceStore.storeName;
   }
-  if (
-    entry.movementType === "LEGACY_OPENING_IN_TRANSIT" ||
-    entry.movementType === "LEGACY_OPENING_IN_TRANSIT_RECEIPT"
-  ) {
-    return entry.sourceStoreLabel ?? "Legacy Opening In Transit";
-  }
-  return "—";
+  return entry.sourceStoreLabel ?? "—";
 }
 
 export function formatMovementTime(value: string): string {

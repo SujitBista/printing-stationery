@@ -1,13 +1,8 @@
 import {
-  confirmLegacyOpeningInTransitInputSchema,
-  confirmLegacyOpeningInTransitResultSchema,
-  openingStockLineIdSchema,
   stockBalanceListQuerySchema,
   stockBalanceResponseSchema,
   stockLedgerListQuerySchema,
   stockLedgerResponseSchema,
-  type ConfirmLegacyOpeningInTransitInput,
-  type ConfirmLegacyOpeningInTransitResult,
   type StockBalanceListQuery,
   type StockBalanceResponse,
   type StockLedgerListQuery,
@@ -87,35 +82,5 @@ export async function fetchStockLedger(
           };
     },
     "Failed to load stock ledger",
-  );
-}
-
-export async function confirmLegacyOpeningInTransitReceipt(
-  lineId: string,
-  input: ConfirmLegacyOpeningInTransitInput,
-): Promise<ApiResult<ConfirmLegacyOpeningInTransitResult>> {
-  const parsedId = openingStockLineIdSchema.safeParse(lineId);
-  const parsedInput = confirmLegacyOpeningInTransitInputSchema.safeParse(input);
-  if (!parsedId.success || !parsedInput.success) {
-    return {
-      ok: false,
-      error: "Invalid legacy opening in-transit receipt request",
-      status: 400,
-    };
-  }
-  return requestJson(
-    `/api/stock-balances/legacy-opening-in-transit/${parsedId.data}/confirm`,
-    { method: "POST", body: JSON.stringify(parsedInput.data) },
-    (json) => {
-      const parsed = confirmLegacyOpeningInTransitResultSchema.safeParse(json);
-      return parsed.success
-        ? { success: true, data: parsed.data }
-        : {
-            success: false,
-            error:
-              "Legacy opening in-transit receipt response did not match the expected schema",
-          };
-    },
-    "Failed to confirm legacy opening in-transit receipt",
   );
 }

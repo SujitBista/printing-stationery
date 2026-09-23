@@ -218,20 +218,6 @@ export const openingStockLines = pgTable(
       .default(sql`'{}'::text[]`),
     sourceRowNumber: numeric("source_row_number", { precision: 10, scale: 0 }).notNull(),
     isIncludedForPosting: boolean("is_included_for_posting").notNull().default(true),
-    remainingInTransitQuantity: numeric("remaining_in_transit_quantity", {
-      precision: 18,
-      scale: 4,
-    })
-      .notNull()
-      .default("0"),
-    confirmedReceivedQuantity: numeric("confirmed_received_quantity", {
-      precision: 18,
-      scale: 4,
-    })
-      .notNull()
-      .default("0"),
-    needsAdminReview: boolean("needs_admin_review").notNull().default(false),
-    inTransitReviewReason: varchar("in_transit_review_reason", { length: 500 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

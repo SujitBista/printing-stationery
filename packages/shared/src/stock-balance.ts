@@ -30,28 +30,6 @@ export const STOCK_LEDGER_MOVEMENT_TYPES = [
 export type StockLedgerMovementType =
   (typeof STOCK_LEDGER_MOVEMENT_TYPES)[number];
 
-export const LEGACY_OPENING_IN_TRANSIT_SOURCE_LABEL =
-  "Legacy Opening In Transit";
-export const UNKNOWN_LEGACY_SOURCE_LABEL = "Unknown legacy source";
-
-export function isLegacyOpeningInTransitMovement(
-  movementType: StockLedgerMovementType,
-): boolean {
-  return (
-    movementType === "LEGACY_OPENING_IN_TRANSIT" ||
-    movementType === "LEGACY_OPENING_IN_TRANSIT_RECEIPT"
-  );
-}
-
-export function legacyOpeningInTransitSourceDisplay(params: {
-  sourceStoreName?: string | null;
-}): string {
-  if (params.sourceStoreName && params.sourceStoreName.trim().length > 0) {
-    return params.sourceStoreName;
-  }
-  return LEGACY_OPENING_IN_TRANSIT_SOURCE_LABEL;
-}
-
 export const STOCK_BALANCE_SORT_FIELDS = [
   "storeName",
   "itemCode",

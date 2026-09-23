@@ -10,7 +10,6 @@ import type {
   Store,
   Unit,
 } from "@printing-stationery/shared";
-import { isZeroQuantity } from "@printing-stationery/shared";
 import { fetchItems } from "@/lib/api/items";
 import {
   cancelOpeningStock,
@@ -21,7 +20,6 @@ import {
 } from "@/lib/api/opening-stock";
 import { fetchStores } from "@/lib/api/stores";
 import { fetchUnits } from "@/lib/api/units";
-import { confirmLegacyOpeningInTransitReceipt } from "@/lib/api/stock-balances";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -107,10 +105,6 @@ function mappingToneClass(tone: "success" | "warning" | "danger"): string {
     return "text-warning";
   }
   return "text-danger";
-}
-
-function isInTransitWarning(message: string): boolean {
-  return /in transit/i.test(message);
 }
 
 function LoadingSpinner({ className = "h-4 w-4" }: { className?: string }) {
@@ -285,23 +279,7 @@ export function OpeningStockDetailPage() {
       ) ?? [],
     [preview],
   );
-  const displayWarnings = useMemo(() => {
-    if (!preview) {
-      return [];
-    }
-    const warnings: string[] = [];
-    if (preview.summary.inTransitRowCount > 0) {
-      warnings.push(
-        `${preview.summary.inTransitRowCount} items are in transit. They will post as in-transit stock at the destination store and will not increase available opening stock. The original supplying store is unknown.`,
-      );
-    }
-    for (const message of preview.summary.warningMessages) {
-      if (!isInTransitWarning(message)) {
-        warnings.push(message);
-      }
-    }
-    return warnings;
-  }, [preview]);
+  const displayWarnings = preview?.summary.warningMessages ?? [];
 
   const storeOptions = useMemo(
     () =>
@@ -408,32 +386,6 @@ export function OpeningStockDetailPage() {
     }
   }
 
-  async function confirmInTransit(line: OpeningStockBatchLine): Promise<void> {
-    setError(null);
-    setSaveFeedback(null);
-    showImmediateSavingOverlay("Confirming in-transit receipt…");
-    setSavingLineId(line.id);
-    try {
-      const result = await confirmLegacyOpeningInTransitReceipt(line.id, {
-        quantity: line.remainingInTransitQuantity,
-      });
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      const refreshed = await fetchOpeningStockBatch(batchId);
-      if (refreshed.ok) {
-        setPreview(refreshed.data);
-      }
-      setSaveFeedback(
-        `Confirmed ${result.data.confirmedQuantity} as available. Remaining in transit: ${result.data.remainingInTransitQuantity}.`,
-      );
-    } finally {
-      setSavingLineId(null);
-      hideImmediateSavingOverlay();
-    }
-  }
-
   if (!canAccessOpeningStock) {
     return (
       <section className="w-full max-w-7xl">
@@ -517,7 +469,7 @@ export function OpeningStockDetailPage() {
               <dd title={ITEM_MATCH_COLUMN_HELP}>{preview.summary.mappedRowCount}</dd>
             </div>
             <div>
-              <dt className="font-medium text-ink">Items currently in transit</dt>
+              <dt className="font-medium text-ink">Imported in-transit rows (ignored)</dt>
               <dd>{preview.summary.inTransitRowCount}</dd>
             </div>
             <div>
@@ -691,7 +643,12 @@ export function OpeningStockDetailPage() {
               <th className="px-3 py-2 font-semibold">Received</th>
               <th className="px-3 py-2 font-semibold">Consumption</th>
               <th className="px-3 py-2 font-semibold">Transfer</th>
-              <th className="px-3 py-2 font-semibold">In Transit</th>
+              <th className="px-3 py-2 font-semibold">
+                <div>Imported In-Transit Qty (Ignored)</div>
+                <p className="mt-1 max-w-48 font-normal normal-case tracking-normal text-ink-muted">
+                  This value is retained only for reference and is not posted to inventory.
+                </p>
+              </th>
               <th className="px-3 py-2 font-semibold">Opening Qty for New System</th>
               <th className="px-3 py-2 font-semibold">Opening stock amount</th>
               <th className="px-3 py-2 font-semibold">
@@ -800,25 +757,7 @@ export function OpeningStockDetailPage() {
                   <td className="px-3 py-3">{displayLine.receivedQuantity}</td>
                   <td className="px-3 py-3">{displayLine.consumptionQuantity}</td>
                   <td className="px-3 py-3">{displayLine.transferQuantity}</td>
-                  <td className="px-3 py-3">
-                    <div>{displayLine.inTransitQuantity}</div>
-                    {preview.batch.status === "POSTED" &&
-                    !isZeroQuantity(displayLine.remainingInTransitQuantity) ? (
-                      <button
-                        type="button"
-                        className="mt-2 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-60"
-                        disabled={saving || Boolean(savingLineId)}
-                        onClick={() => void confirmInTransit(line)}
-                      >
-                        Confirm receipt ({displayLine.remainingInTransitQuantity})
-                      </button>
-                    ) : null}
-                    {displayLine.needsAdminReview ? (
-                      <p className="mt-2 text-xs text-danger">
-                        {displayLine.inTransitReviewReason ?? "Needs Admin review."}
-                      </p>
-                    ) : null}
-                  </td>
+                  <td className="px-3 py-3">{displayLine.inTransitQuantity}</td>
                   <td className="px-3 py-3">
                     <div>{displayLine.closingQuantity}</div>
                     {editable ? (

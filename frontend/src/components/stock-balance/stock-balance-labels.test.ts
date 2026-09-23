@@ -10,7 +10,6 @@ import {
   ledgerSourceStoreDisplay,
   quantityClassName,
   shouldShowNumericSummary,
-  STOCK_MOVEMENT_LABELS,
 } from "./stock-balance-labels";
 
 describe("stock balance labels", () => {
@@ -111,19 +110,7 @@ describe("stock balance labels", () => {
     assert.equal(rows[4]?.categoryRunningBalance, "22");
   });
 
-  it("labels legacy opening in-transit source without inventing a store", () => {
-    assert.equal(
-      STOCK_MOVEMENT_LABELS.LEGACY_OPENING_IN_TRANSIT,
-      "Legacy Opening In Transit",
-    );
-    assert.equal(
-      ledgerSourceStoreDisplay({
-        movementType: "LEGACY_OPENING_IN_TRANSIT",
-        sourceStore: null,
-        sourceStoreLabel: "Legacy Opening In Transit",
-      }),
-      "Legacy Opening In Transit",
-    );
+  it("does not invent a source store when the ledger row has none", () => {
     assert.equal(
       ledgerSourceStoreDisplay({
         movementType: "OPENING_STOCK",
@@ -131,6 +118,14 @@ describe("stock balance labels", () => {
         sourceStoreLabel: null,
       }),
       "—",
+    );
+    assert.equal(
+      ledgerSourceStoreDisplay({
+        movementType: "ITEM_ISSUE_IN_TRANSIT",
+        sourceStore: { storeName: "Corporate Store" },
+        sourceStoreLabel: null,
+      }),
+      "Corporate Store",
     );
   });
 });

@@ -13,9 +13,6 @@ import type {
 } from "@printing-stationery/shared";
 import {
   formatQuantityString,
-  LEGACY_OPENING_IN_TRANSIT_SOURCE_LABEL,
-  UNKNOWN_LEGACY_SOURCE_LABEL,
-  isLegacyOpeningInTransitMovement,
   totalTrackedQuantity,
   userHasAnyRole,
 } from "@printing-stationery/shared";
@@ -820,7 +817,7 @@ export async function listStockLedgerEntries(
       let referenceNumber: string | null = null;
       let remarks: string | null = null;
       let sourceStore: StockLedgerEntry["sourceStore"] = null;
-      let sourceStoreLabel: string | null = null;
+      const sourceStoreLabel: string | null = null;
       let destinationStore: StockLedgerEntry["destinationStore"] = null;
       let departmentName: string | null = null;
       let verifiedBy: ItemRequestPersonSummary | null = null;
@@ -836,11 +833,6 @@ export async function listStockLedgerEntries(
         referenceNumber = opening?.batchNumber ?? null;
         remarks = opening?.remarks ?? null;
         destinationStore = currentStore;
-        if (isLegacyOpeningInTransitMovement(movementType)) {
-          sourceStore = null;
-          sourceStoreLabel = LEGACY_OPENING_IN_TRANSIT_SOURCE_LABEL;
-          remarks = remarks ?? UNKNOWN_LEGACY_SOURCE_LABEL;
-        }
       } else if (row.ledger.referenceType === "PURCHASE") {
         const purchase = purchaseById.get(row.ledger.referenceId);
         referenceNumber = purchase?.purchaseNumber ?? null;

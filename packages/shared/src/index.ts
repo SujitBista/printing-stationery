@@ -672,9 +672,6 @@ export {
   cancelOpeningStockInputSchema,
   openingStockValidationResultSchema,
   openingStockPostResultSchema,
-  confirmLegacyOpeningInTransitInputSchema,
-  openingStockLineIdSchema,
-  confirmLegacyOpeningInTransitResultSchema,
 } from "./schemas/opening-stock.js";
 export type {
   OpeningStockSourceType,
@@ -705,9 +702,6 @@ export type {
   CancelOpeningStockInput,
   OpeningStockValidationResult,
   OpeningStockPostResult,
-  ConfirmLegacyOpeningInTransitInput,
-  OpeningStockLineId,
-  ConfirmLegacyOpeningInTransitResult,
 } from "./types/opening-stock.js";
 
 export {
@@ -743,10 +737,6 @@ export {
   STOCK_LEDGER_CATEGORY_FILTERS,
   STOCK_LEDGER_MOVEMENT_TYPES,
   STOCK_BALANCE_SORT_FIELDS,
-  LEGACY_OPENING_IN_TRANSIT_SOURCE_LABEL,
-  UNKNOWN_LEGACY_SOURCE_LABEL,
-  isLegacyOpeningInTransitMovement,
-  legacyOpeningInTransitSourceDisplay,
   isSignedQuantityString,
   formatQuantityString,
   addQuantityStrings,

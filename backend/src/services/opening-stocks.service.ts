@@ -34,13 +34,12 @@ import {
 import { AppError } from "../utils/errors.js";
 import { databaseUnavailableError, isDatabaseUnavailableError } from "../utils/db-errors.js";
 import { stockLedgerSourceKey } from "./stock-ledger.js";
-import { buildLegacyOpeningInTransitLedgerValue } from "./opening-stock-in-transit.js";
 
 const MAX_IMPORT_FILE_BYTES = 3 * 1024 * 1024;
 const HISTORICAL_CUTOVER_WARNING =
   "This report ends before today. Treat it as a development/test migration unless final cutover is explicitly confirmed and no later legacy transactions exist.";
 const IN_TRANSIT_WARNING =
-  "Rows with In Transit quantity will post as in-transit stock at the destination store. The original supplying store is unknown and will be shown as Legacy Opening In Transit.";
+  "Imported In-Transit Qty is ignored. In-transit stock is created only through dispatched Item Issues.";
 
 type ParsedLegacyRow = {
   sourceRowNumber: number;
@@ -584,10 +583,6 @@ async function mapLineRows(
       mappingStatus: line.mappingStatus,
       validationErrors: [...line.validationErrors],
       isIncludedForPosting: line.isIncludedForPosting,
-      remainingInTransitQuantity: String(line.remainingInTransitQuantity),
-      confirmedReceivedQuantity: String(line.confirmedReceivedQuantity),
-      needsAdminReview: line.needsAdminReview,
-      inTransitReviewReason: line.inTransitReviewReason,
       store,
       item,
       unit,
@@ -632,7 +627,7 @@ function buildLineValidationErrors(params: {
   ) {
     errors.push("Mapped unit does not match Item Setup.");
   }
-  // Imported in-transit qty posts separately as IN_TRANSIT and does not change Closing Stock Qty.
+  // Imported in-transit quantity is reference data only and is excluded from reconciliation.
   return errors;
 }
 
@@ -1461,9 +1456,6 @@ export async function postOpeningStockBatch(
       const postableLines = lineRows.filter(
         (line) => line.isIncludedForPosting && parseScaled(String(line.openingQuantity), 4) > 0n,
       );
-      const inTransitLines = lineRows.filter(
-        (line) => parseScaled(String(line.sourceInTransitQuantity), 4) > 0n,
-      );
 
       for (const line of lineRows) {
         const hasBlockingError = line.validationErrors.some((error) =>
@@ -1471,15 +1463,6 @@ export async function postOpeningStockBatch(
         );
         if (line.mappingStatus !== "MAPPED" || hasBlockingError) {
           throw new AppError("All included opening-stock lines must be valid and mapped before posting.", 409);
-        }
-      }
-
-      for (const line of inTransitLines) {
-        if (!line.storeId || !line.itemId || !line.unitId) {
-          throw new AppError(
-            "Imported in-transit quantities require a mapped destination store, item, and unit before posting.",
-            409,
-          );
         }
       }
 
@@ -1537,37 +1520,11 @@ export async function postOpeningStockBatch(
           postedByApplicationUserId: actor.id,
           postedAt,
         })),
-        ...inTransitLines.map((line) =>
-          buildLegacyOpeningInTransitLedgerValue({
-            storeId: line.storeId!,
-            itemId: line.itemId!,
-            unitId: line.unitId!,
-            rate: line.itemRate,
-            quantityIn: String(line.sourceInTransitQuantity),
-            amountIn: String(line.sourceInTransitAmount),
-            transactionDate: batch.cutoverDate,
-            batchId: batch.id,
-            lineId: line.id,
-            postedByApplicationUserId: actor.id,
-            postedAt,
-          }),
-        ),
       ];
 
       if (ledgerValues.length > 0) {
         await tx.insert(stockLedger).values(ledgerValues);
       }
-
-      await tx
-        .update(openingStockLines)
-        .set({
-          remainingInTransitQuantity: sql`case when ${openingStockLines.sourceInTransitQuantity}::numeric > 0 then ${openingStockLines.sourceInTransitQuantity} else '0' end`,
-          confirmedReceivedQuantity: "0",
-          needsAdminReview: false,
-          inTransitReviewReason: null,
-          updatedAt: sql`now()`,
-        })
-        .where(eq(openingStockLines.openingStockBatchId, batchId));
 
       await tx
         .update(openingStockBatches)
