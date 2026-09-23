@@ -9,9 +9,13 @@ import {
   inferItemRequestActorWorkflowRole,
   isCorporateControlStore,
   ITEM_REQUEST_QUEUE_STATUSES,
+  ITEM_REQUEST_STATUSES,
+  ITEM_REQUEST_SUBMITTED_LIST_FILTER,
   itemRequestActionInputSchema,
+  itemRequestListQuerySchema,
   itemRequestWorkflowCanCreate,
   itemRequestWorkflowIsCorporateMaker,
+  resolveItemRequestListStatusFilter,
   preferCorporateControlStore,
   resolveItemRequestIssueAction,
 } from "@printing-stationery/shared";
@@ -331,5 +335,40 @@ describe("item request workflow remarks and history", () => {
       }),
       "CREATE_REMAINING",
     );
+  });
+});
+
+describe("submitted item request status", () => {
+  it("keeps PENDING_BRANCH_CHECKER as the stored submitted status", () => {
+    assert.equal(ITEM_REQUEST_STATUSES.includes("PENDING_BRANCH_CHECKER"), true);
+    assert.equal(
+      (ITEM_REQUEST_STATUSES as readonly string[]).includes("SUBMITTED"),
+      false,
+    );
+    assert.equal(ITEM_REQUEST_SUBMITTED_LIST_FILTER, "SUBMITTED");
+    assert.deepEqual(ITEM_REQUEST_QUEUE_STATUSES.submitted, [
+      "PENDING_BRANCH_CHECKER",
+    ]);
+    assert.equal(
+      getItemRequestNavQueues(["BRANCH_MAKER"], false).workflowQueues.includes(
+        "submitted",
+      ),
+      false,
+    );
+  });
+
+  it("maps Request List status=SUBMITTED onto the stored status", () => {
+    const parsed = itemRequestListQuerySchema.parse({
+      status: "SUBMITTED",
+      queue: "request-list",
+    });
+
+    assert.equal(parsed.status, "PENDING_BRANCH_CHECKER");
+    assert.equal(parsed.queue, "request-list");
+    assert.equal(
+      resolveItemRequestListStatusFilter("SUBMITTED"),
+      "PENDING_BRANCH_CHECKER",
+    );
+    assert.equal(resolveItemRequestListStatusFilter("DRAFT"), "DRAFT");
   });
 });

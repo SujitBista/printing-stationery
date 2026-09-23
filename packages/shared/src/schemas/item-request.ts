@@ -57,10 +57,40 @@ export const itemRequestWorkflowRoleSchema = z.enum(
   ITEM_REQUEST_WORKFLOW_ROLES,
 );
 
-export const itemRequestStatusFilterSchema = z.enum([
+/**
+ * Request List filter value for requests the Branch Maker has sent to the
+ * Branch Checker. Stored status remains `PENDING_BRANCH_CHECKER`.
+ */
+export const ITEM_REQUEST_SUBMITTED_LIST_FILTER = "SUBMITTED";
+
+const itemRequestStatusFilterEnum = z.enum([
   "ALL",
   ...ITEM_REQUEST_STATUSES,
 ]);
+
+export const itemRequestStatusFilterSchema = z.preprocess(
+  (value) =>
+    value === ITEM_REQUEST_SUBMITTED_LIST_FILTER
+      ? "PENDING_BRANCH_CHECKER"
+      : value,
+  itemRequestStatusFilterEnum,
+);
+
+export function resolveItemRequestListStatusFilter(
+  value: string | null | undefined,
+): z.infer<typeof itemRequestStatusFilterEnum> {
+  const parsed = itemRequestStatusFilterSchema.safeParse(value ?? "ALL");
+  return parsed.success ? parsed.data : "ALL";
+}
+
+export function itemRequestListFilterIsSubmitted(
+  value: string | null | undefined,
+): boolean {
+  return (
+    value === ITEM_REQUEST_SUBMITTED_LIST_FILTER ||
+    value === "PENDING_BRANCH_CHECKER"
+  );
+}
 
 /** Role-specific request queues (sidebar + tabs). */
 export const ITEM_REQUEST_QUEUES = [
@@ -302,7 +332,11 @@ export const itemRequestListQuerySchema = z.object({
     .optional()
     .transform((value) => (value && value.length > 0 ? value : undefined)),
   status: itemRequestStatusFilterSchema.default("ALL"),
-  /** When set, overrides `status` with the queue’s status set. */
+  /**
+   * When set to a queue with its own status set, that set is used.
+   * `request-list` keeps every status and still honors `status`, including
+   * the Submitted alias.
+   */
   queue: itemRequestQueueSchema.optional(),
   requestingStoreId: optionalUuidFilterSchema,
   branchId: optionalUuidFilterSchema,

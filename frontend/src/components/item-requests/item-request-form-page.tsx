@@ -412,7 +412,7 @@ export function ItemRequestFormPage({
           href="/requests/item-requests"
           className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
         >
-          Back to Item Requests
+          Back to All Requests
         </Link>
         <h1
           className="mt-3 text-3xl font-semibold tracking-tight text-ink"

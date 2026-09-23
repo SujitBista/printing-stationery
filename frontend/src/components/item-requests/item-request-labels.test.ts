@@ -5,6 +5,8 @@ import {
   employeeDisplayName,
   formatStoreTransferDirection,
   getItemRequestActionLabel,
+  ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS,
+  itemRequestTrackingStatusLabel,
   requestedByDisplayName,
   storeOptionLabel,
 } from "./item-request-labels.js";
@@ -69,6 +71,25 @@ describe("requested by labels", () => {
         },
       ),
       "Anjani Chaudhary (368)",
+    );
+  });
+});
+
+describe("request list status filter", () => {
+  it("offers Submitted without treating it as a separate stored status label", () => {
+    const submitted = ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS.find(
+      (option) => option.value === "SUBMITTED",
+    );
+    assert.equal(submitted?.label, "Submitted");
+    assert.equal(
+      itemRequestTrackingStatusLabel("PENDING_BRANCH_CHECKER"),
+      "Submitted",
+    );
+    assert.equal(itemRequestTrackingStatusLabel("DRAFT"), "Draft");
+    assert.equal(itemRequestTrackingStatusLabel("ISSUED"), "Fully Issued");
+    assert.equal(
+      itemRequestTrackingStatusLabel("PARTIALLY_ISSUED"),
+      "Partially Issued",
     );
   });
 });

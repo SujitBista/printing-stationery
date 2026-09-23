@@ -16,7 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Printing Stationery",
+  title: {
+    default: "Printing Stationery",
+    template: "%s · Printing Stationery",
+  },
   description: "Inventory management for printing and stationery operations",
 };
 

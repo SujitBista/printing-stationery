@@ -1114,6 +1114,7 @@ async function assertExistingLinesEligibleForSubmit(
 function buildVisibilityCondition(
   actor: AuthenticatedUser,
   supervisedStoreIds: string[],
+  makerStoreIds: string[] = [],
 ): SQL | undefined {
   if (isAdminUser(actor)) {
     return undefined;
@@ -1126,10 +1127,11 @@ function buildVisibilityCondition(
     eq(itemRequests.corporateCheckerApplicationUserId, actor.id),
   ];
 
-  if (supervisedStoreIds.length > 0) {
-    conditions.push(
-      inArray(itemRequests.requestingStoreId, supervisedStoreIds),
-    );
+  const visibleStoreIds = [
+    ...new Set([...supervisedStoreIds, ...makerStoreIds]),
+  ];
+  if (visibleStoreIds.length > 0) {
+    conditions.push(inArray(itemRequests.requestingStoreId, visibleStoreIds));
   }
 
   return or(...conditions);
@@ -1238,6 +1240,8 @@ function buildListFilters(
           [...queueStatuses] as ItemRequestStatus[],
         ),
       );
+    } else if (query.status !== "ALL") {
+      conditions.push(eq(itemRequests.status, query.status));
     }
     const actorCondition = buildQueueActorCondition(query.queue, actor);
     if (actorCondition) {
@@ -1667,10 +1671,12 @@ async function getVisibleHeaderRow(
   id: string,
   actor: AuthenticatedUser,
 ): Promise<HeaderJoinedRow> {
-  const supervisedStoreIds = isAdminUser(actor)
-    ? []
-    : await listSupervisedStoreIds(actor.id);
-  const visibility = buildVisibilityCondition(actor, supervisedStoreIds);
+  const { supervisedStoreIds, makerStoreIds } = await actorStoreIds(actor);
+  const visibility = buildVisibilityCondition(
+    actor,
+    supervisedStoreIds,
+    makerStoreIds,
+  );
   const where = visibility
     ? and(eq(itemRequests.id, id), visibility)
     : eq(itemRequests.id, id);
@@ -1978,7 +1984,11 @@ export async function listItemRequests(
   query: ItemRequestListQuery,
 ): Promise<PaginatedItemRequestResponse> {
   const { supervisedStoreIds, makerStoreIds } = await actorStoreIds(actor);
-  const visibility = buildVisibilityCondition(actor, supervisedStoreIds);
+  const visibility = buildVisibilityCondition(
+    actor,
+    supervisedStoreIds,
+    makerStoreIds,
+  );
   const where = buildListFilters(query, actor, visibility);
 
   try {

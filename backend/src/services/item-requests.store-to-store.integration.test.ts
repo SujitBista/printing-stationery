@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { and, eq, inArray, like, or } from "drizzle-orm";
+import { and, count, eq, inArray, like, or } from "drizzle-orm";
 import {
   ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
   ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+  itemRequestListQuerySchema,
   type AuthenticatedUser,
 } from "@printing-stationery/shared";
 import { loadEnv } from "../config/env.js";
@@ -2179,5 +2180,260 @@ describe("store-to-store item requests", { concurrency: false }, () => {
         (item) => item.status === "PENDING_CORPORATE_MAKER",
       ),
     );
+  });
+
+  it("tracks submitted requests on Request List and keeps checker review store-scoped", async () => {
+    assert.ok(corporateMaker);
+    assert.ok(corporateChecker);
+
+    const ledgerBefore = await getDb()
+      .select({ value: count() })
+      .from(stockLedger);
+
+    const created = await trackRequest(
+      await createItemRequest(birtamodMaker, {
+        sourceStoreId: birtamodStoreId,
+        destinationStoreId: corporateStoreId,
+        requestedByEmployeeId: birtamodMaker.employee!.id,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "1" }],
+      }),
+    );
+    assert.equal(created.status, "DRAFT");
+    assert.ok(created.allowedActions.includes("SUBMIT"));
+
+    const draftList = await listItemRequests(birtamodMaker, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "request-list",
+      search: created.requestNumber,
+    });
+    assert.ok(draftList.items.some((item) => item.id === created.id));
+
+    const adminCreated = await trackRequest(
+      await createItemRequest(admin, {
+        sourceStoreId: birtamodStoreId,
+        destinationStoreId: corporateStoreId,
+        requestedByEmployeeId: birtamodMaker.employee!.id,
+        remarks: null,
+        lines: [{ itemId, requestedQuantity: "1" }],
+      }),
+    );
+    const storeList = await listItemRequests(birtamodMaker, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "request-list",
+      search: adminCreated.requestNumber,
+    });
+    assert.ok(
+      storeList.items.some((item) => item.id === adminCreated.id),
+      "the maker sees requests for their assigned store",
+    );
+    const otherStoreList = await listItemRequests(sourceMaker, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "request-list",
+      search: adminCreated.requestNumber,
+    });
+    assert.equal(
+      otherStoreList.items.some((item) => item.id === adminCreated.id),
+      false,
+    );
+
+    const submitted = await performItemRequestAction(created.id, birtamodMaker, {
+      action: "SUBMIT",
+      remarks: null,
+      expectedVersion: created.version,
+    });
+    assert.equal(submitted.status, "PENDING_BRANCH_CHECKER");
+    assert.equal(submitted.allowedActions.length, 0);
+    const submitEntry = submitted.actions.at(-1);
+    assert.equal(submitEntry?.action, "SUBMIT");
+    assert.equal(submitEntry?.fromStatus, "DRAFT");
+    assert.equal(submitEntry?.toStatus, "PENDING_BRANCH_CHECKER");
+
+    const submittedNotifications = await listNotifications(birtamodChecker.id, {
+      page: 1,
+      pageSize: 20,
+    });
+    const submittedNote = submittedNotifications.items.find(
+      (item) => item.relatedEntityId === created.id,
+    );
+    assert.equal(submittedNote?.type, "ITEM_REQUEST_SUBMITTED");
+    assert.equal(submittedNote?.relatedEntityId, created.id);
+
+    const makerList = await listItemRequests(
+      birtamodMaker,
+      itemRequestListQuerySchema.parse({
+        page: 1,
+        pageSize: 50,
+        status: "SUBMITTED",
+        queue: "request-list",
+        search: created.requestNumber,
+      }),
+    );
+    assert.ok(makerList.items.some((item) => item.id === created.id));
+    assert.ok(
+      makerList.items.every((item) => item.status === "PENDING_BRANCH_CHECKER"),
+    );
+
+    const draftsOnly = await listItemRequests(birtamodMaker, {
+      page: 1,
+      pageSize: 50,
+      status: "DRAFT",
+      queue: "request-list",
+      search: created.requestNumber,
+    });
+    assert.equal(
+      draftsOnly.items.some((item) => item.id === created.id),
+      false,
+    );
+
+    const reviewQueue = await listItemRequests(birtamodChecker, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "recommend",
+      search: created.requestNumber,
+    });
+    assert.ok(reviewQueue.items.some((item) => item.id === created.id));
+    const checkerView = await getItemRequestById(created.id, birtamodChecker);
+    assert.deepEqual([...checkerView.allowedActions].sort(), [
+      "RECOMMEND",
+      "RETURN",
+    ]);
+
+    const otherCheckerQueue = await listItemRequests(sourceChecker, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "recommend",
+      search: created.requestNumber,
+    });
+    assert.equal(
+      otherCheckerQueue.items.some((item) => item.id === created.id),
+      false,
+    );
+    await assert.rejects(
+      () => getItemRequestById(created.id, sourceChecker),
+      (error: unknown) => isAppError(error, 404, "Item request not found"),
+    );
+    await assert.rejects(
+      () =>
+        performItemRequestAction(created.id, sourceChecker, {
+          action: "RECOMMEND",
+          remarks: null,
+          expectedVersion: submitted.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, "This request is not pending with you."),
+    );
+    await assert.rejects(
+      () =>
+        performItemRequestAction(created.id, sourceChecker, {
+          action: "RETURN",
+          remarks: "Not my store",
+          expectedVersion: submitted.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, "This request is not pending with you."),
+    );
+    await assert.rejects(
+      () =>
+        performItemRequestAction(created.id, birtamodChecker, {
+          action: "REJECT",
+          remarks: "Branch checkers do not reject",
+          expectedVersion: submitted.version,
+        }),
+      (error: unknown) =>
+        isAppError(
+          error,
+          409,
+          "This action is not allowed for the current request status.",
+        ),
+    );
+
+    const returned = await performItemRequestAction(
+      created.id,
+      birtamodChecker,
+      {
+        action: "RETURN",
+        remarks: "Please revise the quantity",
+        expectedVersion: submitted.version,
+      },
+    );
+    assert.equal(returned.status, "RETURNED_TO_BRANCH_MAKER");
+    assert.ok(returned.actions.some((entry) => entry.action === "RETURN"));
+    const reviewAfterReturn = await listItemRequests(birtamodChecker, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "recommend",
+      search: created.requestNumber,
+    });
+    assert.equal(
+      reviewAfterReturn.items.some((item) => item.id === created.id),
+      false,
+    );
+
+    const resubmitted = await performItemRequestAction(
+      created.id,
+      birtamodMaker,
+      {
+        action: "RESUBMIT",
+        remarks: null,
+        expectedVersion: returned.version,
+      },
+    );
+    const recommended = await performItemRequestAction(
+      created.id,
+      birtamodChecker,
+      {
+        action: "RECOMMEND",
+        remarks: "Ready for corporate",
+        expectedVersion: resubmitted.version,
+      },
+    );
+    assert.equal(recommended.status, "PENDING_CORPORATE_MAKER");
+    const reviewAfterRecommend = await listItemRequests(birtamodChecker, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "recommend",
+      search: created.requestNumber,
+    });
+    assert.equal(
+      reviewAfterRecommend.items.some((item) => item.id === created.id),
+      false,
+    );
+
+    const forwarded = await performItemRequestAction(
+      created.id,
+      corporateMaker,
+      {
+        action: "FORWARD",
+        remarks: null,
+        expectedVersion: recommended.version,
+      },
+    );
+    const rejected = await performItemRequestAction(
+      created.id,
+      corporateChecker,
+      {
+        action: "REJECT",
+        remarks: "Not required",
+        expectedVersion: forwarded.version,
+      },
+    );
+    assert.equal(rejected.status, "REJECTED");
+    assert.equal(rejected.actions.at(-1)?.action, "REJECT");
+
+    const ledgerAfter = await getDb()
+      .select({ value: count() })
+      .from(stockLedger);
+    assert.equal(ledgerAfter[0]?.value, ledgerBefore[0]?.value);
   });
 });

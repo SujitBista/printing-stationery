@@ -6,6 +6,41 @@ import type {
   ItemRequestWorkflowRole,
 } from "@printing-stationery/shared";
 
+/** Status choices on All Requests. Submitted is the tracking name. */
+export const ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS = [
+  { value: "ALL", label: "All statuses" },
+  { value: "DRAFT", label: "Draft" },
+  { value: "SUBMITTED", label: "Submitted" },
+  { value: "RETURNED_TO_BRANCH_MAKER", label: "Returned" },
+  { value: "REJECTED", label: "Rejected" },
+  { value: "PENDING_CORPORATE_MAKER", label: "Recommended" },
+  { value: "PENDING_CORPORATE_CHECKER", label: "Pending Corporate Checker" },
+  { value: "RETURNED_TO_CORPORATE_MAKER", label: "Returned to Corporate Maker" },
+  { value: "APPROVED", label: "Approved" },
+  { value: "PARTIALLY_ISSUED", label: "Partially Issued" },
+  { value: "ISSUED", label: "Fully Issued" },
+  { value: "CANCELLED", label: "Cancelled" },
+] as const;
+
+export function itemRequestTrackingStatusLabel(
+  status: ItemRequestStatus,
+): string {
+  switch (status) {
+    case "PENDING_BRANCH_CHECKER":
+      return "Submitted";
+    case "RETURNED_TO_BRANCH_MAKER":
+      return "Returned";
+    case "PENDING_CORPORATE_MAKER":
+      return "Recommended";
+    case "PARTIALLY_ISSUED":
+      return "Partially Issued";
+    case "ISSUED":
+      return "Fully Issued";
+    default:
+      return ITEM_REQUEST_STATUS_LABELS[status];
+  }
+}
+
 export const ITEM_REQUEST_STATUS_LABELS: Record<ItemRequestStatus, string> = {
   DRAFT: "Draft",
   PENDING_BRANCH_CHECKER: "Pending Branch Checker",

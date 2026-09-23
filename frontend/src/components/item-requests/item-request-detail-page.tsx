@@ -189,7 +189,7 @@ export function ItemRequestDetailPage() {
         href="/requests/item-requests"
         className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
       >
-        Back to Item Requests
+        Back to All Requests
       </Link>
 
       {loading ? (

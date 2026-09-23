@@ -3,6 +3,18 @@ import { describe, it } from "node:test";
 import { itemRequestNotificationHref } from "./href.js";
 
 describe("itemRequestNotificationHref", () => {
+  it("opens a submitted item request instead of the removed submitted list", () => {
+    const requestId = "55555555-5555-4555-8555-555555555555";
+    const href = itemRequestNotificationHref({
+      relatedEntityType: "ITEM_REQUEST",
+      relatedEntityId: requestId,
+      type: "ITEM_REQUEST_SUBMITTED",
+    });
+
+    assert.equal(href, `/requests/item-requests/${requestId}`);
+    assert.equal(href?.includes("/submitted"), false);
+  });
+
   it("links item-request notifications to the request detail page", () => {
     assert.equal(
       itemRequestNotificationHref({

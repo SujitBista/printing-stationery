@@ -5,8 +5,12 @@ import {
   getItemRequestListEmptyState,
   getItemRequestListRowActions,
   getItemRequestQueue,
+  getItemRequestSidebarQueues,
   getItemRequestTabQueues,
   getItemRequestWorkflowTabQueues,
+  ITEM_REQUEST_CHECKER_REVIEW_EMPTY_TITLE,
+  ITEM_REQUEST_MAKER_SUBMITTED_HREF,
+  ITEM_REQUEST_SUBMITTED_EMPTY_TITLE,
 } from "./queues.js";
 
 const ALL_WORKFLOW_ACTIONS: ItemRequestActionType[] = [
@@ -26,7 +30,13 @@ const ISSUE_ID = "22222222-2222-4222-8222-222222222222";
 function requestForActions(
   overrides: Partial<{
     canCreateIssue: boolean;
-    status: "APPROVED" | "PARTIALLY_ISSUED" | "ISSUED";
+    status:
+      | "APPROVED"
+      | "PARTIALLY_ISSUED"
+      | "ISSUED"
+      | "DRAFT"
+      | "PENDING_BRANCH_CHECKER"
+      | "RETURNED_TO_BRANCH_MAKER";
     activeIssue: {
       id: string;
       issueNumber: string;
@@ -45,7 +55,7 @@ function requestForActions(
 }
 
 describe("item request list row actions", () => {
-  it("keeps Request List as overview-only View", () => {
+  it("keeps All Requests as overview-only View", () => {
     const actions = getItemRequestListRowActions(
       "request-list",
       requestForActions({ canCreateIssue: true }),
@@ -262,11 +272,132 @@ describe("item request role queues", () => {
 
     assert.deepEqual(branchMaker, [
       "drafts",
-      "submitted",
       "returned",
       "rejected",
       "request-list",
     ]);
+    assert.equal(branchMaker.includes("submitted"), false);
+  });
+
+  it("names the Branch Maker history All Requests and drops the Submitted menu", () => {
+    const sidebar = getItemRequestSidebarQueues({
+      workflowRoles: ["BRANCH_MAKER"],
+      canViewFulfilment: false,
+    });
+    const labels = sidebar.map((queue) => queue.sidebarLabel);
+    const allRequests = getItemRequestQueue("request-list", ["BRANCH_MAKER"]);
+
+    assert.equal(labels.includes("Submitted"), false);
+    assert.equal(labels.includes("Request List"), false);
+    assert.equal(labels.includes("All Requests"), true);
+    assert.equal(allRequests.sidebarLabel, "All Requests");
+    assert.equal(allRequests.tabLabel, "All Requests");
+    assert.equal(allRequests.title, "All Requests");
+    assert.equal(allRequests.showCreate, true);
+    assert.equal(allRequests.href, "/requests/item-requests");
+    assert.equal(
+      ITEM_REQUEST_MAKER_SUBMITTED_HREF,
+      "/requests/item-requests?status=SUBMITTED",
+    );
+    assert.equal(
+      sidebar.filter((queue) => queue.key === "request-list").length,
+      1,
+    );
+  });
+
+  it("keeps draft and returned actions, and keeps submitted requests view-only", () => {
+    const drafts = getItemRequestListRowActions("drafts", {
+      ...requestForActions({ allowedActions: ["SUBMIT", "CANCEL"] }),
+      status: "DRAFT",
+    });
+    const returned = getItemRequestListRowActions("returned", {
+      ...requestForActions({ allowedActions: ["RESUBMIT", "CANCEL"] }),
+      status: "RETURNED_TO_BRANCH_MAKER",
+    });
+    const tracking = getItemRequestListRowActions("request-list", {
+      ...requestForActions({ allowedActions: ["SUBMIT", "RECOMMEND", "REJECT"] }),
+      status: "PENDING_BRANCH_CHECKER",
+    });
+
+    assert.deepEqual(drafts.workflowActions, ["SUBMIT", "CANCEL"]);
+    assert.deepEqual(returned.workflowActions, ["RESUBMIT", "CANCEL"]);
+    assert.deepEqual(tracking.workflowActions, []);
+  });
+
+  it("labels the Branch Checker action queue Pending My Review", () => {
+    const review = getItemRequestQueue("recommend", ["BRANCH_CHECKER"]);
+    const history = getItemRequestQueue("request-list", ["BRANCH_CHECKER"]);
+    const sidebar = getItemRequestSidebarQueues({
+      workflowRoles: ["BRANCH_CHECKER"],
+      canViewFulfilment: false,
+    });
+
+    assert.equal(review.sidebarLabel, "Pending My Review");
+    assert.equal(review.tabLabel, "Pending My Review");
+    assert.equal(review.title, "Pending My Review");
+    assert.equal(review.href, "/requests/item-requests/recommend");
+    assert.equal(history.sidebarLabel, "All Requests");
+    assert.equal(history.tabLabel, "All Requests");
+    assert.equal(history.title, "All Requests");
+    assert.equal(history.showCreate, false);
+    assert.equal(
+      sidebar.some((queue) => queue.sidebarLabel === "Submitted"),
+      false,
+    );
+    assert.equal(
+      sidebar.filter((queue) => queue.sidebarLabel === "Pending My Review")
+        .length,
+      1,
+    );
+    assert.equal(
+      sidebar.filter((queue) => queue.sidebarLabel === "All Requests").length,
+      1,
+    );
+  });
+
+  it("does not duplicate All Requests and Pending My Review for a maker who is also a checker", () => {
+    const sidebar = getItemRequestSidebarQueues({
+      workflowRoles: ["BRANCH_MAKER", "BRANCH_CHECKER"],
+      canViewFulfilment: false,
+    });
+    const labels = sidebar.map((queue) => queue.sidebarLabel);
+
+    assert.equal(labels.includes("Submitted"), false);
+    assert.equal(labels.includes("Request List"), false);
+    assert.equal(labels.includes("Requests to Review"), false);
+    assert.equal(labels.filter((label) => label === "All Requests").length, 1);
+    assert.equal(
+      labels.filter((label) => label === "Pending My Review").length,
+      1,
+    );
+    assert.equal(
+      getItemRequestQueue("request-list", ["BRANCH_MAKER", "BRANCH_CHECKER"])
+        .showCreate,
+      true,
+    );
+  });
+
+  it("uses different empty states for submitted tracking and checker review", () => {
+    const submitted = getItemRequestListEmptyState({
+      queue: "request-list",
+      workflowRoles: ["BRANCH_MAKER"],
+      hasFilters: true,
+      canCreate: true,
+      statusFilter: "SUBMITTED",
+    });
+    const review = getItemRequestListEmptyState({
+      queue: "recommend",
+      workflowRoles: ["BRANCH_CHECKER"],
+      hasFilters: false,
+      canCreate: false,
+    });
+
+    assert.equal(submitted.title, ITEM_REQUEST_SUBMITTED_EMPTY_TITLE);
+    assert.equal(submitted.title, "No submitted requests found.");
+    assert.equal(review.title, ITEM_REQUEST_CHECKER_REVIEW_EMPTY_TITLE);
+    assert.equal(review.title, "No requests are waiting for your review.");
+    assert.notEqual(submitted.title, review.title);
+    assert.notEqual(submitted.message, review.message);
   });
 
   it("renames the Corporate Maker review page heading", () => {

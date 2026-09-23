@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState, useTransition } from "react";
 import {
   ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
   ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+  itemRequestListFilterIsSubmitted,
+  resolveItemRequestListStatusFilter,
   type Branch,
   type ItemRequestActionType,
   type ItemRequestListItem,
@@ -39,8 +42,10 @@ import {
   formatDateTime,
   formatStoreTransferDirection,
   getItemRequestActionLabel,
+  ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS,
   ITEM_REQUEST_STATUS_LABELS,
   itemRequestStatusTone,
+  itemRequestTrackingStatusLabel,
   personDisplayName,
   requestedByDisplayName,
 } from "./item-request-labels";
@@ -51,9 +56,29 @@ type ItemRequestListPageProps = {
   queue?: ItemRequestQueue;
 };
 
-export function ItemRequestListPage({
+export function ItemRequestListPage(props: ItemRequestListPageProps) {
+  return (
+    <Suspense fallback={<p className="text-sm text-ink-muted">Loading item requests…</p>}>
+      <ItemRequestListPageContent {...props} />
+    </Suspense>
+  );
+}
+
+function ItemRequestListPageContent({
   queue = "request-list",
 }: ItemRequestListPageProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const rawStatusParam =
+    queue === "request-list" ? searchParams.get("status") : null;
+  const statusSelectValue = itemRequestListFilterIsSubmitted(rawStatusParam)
+    ? "SUBMITTED"
+    : resolveItemRequestListStatusFilter(rawStatusParam);
+  const apiStatus =
+    queue === "request-list"
+      ? resolveItemRequestListStatusFilter(statusSelectValue)
+      : "ALL";
   const {
     workflowRoles,
     canViewFulfilment,
@@ -64,6 +89,10 @@ export function ItemRequestListPage({
   } = useItemRequestNavContext();
   const queueMeta = getItemRequestQueue(queue, workflowRoles);
   const { canAccessItemRequests, isAdmin, user } = useAuth();
+
+  useEffect(() => {
+    document.title = `${queueMeta.title} · Printing Stationery`;
+  }, [queueMeta.title]);
   const [requests, setRequests] = useState<ItemRequestListItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -146,6 +175,7 @@ export function ItemRequestListPage({
       pageSize: PAGE_SIZE,
       search: search || undefined,
       queue,
+      status: apiStatus,
       requestingStoreId: isAdmin ? requestingStoreId || undefined : undefined,
       branchId: isAdmin ? branchId || undefined : undefined,
     });
@@ -176,6 +206,7 @@ export function ItemRequestListPage({
     page,
     search,
     queue,
+    apiStatus,
     requestingStoreId,
     branchId,
     isAdmin,
@@ -291,12 +322,28 @@ export function ItemRequestListPage({
       queue,
       workflowRoles,
     });
+  const hasStatusFilter = queue === "request-list" && apiStatus !== "ALL";
   const emptyState = getItemRequestListEmptyState({
     queue,
     workflowRoles,
-    hasFilters: Boolean(search || requestingStoreId || branchId),
+    hasFilters: Boolean(
+      search || requestingStoreId || branchId || hasStatusFilter,
+    ),
     canCreate: showCreate,
+    statusFilter: queue === "request-list" ? statusSelectValue : null,
   });
+
+  function setStatusFilter(nextStatus: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextStatus === "ALL") {
+      params.delete("status");
+    } else {
+      params.set("status", nextStatus);
+    }
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+    setPage(1);
+  }
 
   return (
     <section className="w-full max-w-7xl">
@@ -314,7 +361,7 @@ export function ItemRequestListPage({
             href="/requests/item-requests/new"
             className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
           >
-            New Request
+            New Item Request
           </Link>
         ) : showCorporateMakerCreateNote ? (
           <p className="max-w-xs text-sm text-ink-muted">
@@ -352,6 +399,22 @@ export function ItemRequestListPage({
       ) : null}
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {queue === "request-list" ? (
+          <label className="flex min-w-0 flex-col gap-1 text-sm">
+            <span className="font-medium text-ink">Status</span>
+            <select
+              value={statusSelectValue}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
+            >
+              {ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="flex min-w-0 flex-col gap-1 text-sm sm:col-span-2 lg:col-span-1">
           <span className="font-medium text-ink">Search</span>
           <input
@@ -514,7 +577,9 @@ export function ItemRequestListPage({
                         </td>
                         <td className="min-w-[10rem] px-3 py-3">
                           <Badge variant={itemRequestStatusTone(request.status)}>
-                            {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                            {queue === "request-list"
+                              ? itemRequestTrackingStatusLabel(request.status)
+                              : ITEM_REQUEST_STATUS_LABELS[request.status]}
                           </Badge>
                         </td>
                         <td className="min-w-[10rem] px-3 py-3">

@@ -11,11 +11,21 @@ import {
   ITEM_REQUEST_REVIEW_EMPTY_TITLE,
   getItemRequestNavQueues,
   itemRequestIssueActionHref,
+  itemRequestListFilterIsSubmitted,
   itemRequestQueueIsFulfilment,
   itemRequestWorkflowIsCorporateMaker,
   resolveItemRequestIssueAction,
   type ItemRequestActiveIssueSummary,
 } from "@printing-stationery/shared";
+
+/** Old maker Submitted page. Bookmarks land on All Requests filtered to Submitted. */
+export const ITEM_REQUEST_MAKER_SUBMITTED_HREF =
+  "/requests/item-requests?status=SUBMITTED";
+
+export const ITEM_REQUEST_SUBMITTED_EMPTY_TITLE = "No submitted requests found.";
+
+export const ITEM_REQUEST_CHECKER_REVIEW_EMPTY_TITLE =
+  "No requests are waiting for your review.";
 
 export type ItemRequestQueueDefinition = {
   key: ItemRequestQueue;
@@ -41,11 +51,11 @@ type QueueLabelOverride = Pick<
 const ITEM_REQUEST_QUEUE_DEFINITIONS: ItemRequestQueueDefinition[] = [
   {
     key: "request-list",
-    sidebarLabel: "Item Request",
-    tabLabel: "Request List",
-    title: "Item Request",
+    sidebarLabel: "All Requests",
+    tabLabel: "All Requests",
+    title: "All Requests",
     description:
-      "Overview of stationery requests, including current status and who they are pending with.",
+      "Complete history of item requests, including current status and who they are pending with.",
     href: "/requests/item-requests",
     showCreate: true,
     navGroup: "workflow",
@@ -66,7 +76,7 @@ const ITEM_REQUEST_QUEUE_DEFINITIONS: ItemRequestQueueDefinition[] = [
     tabLabel: "Submitted",
     title: "Submitted Item Requests",
     description: "Requests waiting for the Branch Checker to recommend.",
-    href: "/requests/item-requests/submitted",
+    href: ITEM_REQUEST_MAKER_SUBMITTED_HREF,
     navGroup: "workflow",
   },
   {
@@ -225,6 +235,29 @@ const CORPORATE_MAKER_LABELS: Partial<
   },
 };
 
+const BRANCH_MAKER_REQUEST_LIST_LABELS: QueueLabelOverride = {
+  sidebarLabel: "All Requests",
+  tabLabel: "All Requests",
+  title: "All Requests",
+  description:
+    "Complete history of item requests for your store, including drafts, submitted requests, returns, and issued requests.",
+};
+
+const BRANCH_CHECKER_REVIEW_LABELS: QueueLabelOverride = {
+  sidebarLabel: "Pending My Review",
+  tabLabel: "Pending My Review",
+  title: "Pending My Review",
+  description:
+    "Requests from your store that are waiting for you to recommend or return.",
+};
+
+const BRANCH_CHECKER_REQUEST_LIST_LABELS: QueueLabelOverride = {
+  sidebarLabel: "All Requests",
+  tabLabel: "All Requests",
+  title: "All Requests",
+  description: "Complete history of item requests for your store.",
+};
+
 const QUEUE_BY_KEY = new Map(
   ITEM_REQUEST_QUEUE_DEFINITIONS.map((queue) => [queue.key, queue]),
 );
@@ -233,24 +266,48 @@ function applyRoleLabels(
   queue: ItemRequestQueueDefinition,
   workflowRoles: readonly ItemRequestWorkflowRole[],
 ): ItemRequestQueueDefinition {
+  let next = queue;
+  const corporateCheckerOnly =
+    workflowRoles.length === 1 && workflowRoles[0] === "CORPORATE_CHECKER";
+
   if (itemRequestWorkflowIsCorporateMaker(workflowRoles)) {
-    const override = CORPORATE_MAKER_LABELS[queue.key];
-    return {
-      ...queue,
-      ...override,
+    next = {
+      ...next,
+      ...CORPORATE_MAKER_LABELS[queue.key],
+      showCreate: false,
+    };
+  } else if (corporateCheckerOnly) {
+    next = {
+      ...next,
+      ...CORPORATE_CHECKER_LABELS[queue.key],
       showCreate: false,
     };
   }
-  const corporateCheckerOnly =
-    workflowRoles.length === 1 && workflowRoles[0] === "CORPORATE_CHECKER";
-  if (!corporateCheckerOnly) {
-    return queue;
+
+  const isBranchMaker = workflowRoles.includes("BRANCH_MAKER");
+  const isBranchChecker = workflowRoles.includes("BRANCH_CHECKER");
+
+  if (isBranchChecker && queue.key === "recommend") {
+    next = { ...next, ...BRANCH_CHECKER_REVIEW_LABELS };
   }
-  const override = CORPORATE_CHECKER_LABELS[queue.key];
-  if (!override) {
-    return queue;
+
+  if (isBranchMaker && queue.key === "request-list") {
+    next = { ...next, ...BRANCH_MAKER_REQUEST_LIST_LABELS, showCreate: true };
+  } else if (
+    isBranchChecker &&
+    !isBranchMaker &&
+    !corporateCheckerOnly &&
+    !itemRequestWorkflowIsCorporateMaker(workflowRoles) &&
+    queue.key === "request-list"
+  ) {
+    next = {
+      ...next,
+      ...BRANCH_CHECKER_REQUEST_LIST_LABELS,
+      showCreate: false,
+    };
   }
-  return { ...queue, ...override, showCreate: false };
+
+  return next;
 }
 
 export function getItemRequestQueue(
@@ -269,7 +326,30 @@ export function getItemRequestListEmptyState(params: {
   workflowRoles: readonly ItemRequestWorkflowRole[];
   hasFilters: boolean;
   canCreate: boolean;
+  statusFilter?: string | null;
 }): { title: string; message: string } {
+  if (
+    params.queue === "request-list" &&
+    itemRequestListFilterIsSubmitted(params.statusFilter)
+  ) {
+    return {
+      title: ITEM_REQUEST_SUBMITTED_EMPTY_TITLE,
+      message: "Change the status filter to see your other requests.",
+    };
+  }
+
+  if (
+    params.queue === "recommend" &&
+    params.workflowRoles.includes("BRANCH_CHECKER") &&
+    !params.hasFilters
+  ) {
+    return {
+      title: ITEM_REQUEST_CHECKER_REVIEW_EMPTY_TITLE,
+      message:
+        "Requests from your store appear here after a Branch Maker submits them.",
+    };
+  }
+
   if (
     params.queue === "review" &&
     itemRequestWorkflowIsCorporateMaker(params.workflowRoles) &&
@@ -362,7 +442,7 @@ export const ITEM_REQUEST_TAB_QUEUES: ItemRequestQueueDefinition[] = [
 
 /**
  * Workflow decision actions that belong on each queue’s row actions.
- * Request List is overview-only. Backend `allowedActions` remains the
+ * All Requests is overview-only. Backend `allowedActions` remains the
  * authorization source; this only chooses which of those actions to show.
  */
 export const ITEM_REQUEST_QUEUE_WORKFLOW_ACTIONS: Record<

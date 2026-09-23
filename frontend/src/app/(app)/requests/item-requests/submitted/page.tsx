@@ -1,5 +1,6 @@
-import { ItemRequestListPage } from "@/components/item-requests/item-request-list-page";
+import { redirect } from "next/navigation";
+import { ITEM_REQUEST_MAKER_SUBMITTED_HREF } from "@/lib/item-requests/queues";
 
 export default function ItemRequestSubmittedPage() {
-  return <ItemRequestListPage queue="submitted" />;
+  redirect(ITEM_REQUEST_MAKER_SUBMITTED_HREF);
 }
