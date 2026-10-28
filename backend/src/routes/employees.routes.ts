@@ -14,12 +14,16 @@ import {
   employeeImportUpload,
   previewEmployeeImportHandler,
 } from "../controllers/employees-import.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireOrganizationHead,
+  requireRole,
+} from "../middleware/auth.js";
 
 export const employeesRouter = Router();
 
 const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 employeesRouter.get("/", requireAuth, readRoles, listEmployeesHandler);
 employeesRouter.post(

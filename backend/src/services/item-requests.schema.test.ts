@@ -10,6 +10,7 @@ import {
   isCorporateControlStore,
   ITEM_REQUEST_QUEUE_STATUSES,
   ITEM_REQUEST_STATUSES,
+  ITEM_REQUEST_RECOMMENDED_LIST_FILTER,
   ITEM_REQUEST_SUBMITTED_LIST_FILTER,
   itemRequestActionInputSchema,
   itemRequestListQuerySchema,
@@ -274,11 +275,11 @@ describe("item request workflow remarks and history", () => {
     assert.equal(nav.workflowQueues.includes("approve"), false);
   });
 
-  it("lets only admins and Branch Makers create item requests", () => {
+  it("lets the Corporate Checker, admins, and Branch Makers create item requests", () => {
     assert.equal(itemRequestWorkflowCanCreate(["ADMIN"]), true);
     assert.equal(itemRequestWorkflowCanCreate(["BRANCH_MAKER"]), true);
     assert.equal(itemRequestWorkflowCanCreate(["CORPORATE_MAKER"]), false);
-    assert.equal(itemRequestWorkflowCanCreate(["CORPORATE_CHECKER"]), false);
+    assert.equal(itemRequestWorkflowCanCreate(["CORPORATE_CHECKER"]), true);
     assert.equal(itemRequestWorkflowCanCreate(["BRANCH_CHECKER"]), false);
     assert.equal(itemRequestWorkflowIsCorporateMaker(["CORPORATE_MAKER"]), true);
     assert.equal(
@@ -370,5 +371,60 @@ describe("submitted item request status", () => {
       "PENDING_BRANCH_CHECKER",
     );
     assert.equal(resolveItemRequestListStatusFilter("DRAFT"), "DRAFT");
+  });
+});
+
+describe("recommended item request status", () => {
+  it("keeps PENDING_CORPORATE_MAKER as the stored recommended status", () => {
+    assert.equal(ITEM_REQUEST_STATUSES.includes("PENDING_CORPORATE_MAKER"), true);
+    assert.equal(
+      (ITEM_REQUEST_STATUSES as readonly string[]).includes("RECOMMENDED"),
+      false,
+    );
+    assert.equal(ITEM_REQUEST_RECOMMENDED_LIST_FILTER, "RECOMMENDED");
+    assert.deepEqual(ITEM_REQUEST_QUEUE_STATUSES.review, [
+      "PENDING_CORPORATE_MAKER",
+    ]);
+    assert.deepEqual(ITEM_REQUEST_QUEUE_STATUSES.returned, [
+      "RETURNED_TO_BRANCH_MAKER",
+      "RETURNED_TO_CORPORATE_MAKER",
+    ]);
+    assert.deepEqual(ITEM_REQUEST_QUEUE_STATUSES.rejected, ["REJECTED"]);
+    assert.equal(
+      getItemRequestNavQueues(["BRANCH_CHECKER"], false).workflowQueues.includes(
+        "recommended",
+      ),
+      false,
+    );
+    assert.equal(
+      getItemRequestNavQueues(["CORPORATE_MAKER"], false).workflowQueues.includes(
+        "review",
+      ),
+      true,
+    );
+    assert.equal(
+      getItemRequestNavQueues(["CORPORATE_MAKER"], false).workflowQueues.includes(
+        "recommended",
+      ),
+      false,
+    );
+  });
+
+  it("maps Request List status=RECOMMENDED onto the stored status", () => {
+    const parsed = itemRequestListQuerySchema.parse({
+      status: "RECOMMENDED",
+      queue: "request-list",
+    });
+
+    assert.equal(parsed.status, "PENDING_CORPORATE_MAKER");
+    assert.equal(parsed.queue, "request-list");
+    assert.equal(
+      resolveItemRequestListStatusFilter("RECOMMENDED"),
+      "PENDING_CORPORATE_MAKER",
+    );
+    assert.equal(
+      resolveItemRequestListStatusFilter("PENDING_CORPORATE_MAKER"),
+      "PENDING_CORPORATE_MAKER",
+    );
   });
 });

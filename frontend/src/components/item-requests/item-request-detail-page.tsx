@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import type {
   ItemRequest,
   ItemRequestActionType,
@@ -21,17 +21,43 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import {
+  departmentDisplayName,
   formatDateTime,
   formatStoreTransferDirection,
   getItemRequestActionLabel,
-  ITEM_REQUEST_STATUS_LABELS,
   ITEM_REQUEST_WORKFLOW_ROLE_LABELS,
+  itemRequestPendingWithLabel,
   itemRequestStatusTone,
-  departmentDisplayName,
+  itemRequestTrackingStatusLabel,
   personDisplayName,
   requestedByDisplayName,
 } from "./item-request-labels";
 import { formatAvailableStockQuantity } from "@/components/item-issues/item-issue-labels";
+import {
+  issueWorkflowHref,
+  REQUEST_NAV_ITEM,
+  requestNavBackLink,
+  resolveRequestNavItem,
+} from "@/lib/navigation/request-nav";
+
+function ItemRequestDetailBackLink({ requestId }: { requestId: string }) {
+  const searchParams = useSearchParams();
+  const navItem =
+    resolveRequestNavItem({
+      pathname: `/requests/item-requests/${requestId}`,
+      activeNavItem: searchParams.get("activeNavItem"),
+    }) ?? REQUEST_NAV_ITEM.ALL_REQUESTS;
+  const back = requestNavBackLink(navItem);
+
+  return (
+    <Link
+      href={back.href}
+      className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
+    >
+      {back.label}
+    </Link>
+  );
+}
 
 function storeBlock(
   title: string,
@@ -185,12 +211,18 @@ export function ItemRequestDetailPage() {
 
   return (
     <section className="w-full max-w-5xl">
-      <Link
-        href="/requests/item-requests"
-        className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
+      <Suspense
+        fallback={
+          <Link
+            href="/requests/item-requests"
+            className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
+          >
+            Back to All Requests
+          </Link>
+        }
       >
-        Back to All Requests
-      </Link>
+        <ItemRequestDetailBackLink requestId={params.id ?? ""} />
+      </Suspense>
 
       {loading ? (
         <p className="mt-6 text-sm text-ink-muted">Loading request…</p>
@@ -209,7 +241,7 @@ export function ItemRequestDetailPage() {
               </h1>
               <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-muted">
                 <Badge variant={itemRequestStatusTone(request.status)}>
-                  {ITEM_REQUEST_STATUS_LABELS[request.status]}
+                  {itemRequestTrackingStatusLabel(request.status)}
                 </Badge>
                 <Badge variant="info">
                   {formatStoreTransferDirection(
@@ -218,18 +250,24 @@ export function ItemRequestDetailPage() {
                   )}
                 </Badge>
                 {request.pendingWith
-                  ? `Pending with ${personDisplayName(request.pendingWith)}`
+                  ? `Pending with ${itemRequestPendingWithLabel(
+                      request.status,
+                      request.pendingWith,
+                    )}`
                   : null}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {issueAction ? (
                 <Link
-                  href={getItemRequestIssueActionHref({
-                    requestId: request.id,
-                    action: issueAction,
-                    activeIssueId: request.activeIssue?.id,
-                  })}
+                  href={issueWorkflowHref(
+                    getItemRequestIssueActionHref({
+                      requestId: request.id,
+                      action: issueAction,
+                      activeIssueId: request.activeIssue?.id,
+                    }),
+                    request.activeIssue,
+                  )}
                   className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
                 >
                   {getItemRequestIssueActionLabel(issueAction)}
@@ -326,6 +364,26 @@ export function ItemRequestDetailPage() {
                 {formatDateTime(request.createdAt)}
               </p>
             </div>
+            {request.recommendedAt ? (
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  Recommended by
+                </h2>
+                <p className="mt-1 font-medium">
+                  {personDisplayName(
+                    request.recommendedBy ?? request.branchChecker,
+                  )}
+                </p>
+                <p className="text-sm text-ink-muted">
+                  {formatDateTime(request.recommendedAt)}
+                </p>
+                {request.recommendationRemarks ? (
+                  <p className="text-sm text-ink-muted">
+                    Recommendation remarks: {request.recommendationRemarks}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
                 Assignees
@@ -438,10 +496,10 @@ export function ItemRequestDetailPage() {
                     </p>
                     <p className="text-sm text-ink-muted">
                       Previous status:{" "}
-                      {ITEM_REQUEST_STATUS_LABELS[entry.fromStatus]}
+                      {itemRequestTrackingStatusLabel(entry.fromStatus)}
                     </p>
                     <p className="text-sm text-ink-muted">
-                      New status: {ITEM_REQUEST_STATUS_LABELS[entry.toStatus]}
+                      New status: {itemRequestTrackingStatusLabel(entry.toStatus)}
                     </p>
                     <p className="text-sm text-ink-muted">
                       Performed by: {personDisplayName(entry.actor)}

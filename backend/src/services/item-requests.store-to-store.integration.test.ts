@@ -2398,6 +2398,107 @@ describe("store-to-store item requests", { concurrency: false }, () => {
       },
     );
     assert.equal(recommended.status, "PENDING_CORPORATE_MAKER");
+    assert.ok(recommended.recommendedAt);
+    assert.equal(recommended.recommendedBy?.id, birtamodChecker.id);
+    assert.equal(recommended.recommendationRemarks, "Ready for corporate");
+    assert.equal(recommended.pendingWith?.id, corporateMaker?.id);
+    const recommendEntry = recommended.actions.find(
+      (entry) => entry.action === "RECOMMEND",
+    );
+    assert.equal(recommendEntry?.remarks, "Ready for corporate");
+    assert.equal(recommendEntry?.actor.id, birtamodChecker.id);
+    assert.equal(recommendEntry?.toStatus, "PENDING_CORPORATE_MAKER");
+    assert.equal(recommended.allowedActions.includes("FORWARD"), false);
+    const corporateView = await getItemRequestById(created.id, corporateMaker!);
+    assert.ok(corporateView.allowedActions.includes("FORWARD"));
+    assert.ok(corporateView.allowedActions.includes("RETURN"));
+
+    const ledgerAfterRecommend = await getDb()
+      .select({ value: count() })
+      .from(stockLedger);
+    assert.equal(ledgerAfterRecommend[0]?.value, ledgerBefore[0]?.value);
+
+    const recommendedNotifications = await listNotifications(corporateMaker!.id, {
+      page: 1,
+      pageSize: 20,
+    });
+    const recommendedNote = recommendedNotifications.items.find(
+      (item) =>
+        item.relatedEntityId === created.id &&
+        item.type === "ITEM_REQUEST_RECOMMENDED",
+    );
+    assert.equal(recommendedNote?.relatedEntityId, created.id);
+    assert.equal(
+      recommendedNote?.message.includes("Ready for corporate"),
+      true,
+    );
+
+    const recommendedList = await listItemRequests(
+      birtamodMaker,
+      itemRequestListQuerySchema.parse({
+        page: 1,
+        pageSize: 50,
+        status: "RECOMMENDED",
+        queue: "request-list",
+        search: created.requestNumber,
+      }),
+    );
+    assert.ok(recommendedList.items.some((item) => item.id === created.id));
+    assert.ok(
+      recommendedList.items.every(
+        (item) => item.status === "PENDING_CORPORATE_MAKER",
+      ),
+    );
+    const listed = recommendedList.items.find((item) => item.id === created.id);
+    assert.equal(listed?.recommendedBy?.id, birtamodChecker.id);
+    assert.ok(listed?.recommendedAt);
+    assert.equal(listed?.recommendationRemarks, "Ready for corporate");
+    assert.equal(listed?.pendingWith?.id, corporateMaker?.id);
+
+    const hiddenFromSubmitted = await listItemRequests(
+      birtamodMaker,
+      itemRequestListQuerySchema.parse({
+        page: 1,
+        pageSize: 50,
+        status: "SUBMITTED",
+        queue: "request-list",
+        search: created.requestNumber,
+      }),
+    );
+    assert.equal(
+      hiddenFromSubmitted.items.some((item) => item.id === created.id),
+      false,
+    );
+
+    await assert.rejects(
+      () => getItemRequestById(created.id, sourceChecker),
+      (error: unknown) => isAppError(error, 404, "Item request not found"),
+    );
+    await assert.rejects(
+      () =>
+        performItemRequestAction(created.id, sourceChecker, {
+          action: "FORWARD",
+          remarks: null,
+          expectedVersion: recommended.version,
+        }),
+      (error: unknown) =>
+        isAppError(error, 403, "This request is not pending with you."),
+    );
+
+    const corporateReview = await listItemRequests(corporateMaker!, {
+      page: 1,
+      pageSize: 50,
+      status: "ALL",
+      queue: "review",
+      search: created.requestNumber,
+    });
+    assert.ok(corporateReview.items.some((item) => item.id === created.id));
+    assert.ok(
+      corporateReview.items.every(
+        (item) => item.status === "PENDING_CORPORATE_MAKER",
+      ),
+    );
+
     const reviewAfterRecommend = await listItemRequests(birtamodChecker, {
       page: 1,
       pageSize: 50,

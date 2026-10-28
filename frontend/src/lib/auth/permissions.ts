@@ -1,6 +1,7 @@
 import {
   userHasAnyRole,
   userHasRole,
+  userIsOrganizationHead,
   type AppRole,
   type AuthenticatedUser,
 } from "@printing-stationery/shared";
@@ -10,6 +11,13 @@ export function isAdmin(user: AuthenticatedUser | null | undefined): boolean {
     return false;
   }
   return userHasRole(user.roles, "ADMIN");
+}
+
+/** Corporate Checker, or an existing ADMIN role, administers organization data. */
+export function isOrganizationHead(
+  user: AuthenticatedUser | null | undefined,
+): boolean {
+  return userIsOrganizationHead(user);
 }
 
 export function canReadMasterData(
@@ -24,25 +32,25 @@ export function canReadMasterData(
 export function canMutateMasterData(
   user: AuthenticatedUser | null | undefined,
 ): boolean {
-  return isAdmin(user);
+  return isOrganizationHead(user);
 }
 
 export function canAccessOrganizationSetup(
   user: AuthenticatedUser | null | undefined,
 ): boolean {
-  return isAdmin(user);
+  return isOrganizationHead(user);
 }
 
 export function canManageApplicationUsers(
   user: AuthenticatedUser | null | undefined,
 ): boolean {
-  return isAdmin(user);
+  return isOrganizationHead(user);
 }
 
 export function canManageStoreUsers(
   user: AuthenticatedUser | null | undefined,
 ): boolean {
-  return isAdmin(user);
+  return isOrganizationHead(user);
 }
 
 export function canAccessItemRequests(
@@ -57,7 +65,7 @@ export function canAccessItemRequests(
 export function canAccessOpeningStock(
   user: AuthenticatedUser | null | undefined,
 ): boolean {
-  return isAdmin(user);
+  return isOrganizationHead(user);
 }
 
 export function canAccessStockBalance(
@@ -84,7 +92,7 @@ export function canMutatePurchases(
   if (!user) {
     return false;
   }
-  return userHasRole(user.roles, "ADMIN") || userHasRole(user.roles, "MAKER");
+  return isOrganizationHead(user) || userHasRole(user.roles, "MAKER");
 }
 
 export function hasRole(

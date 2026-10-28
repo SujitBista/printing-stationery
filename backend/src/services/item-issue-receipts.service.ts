@@ -16,6 +16,7 @@ import {
   ITEM_ISSUE_OPEN_RECEIPT_STATUSES,
   ITEM_ISSUE_RECEIVABLE_DELIVERY_STATUSES,
   userHasRole,
+  userIsOrganizationHead,
 } from "@printing-stationery/shared";
 import { AppError } from "../utils/errors.js";
 import {
@@ -64,7 +65,11 @@ const toStores = alias(stores, "incoming_to_stores");
 const toBranches = alias(branches, "incoming_to_branches");
 
 function isAdminUser(actor: AuthenticatedUser): boolean {
-  return userHasRole(actor.roles, "ADMIN");
+  return userHasRole(actor.roles, "ADMIN") && actor.isCorporateChecker !== true;
+}
+
+function hasHeadAccess(actor: AuthenticatedUser): boolean {
+  return userIsOrganizationHead(actor);
 }
 
 function parseQuantityToScaled(value: string): bigint {
@@ -273,7 +278,7 @@ export async function getShipmentDetailForIssue(
   if (!row) {
     return null;
   }
-  if (!isAdminUser(actor) && !access.visibleStoreIds.includes(row.shipment.toStoreId) && !access.visibleStoreIds.includes(row.shipment.fromStoreId)) {
+  if (!hasHeadAccess(actor) && !access.visibleStoreIds.includes(row.shipment.toStoreId) && !access.visibleStoreIds.includes(row.shipment.fromStoreId)) {
     return null;
   }
   return mapShipment(row, actor, access);
@@ -472,14 +477,14 @@ export async function listIncomingShipments(
   query: IncomingShipmentListQuery,
 ): Promise<PaginatedIncomingShipmentResponse> {
   const access = await loadIncomingAccess(actor);
-  if (!isAdminUser(actor) && access.visibleStoreIds.length === 0) {
+  if (!hasHeadAccess(actor) && access.visibleStoreIds.length === 0) {
     return { items: [], page: query.page, pageSize: query.pageSize, totalItems: 0, totalPages: 0 };
   }
 
   const conditions: SQL[] = [
     sql`${itemIssueShipments.deliveryStatus} <> 'NEEDS_REVIEW'`,
   ];
-  if (!isAdminUser(actor)) {
+  if (!hasHeadAccess(actor)) {
     conditions.push(inArray(itemIssueShipments.toStoreId, access.visibleStoreIds));
   }
   const queueCondition = incomingQueueCondition(query.queue);
@@ -893,7 +898,7 @@ export async function listInTransitQuantities(
   actor: AuthenticatedUser,
 ): Promise<InTransitQuantity[]> {
   const access = await loadIncomingAccess(actor);
-  if (!isAdminUser(actor) && access.visibleStoreIds.length === 0) {
+  if (!hasHeadAccess(actor) && access.visibleStoreIds.length === 0) {
     return [];
   }
 
@@ -901,7 +906,7 @@ export async function listInTransitQuantities(
     sql`${itemIssueShipmentLines.remainingInTransitQuantity}::numeric > 0`,
     sql`${itemIssueShipments.deliveryStatus} in ('IN_TRANSIT', 'PARTIALLY_RECEIVED')`,
   ];
-  if (!isAdminUser(actor)) {
+  if (!hasHeadAccess(actor)) {
     conditions.push(
       or(
         inArray(itemIssueShipments.toStoreId, access.visibleStoreIds),

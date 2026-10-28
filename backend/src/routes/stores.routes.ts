@@ -11,12 +11,16 @@ import {
   previewStoreImportHandler,
   storeImportUpload,
 } from "../controllers/stores-import.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireOrganizationHead,
+  requireRole,
+} from "../middleware/auth.js";
 
 export const storesRouter = Router();
 
 const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 storesRouter.get("/", requireAuth, readRoles, listStoresHandler);
 storesRouter.post(

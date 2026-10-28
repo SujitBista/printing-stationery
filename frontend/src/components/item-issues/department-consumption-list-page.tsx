@@ -9,6 +9,10 @@ import { fetchDepartmentConsumptions } from "@/lib/api/item-issues";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
+import {
+  issueDetailHref,
+  REQUEST_NAV_ITEM,
+} from "@/lib/navigation/request-nav";
 import { formatDateTime, personDisplayName } from "./item-issue-labels";
 
 const PAGE_SIZE = 20;
@@ -201,7 +205,10 @@ export function DepartmentConsumptionListPage() {
                   <tr key={item.id} className="border-b border-border hover:bg-accent-soft/70">
                     <td className="px-3 py-3">
                       <Link
-                        href={`/requests/item-issues/${item.itemIssueId}`}
+                        href={issueDetailHref(
+                          item.itemIssueId,
+                          REQUEST_NAV_ITEM.DEPARTMENT_CONSUMPTION,
+                        )}
                         className="font-medium text-accent hover:underline"
                       >
                         {item.issueNumber}

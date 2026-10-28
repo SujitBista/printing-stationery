@@ -6,6 +6,12 @@ import type { ItemIssueListItem, ItemIssueQueue } from "@printing-stationery/sha
 import { fetchItemIssues } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
 import { getItemIssueQueue } from "@/lib/item-issues/queues";
+import {
+  issueWorkflowHref,
+  requestDetailHref,
+  requestNavItemForIssueDetail,
+  requestNavItemForIssueQueue,
+} from "@/lib/navigation/request-nav";
 import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -161,7 +167,11 @@ export function ItemIssueListPage({ queue }: ItemIssueListPageProps) {
                     <td className="px-3 py-3">
                       {issue.requestId && issue.requestNumber ? (
                         <Link
-                          href={`/requests/item-requests/${issue.requestId}`}
+                          href={requestDetailHref(
+                            issue.requestId,
+                            requestNavItemForIssueDetail(issue) ??
+                              requestNavItemForIssueQueue(queue),
+                          )}
                           className="font-medium text-accent hover:underline"
                         >
                           {issue.requestNumber}
@@ -202,7 +212,10 @@ export function ItemIssueListPage({ queue }: ItemIssueListPageProps) {
                     </td>
                     <td className="px-3 py-3">
                       <Link
-                        href={`/requests/item-issues/${issue.id}`}
+                        href={issueWorkflowHref(
+                          `/requests/item-issues/${issue.id}`,
+                          issue,
+                        )}
                         className="font-medium text-accent hover:underline"
                       >
                         {issue.status === "RETURNED" && issue.canEdit

@@ -16,6 +16,7 @@ import {
   type ApplicationUserRow,
 } from "../db/schema/auth.js";
 import { AppError } from "../utils/errors.js";
+import { userSupervisesCorporateStore } from "./corporate-checker.js";
 import {
   generateSessionToken,
   hashPassword,
@@ -29,10 +30,15 @@ export const LOGIN_MAX_FAILED_ATTEMPTS = 5;
 /** Lockout duration after too many failed attempts. */
 export const LOGIN_LOCKOUT_MINUTES = 15;
 
-/** Advisory lock key for first-Admin bootstrap (transaction-scoped). */
-const BOOTSTRAP_ADMIN_ADVISORY_LOCK_KEY = 874_201_033;
-
 const INVALID_CREDENTIALS_MESSAGE = "Invalid username or password.";
+
+/** A standalone ADMIN account cannot sign in. The Corporate Checker can also hold ADMIN. */
+function signInBlocked(roles: AppRole[], isCorporateChecker: boolean): boolean {
+  if (roles.length === 0) {
+    return true;
+  }
+  return roles.includes("ADMIN") && !isCorporateChecker;
+}
 
 export type AuthContext = {
   sessionId: string;
@@ -53,6 +59,7 @@ type AuthenticatedUserJoinedRow = {
 function toAuthenticatedUser(
   row: AuthenticatedUserJoinedRow,
   roles: AppRole[],
+  isCorporateChecker: boolean,
 ): AuthenticatedUser {
   const employee =
     row.employeeId &&
@@ -79,6 +86,7 @@ function toAuthenticatedUser(
     mustChangePassword: row.user.mustChangePassword,
     roles,
     employee,
+    isCorporateChecker,
   };
 }
 
@@ -205,7 +213,8 @@ export async function login(
   }
 
   const roles = await loadRolesForUser(row.user.id);
-  if (roles.length === 0) {
+  const isCorporateChecker = await userSupervisesCorporateStore(row.user.id);
+  if (signInBlocked(roles, isCorporateChecker)) {
     throw new AppError(INVALID_CREDENTIALS_MESSAGE, 401);
   }
 
@@ -229,7 +238,7 @@ export async function login(
   }
 
   return {
-    user: toAuthenticatedUser(refreshed, roles),
+    user: toAuthenticatedUser(refreshed, roles, isCorporateChecker),
     sessionToken,
   };
 }
@@ -282,7 +291,8 @@ export async function resolveSession(
   }
 
   const roles = await loadRolesForUser(row.user.id);
-  if (roles.length === 0) {
+  const isCorporateChecker = await userSupervisesCorporateStore(row.user.id);
+  if (signInBlocked(roles, isCorporateChecker)) {
     return null;
   }
 
@@ -318,6 +328,7 @@ export async function resolveSession(
         branchName: row.branchName,
       },
       roles,
+      isCorporateChecker,
     ),
   };
 }
@@ -411,7 +422,8 @@ export async function changeInitialPassword(
   }
 
   const roles = await loadRolesForUser(auth.user.id);
-  return toAuthenticatedUser(refreshed, roles);
+  const isCorporateChecker = await userSupervisesCorporateStore(auth.user.id);
+  return toAuthenticatedUser(refreshed, roles, isCorporateChecker);
 }
 
 export async function cleanupExpiredSessions(): Promise<number> {
@@ -433,60 +445,15 @@ export async function cleanupExpiredSessions(): Promise<number> {
 }
 
 /**
- * Creates the first independent system Admin (`employee_id = NULL`).
- * Refuses if any application user already exists.
- * Not a general Admin-creation API.
+ * Retired. The Corporate Checker administers the system. This no longer
+ * creates an Admin login.
  */
-export async function createBootstrapAdmin(input: {
+export async function createBootstrapAdmin(_input: {
   username: string;
   password: string;
 }): Promise<{ userId: string; username: string }> {
-  const db = getDb();
-  const username = input.username.trim();
-
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(${BOOTSTRAP_ADMIN_ADVISORY_LOCK_KEY})`,
-    );
-
-    const existingUsers = await tx
-      .select({ id: applicationUsers.id })
-      .from(applicationUsers)
-      .limit(1);
-
-    if (existingUsers[0]) {
-      throw new AppError(
-        "Bootstrap Admin refused: an application user already exists",
-        409,
-      );
-    }
-
-    const passwordHash = await hashPassword(input.password);
-
-    const inserted = await tx
-      .insert(applicationUsers)
-      .values({
-        employeeId: null,
-        username,
-        passwordHash,
-        mustChangePassword: true,
-        isActive: true,
-      })
-      .returning({ id: applicationUsers.id, username: applicationUsers.username });
-
-    const created = inserted[0];
-    if (!created) {
-      throw new AppError("Failed to create application user", 500);
-    }
-
-    await tx.insert(userRoles).values({
-      userId: created.id,
-      role: "ADMIN",
-    });
-
-    return {
-      userId: created.id,
-      username: created.username,
-    };
-  });
+  throw new AppError(
+    "The system admin login has been removed. The Corporate Checker administers the system.",
+    410,
+  );
 }

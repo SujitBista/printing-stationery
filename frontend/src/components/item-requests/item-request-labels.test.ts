@@ -6,6 +6,7 @@ import {
   formatStoreTransferDirection,
   getItemRequestActionLabel,
   ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS,
+  itemRequestPendingWithLabel,
   itemRequestTrackingStatusLabel,
   requestedByDisplayName,
   storeOptionLabel,
@@ -90,6 +91,39 @@ describe("request list status filter", () => {
     assert.equal(
       itemRequestTrackingStatusLabel("PARTIALLY_ISSUED"),
       "Partially Issued",
+    );
+  });
+
+  it("offers Recommended as the tracking name for the stored recommended status", () => {
+    const recommended = ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS.find(
+      (option) => option.value === "RECOMMENDED",
+    );
+    assert.equal(recommended?.label, "Recommended");
+    const filterValues: readonly string[] =
+      ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS.map((option) => option.value);
+    assert.equal(filterValues.includes("PENDING_CORPORATE_MAKER"), false);
+    assert.equal(
+      itemRequestTrackingStatusLabel("PENDING_CORPORATE_MAKER"),
+      "Recommended",
+    );
+  });
+});
+
+describe("pending with label", () => {
+  it("shows the assigned user and role", () => {
+    assert.equal(
+      itemRequestPendingWithLabel("PENDING_CORPORATE_MAKER", {
+        id: "33333333-3333-4333-8333-333333333333",
+        username: "corp.maker",
+        isActive: true,
+        employee: {
+          id: "44444444-4444-4444-8444-444444444444",
+          employeeCode: "501",
+          employeeName: "Sita Sharma",
+          isActive: true,
+        },
+      }),
+      "Sita Sharma (501) (Corporate Maker)",
     );
   });
 });

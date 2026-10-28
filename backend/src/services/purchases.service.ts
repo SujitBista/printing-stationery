@@ -27,7 +27,8 @@ import {
   nepaliFiscalYearFromIsoDate,
   purchaseLineAmount,
   sumDecimalStrings,
-  userHasAnyRole,
+  userHasRole,
+  userIsOrganizationHead,
 } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
 import {
@@ -136,7 +137,7 @@ async function insertPurchaseLedger(
 }
 
 function canMutatePurchases(actor: AuthenticatedUser): boolean {
-  return userHasAnyRole(actor.roles, ["ADMIN", "MAKER"]);
+  return userIsOrganizationHead(actor) || userHasRole(actor.roles, "MAKER");
 }
 
 function escapeIlikePattern(value: string): string {

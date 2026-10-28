@@ -17,7 +17,7 @@ export default function OrganizationLayout({
           Organization Setup
         </h1>
         <p className="mt-4 border-l-2 border-danger pl-3 text-sm text-danger">
-          Only an Admin can set up organization data.
+          Only the Corporate Checker can set up organization data.
         </p>
       </section>
     );

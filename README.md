@@ -39,15 +39,7 @@ npm install
 npm run db:migrate -w @printing-stationery/backend
 ```
 
-5. Bootstrap the first Admin (independent system account; no Employee required):
-
-```bash
-BOOTSTRAP_ADMIN_USERNAME="<admin-username>" \
-BOOTSTRAP_ADMIN_PASSWORD="<strong-temporary-password>" \
-npm run auth:bootstrap-admin -w @printing-stationery/backend
-```
-
-On first login the Admin must change the temporary password, then receives full `ADMIN` access. Ordinary users created later through Application User Setup must reference an Employee. See [docs/AUTH.md](docs/AUTH.md).
+5. Sign in as the Corporate Checker (the supervisor of the Corporate Store). That account is the head and administers organization setup, users, and opening stock. There is no system admin login. See [docs/AUTH.md](docs/AUTH.md).
 
 ## Development
 
@@ -75,7 +67,7 @@ Sign in: [http://localhost:3000/login](http://localhost:3000/login)
 | `npm run clean` | Remove build outputs (`dist`, `.next`) only |
 | `npm run db:generate -w @printing-stationery/backend` | Generate Drizzle migrations from the schema |
 | `npm run db:migrate -w @printing-stationery/backend` | Apply pending Drizzle migrations to PostgreSQL |
-| `npm run auth:bootstrap-admin -w @printing-stationery/backend` | Create the first Admin application user |
+| `npm run auth:bootstrap-admin -w @printing-stationery/backend` | Retired. The Corporate Checker administers the system |
 | `npm run auth:cleanup-sessions -w @printing-stationery/backend` | Remove expired / long-revoked sessions |
 
 ## Database migrations

@@ -93,7 +93,17 @@ export const createApplicationUserInputSchema = z
     storeId: optionalNullableUuidSchema.optional().default(null),
   })
   .strict()
-  .superRefine(confirmTemporaryPassword);
+  .superRefine(confirmTemporaryPassword)
+  .superRefine((value, ctx) => {
+    if (value.role === "ADMIN") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["role"],
+        message:
+          "The Corporate Checker administers the system. Admin accounts cannot be assigned.",
+      });
+    }
+  });
 
 export const updateApplicationUserInputSchema = z
   .object({
@@ -101,7 +111,17 @@ export const updateApplicationUserInputSchema = z
     role: appRoleSchema,
     storeId: optionalNullableUuidSchema.optional().default(null),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.role === "ADMIN") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["role"],
+        message:
+          "The Corporate Checker administers the system. Admin accounts cannot be assigned.",
+      });
+    }
+  });
 
 export const updateApplicationUserStatusInputSchema = z
   .object({

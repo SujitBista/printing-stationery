@@ -11,12 +11,16 @@ import {
   itemImportUpload,
   previewItemImportHandler,
 } from "../controllers/items-import.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireOrganizationHead,
+  requireRole,
+} from "../middleware/auth.js";
 
 export const itemsRouter = Router();
 
 const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 itemsRouter.get("/", requireAuth, readRoles, listItemsHandler);
 itemsRouter.post(

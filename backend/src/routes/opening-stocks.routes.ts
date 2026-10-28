@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requireOrganizationHead } from "../middleware/auth.js";
 import {
   cancelOpeningStockBatchHandler,
   createManualOpeningStockBatchHandler,
@@ -14,7 +14,7 @@ import {
 
 export const openingStocksRouter = Router();
 
-openingStocksRouter.use(requireAuth, requireRole("ADMIN"));
+openingStocksRouter.use(requireAuth, requireOrganizationHead);
 
 openingStocksRouter.get("/", listOpeningStockBatchesHandler);
 openingStocksRouter.get("/:batchId", getOpeningStockBatchHandler);

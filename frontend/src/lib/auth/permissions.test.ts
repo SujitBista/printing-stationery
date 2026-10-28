@@ -11,13 +11,18 @@ import {
 
 function userWithRoles(
   roles: Array<"ADMIN" | "HR" | "MAKER" | "CHECKER">,
+  isCorporateChecker = false,
 ) {
-  return { roles } as never;
+  return { roles, isCorporateChecker } as never;
 }
 
 describe("organization setup access", () => {
-  it("allows only ADMIN to open organization setup", () => {
+  it("allows the corporate checker and an existing admin role to open organization setup", () => {
     assert.equal(canAccessOrganizationSetup(userWithRoles(["ADMIN"])), true);
+    assert.equal(
+      canAccessOrganizationSetup(userWithRoles(["CHECKER"], true)),
+      true,
+    );
     assert.equal(canAccessOrganizationSetup(userWithRoles(["MAKER"])), false);
     assert.equal(canAccessOrganizationSetup(userWithRoles(["CHECKER"])), false);
     assert.equal(canAccessOrganizationSetup(userWithRoles(["HR"])), false);
@@ -28,6 +33,7 @@ describe("organization setup access", () => {
     assert.equal(canMutateMasterData(userWithRoles(["MAKER"])), false);
     assert.equal(canMutateMasterData(userWithRoles(["CHECKER"])), false);
     assert.equal(canMutateMasterData(userWithRoles(["ADMIN"])), true);
+    assert.equal(canMutateMasterData(userWithRoles(["CHECKER"], true)), true);
   });
 
   it("still lets makers and checkers read master data for operational screens", () => {
@@ -45,6 +51,7 @@ describe("purchase access", () => {
     assert.equal(canAccessPurchases(userWithRoles(["CHECKER"])), true);
     assert.equal(canAccessPurchases(userWithRoles(["HR"])), false);
     assert.equal(canMutatePurchases(userWithRoles(["CHECKER"])), false);
+    assert.equal(canMutatePurchases(userWithRoles(["CHECKER"], true)), true);
     assert.equal(canMutatePurchases(userWithRoles(["MAKER"])), true);
   });
 });

@@ -3,7 +3,7 @@
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import {
-  APP_ROLES,
+  ASSIGNABLE_APP_ROLES,
   type AppRole,
   type ApplicationUser,
   type ApplicationUserStatusFilter,
@@ -237,7 +237,7 @@ export function ApplicationUserSetupPage() {
           Application User Setup
         </h1>
         <p className="mt-4 border-l-2 border-danger pl-3 text-sm text-danger">
-          Only an Admin can manage application users.
+          Only the Corporate Checker can manage application users.
         </p>
       </section>
     );
@@ -290,7 +290,7 @@ export function ApplicationUserSetupPage() {
             className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           >
             <option value="">All roles</option>
-            {APP_ROLES.map((appRole) => (
+            {ASSIGNABLE_APP_ROLES.map((appRole) => (
               <option key={appRole} value={appRole}>
                 {appRole}
               </option>

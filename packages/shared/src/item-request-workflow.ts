@@ -28,13 +28,7 @@ export const ITEM_REQUEST_ROLE_WORKFLOW_QUEUES = {
     "rejected",
   ],
   BRANCH_MAKER: ["drafts", "returned", "rejected", "request-list"],
-  BRANCH_CHECKER: [
-    "recommend",
-    "recommended",
-    "returned",
-    "rejected",
-    "request-list",
-  ],
+  BRANCH_CHECKER: ["recommend", "returned", "rejected", "request-list"],
   CORPORATE_MAKER: [
     "review",
     "forwarded",
@@ -119,13 +113,14 @@ export function itemRequestQueueIsFulfilment(queue: ItemRequestQueue): boolean {
   return (ITEM_REQUEST_FULFILMENT_QUEUES as readonly string[]).includes(queue);
 }
 
-/** Branch Makers (and admins) create requests. Corporate Maker only reviews. */
+/** Branch Makers and the Corporate Checker (the head) create requests. Corporate Maker only reviews. */
 export function itemRequestWorkflowCanCreate(
   workflowRoles: readonly ItemRequestWorkflowRole[],
 ): boolean {
   return (
     workflowRoles.includes("ADMIN") ||
-    workflowRoles.includes("BRANCH_MAKER")
+    workflowRoles.includes("BRANCH_MAKER") ||
+    workflowRoles.includes("CORPORATE_CHECKER")
   );
 }
 

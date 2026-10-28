@@ -9,11 +9,11 @@ import {
   updateStoreUserStatusHandler,
   deleteStoreUserHandler,
 } from "../controllers/store-users.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requireOrganizationHead } from "../middleware/auth.js";
 
 export const storeUsersRouter = Router();
 
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 storeUsersRouter.get("/", requireAuth, adminOnly, listStoreUsersHandler);
 storeUsersRouter.get(

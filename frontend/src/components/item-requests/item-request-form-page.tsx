@@ -63,7 +63,7 @@ export function ItemRequestFormPage({
   requestId,
 }: ItemRequestFormPageProps) {
   const router = useRouter();
-  const { canAccessItemRequests, isAdmin, user } = useAuth();
+  const { canAccessItemRequests, isOrganizationHead, user } = useAuth();
   const [context, setContext] = useState<ItemRequestContext | null>(null);
   const [existing, setExisting] = useState<ItemRequest | null>(null);
   const [eligibleItems, setEligibleItems] = useState<EligibleItemRequestItem[]>(
@@ -145,7 +145,7 @@ export function ItemRequestFormPage({
           setCreateBlockedMessage(ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE);
         } else {
           setLoadError(
-            isAdmin
+            isOrganizationHead
               ? "You cannot create a request right now."
               : ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
           );
@@ -192,7 +192,7 @@ export function ItemRequestFormPage({
     } else {
       setLoading(false);
     }
-  }, [canAccessItemRequests, isAdmin, mode, requestId, user]);
+  }, [canAccessItemRequests, isOrganizationHead, mode, requestId, user]);
 
   useEffect(() => {
     if (!destinationStoreId) {

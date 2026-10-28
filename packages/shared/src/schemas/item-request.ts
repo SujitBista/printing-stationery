@@ -63,16 +63,27 @@ export const itemRequestWorkflowRoleSchema = z.enum(
  */
 export const ITEM_REQUEST_SUBMITTED_LIST_FILTER = "SUBMITTED";
 
+/**
+ * Request List filter value for requests the Branch Checker has recommended.
+ * Stored status remains `PENDING_CORPORATE_MAKER`.
+ */
+export const ITEM_REQUEST_RECOMMENDED_LIST_FILTER = "RECOMMENDED";
+
 const itemRequestStatusFilterEnum = z.enum([
   "ALL",
   ...ITEM_REQUEST_STATUSES,
 ]);
 
 export const itemRequestStatusFilterSchema = z.preprocess(
-  (value) =>
-    value === ITEM_REQUEST_SUBMITTED_LIST_FILTER
-      ? "PENDING_BRANCH_CHECKER"
-      : value,
+  (value) => {
+    if (value === ITEM_REQUEST_SUBMITTED_LIST_FILTER) {
+      return "PENDING_BRANCH_CHECKER";
+    }
+    if (value === ITEM_REQUEST_RECOMMENDED_LIST_FILTER) {
+      return "PENDING_CORPORATE_MAKER";
+    }
+    return value;
+  },
   itemRequestStatusFilterEnum,
 );
 
@@ -89,6 +100,15 @@ export function itemRequestListFilterIsSubmitted(
   return (
     value === ITEM_REQUEST_SUBMITTED_LIST_FILTER ||
     value === "PENDING_BRANCH_CHECKER"
+  );
+}
+
+export function itemRequestListFilterIsRecommended(
+  value: string | null | undefined,
+): boolean {
+  return (
+    value === ITEM_REQUEST_RECOMMENDED_LIST_FILTER ||
+    value === "PENDING_CORPORATE_MAKER"
   );
 }
 
@@ -335,7 +355,7 @@ export const itemRequestListQuerySchema = z.object({
   /**
    * When set to a queue with its own status set, that set is used.
    * `request-list` keeps every status and still honors `status`, including
-   * the Submitted alias.
+   * the Submitted and Recommended aliases.
    */
   queue: itemRequestQueueSchema.optional(),
   requestingStoreId: optionalUuidFilterSchema,
@@ -492,6 +512,12 @@ export const itemRequestListItemSchema = z.object({
   requestedBy: itemRequestRequestedByEmployeeSchema.nullable(),
   createdBy: itemRequestPersonSummarySchema,
   pendingWith: itemRequestPersonSummarySchema.nullable(),
+  /** Set when a Branch Checker has recommended the request. */
+  recommendedAt: z.string().nullable(),
+  /** Branch Checker who recommended the request. Null until recommended. */
+  recommendedBy: itemRequestPersonSummarySchema.nullable(),
+  /** Remarks recorded on the latest Recommend action. */
+  recommendationRemarks: z.string().nullable(),
   canEdit: z.boolean(),
   canDelete: z.boolean(),
   allowedActions: z.array(itemRequestActionTypeSchema),

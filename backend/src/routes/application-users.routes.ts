@@ -8,11 +8,11 @@ import {
   updateApplicationUserHandler,
   updateApplicationUserStatusHandler,
 } from "../controllers/application-users.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requireOrganizationHead } from "../middleware/auth.js";
 
 export const applicationUsersRouter = Router();
 
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 applicationUsersRouter.get(
   "/",

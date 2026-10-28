@@ -46,6 +46,7 @@ import {
   remainingRequestedQuantity,
   requestStatusAllowsItemIssue,
   userHasRole,
+  userIsOrganizationHead,
 } from "@printing-stationery/shared";
 import { AppError } from "../utils/errors.js";
 import {
@@ -167,7 +168,11 @@ type RequestLineRow = {
 };
 
 function isAdminUser(actor: AuthenticatedUser): boolean {
-  return userHasRole(actor.roles, "ADMIN");
+  return userHasRole(actor.roles, "ADMIN") && actor.isCorporateChecker !== true;
+}
+
+function hasHeadAccess(actor: AuthenticatedUser): boolean {
+  return userIsOrganizationHead(actor);
 }
 
 function isMakerUser(actor: AuthenticatedUser): boolean {
@@ -903,7 +908,7 @@ function issueVisibilityCondition(
   actor: AuthenticatedUser,
   visibleStoreIds: string[],
 ): SQL | undefined {
-  if (isAdminUser(actor)) {
+  if (hasHeadAccess(actor)) {
     return undefined;
   }
 
@@ -2978,9 +2983,9 @@ export async function listDepartmentConsumptions(
 ): Promise<PaginatedDepartmentConsumptionResponse> {
   const access = await loadIssueAccessContext(actor);
   const conditions: SQL[] = [eq(itemIssues.status, "POSTED")];
-  if (!isAdminUser(actor) && access.visibleStoreIds.length > 0) {
+  if (!hasHeadAccess(actor) && access.visibleStoreIds.length > 0) {
     conditions.push(inArray(itemIssues.fromStoreId, access.visibleStoreIds));
-  } else if (!isAdminUser(actor)) {
+  } else if (!hasHeadAccess(actor)) {
     return {
       items: [],
       page: query.page,

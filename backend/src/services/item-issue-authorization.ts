@@ -68,12 +68,21 @@ export function isEligibleSupplyingStore(params: {
   return params.allowTransfer || isCorporateSupplyingStore(params);
 }
 
+type IssueActor = Pick<AuthenticatedUser, "roles"> & {
+  isCorporateChecker?: boolean;
+};
+
+/** Stored ADMIN is view-only unless this account is also the Corporate Checker. */
+function isViewOnlyAdmin(actor: IssueActor): boolean {
+  return userHasRole(actor.roles, "ADMIN") && actor.isCorporateChecker !== true;
+}
+
 export function actorMayCreateItemIssue(params: {
-  actor: Pick<AuthenticatedUser, "roles">;
+  actor: IssueActor;
   supplyingStoreId: string;
   makerStoreIds: readonly string[];
 }): boolean {
-  if (userHasRole(params.actor.roles, "ADMIN")) {
+  if (isViewOnlyAdmin(params.actor)) {
     return false;
   }
   if (userHasRole(params.actor.roles, "CHECKER") && !userHasRole(params.actor.roles, "MAKER")) {
@@ -86,13 +95,13 @@ export function actorMayCreateItemIssue(params: {
 }
 
 export function actorMayVerifyItemIssue(params: {
-  actor: Pick<AuthenticatedUser, "roles">;
+  actor: IssueActor;
   supplyingStoreId: string;
   supervisedStoreIds: readonly string[];
   createdByApplicationUserId?: string;
   actorUserId?: string;
 }): boolean {
-  if (userHasRole(params.actor.roles, "ADMIN")) {
+  if (isViewOnlyAdmin(params.actor)) {
     return false;
   }
   if (!userHasRole(params.actor.roles, "CHECKER")) {
@@ -110,7 +119,7 @@ export function actorMayVerifyItemIssue(params: {
 
 /** @deprecated Use actorMayCreateItemIssue. */
 export function actorMayOperateItemIssue(params: {
-  actor: Pick<AuthenticatedUser, "roles">;
+  actor: IssueActor;
   supplyingStoreId: string;
   supervisedStoreIds: readonly string[];
 }): boolean {
@@ -127,12 +136,12 @@ export function actorMayOperateItemIssue(params: {
  * destination store may confirm. There is no separate verifier.
  */
 export function actorMayConfirmDestinationReceipt(params: {
-  actor: Pick<AuthenticatedUser, "roles">;
+  actor: IssueActor;
   destinationStoreId: string;
   makerStoreIds: readonly string[];
   checkerStoreIds: readonly string[];
 }): boolean {
-  if (userHasRole(params.actor.roles, "ADMIN")) {
+  if (isViewOnlyAdmin(params.actor)) {
     return false;
   }
   return (

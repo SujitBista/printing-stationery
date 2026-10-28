@@ -10,6 +10,7 @@ import {
   getItemRequestWorkflowTabQueues,
   ITEM_REQUEST_CHECKER_REVIEW_EMPTY_TITLE,
   ITEM_REQUEST_MAKER_SUBMITTED_HREF,
+  ITEM_REQUEST_RECOMMENDED_HREF,
   ITEM_REQUEST_SUBMITTED_EMPTY_TITLE,
 } from "./queues.js";
 
@@ -262,6 +263,7 @@ describe("item request role queues", () => {
     );
 
     assert.ok(branchChecker.includes("recommend"));
+    assert.equal(branchChecker.includes("recommended"), false);
     assert.equal(branchChecker.includes("review"), false);
     assert.equal(branchChecker.includes("approve"), false);
 
@@ -353,6 +355,76 @@ describe("item request role queues", () => {
       sidebar.filter((queue) => queue.sidebarLabel === "All Requests").length,
       1,
     );
+    assert.equal(
+      sidebar.some((queue) => queue.sidebarLabel === "Recommended"),
+      false,
+    );
+    assert.equal(
+      sidebar.some((queue) => queue.key === "recommended"),
+      false,
+    );
+  });
+
+  it("sends the old Recommended history page to All Requests filtered by Recommended", () => {
+    assert.equal(
+      ITEM_REQUEST_RECOMMENDED_HREF,
+      "/requests/item-requests?status=RECOMMENDED",
+    );
+    assert.equal(
+      getItemRequestQueue("recommended").href,
+      ITEM_REQUEST_RECOMMENDED_HREF,
+    );
+    assert.equal(getItemRequestQueue("recommended").title, "All Requests");
+    for (const roles of [
+      ["BRANCH_CHECKER"],
+      ["BRANCH_MAKER", "BRANCH_CHECKER"],
+      ["CORPORATE_MAKER"],
+      ["ADMIN"],
+    ] as const) {
+      const labels = getItemRequestSidebarQueues({
+        workflowRoles: [...roles],
+        canViewFulfilment: true,
+      }).map((queue) => queue.sidebarLabel);
+      const tabs = getItemRequestWorkflowTabQueues([...roles]).map(
+        (queue) => queue.tabLabel,
+      );
+      assert.equal(labels.includes("Recommended"), false);
+      assert.equal(tabs.includes("Recommended"), false);
+    }
+  });
+
+  it("keeps Returned as an action queue and Rejected as history", () => {
+    const returned = getItemRequestListRowActions("returned", {
+      ...requestForActions({
+        allowedActions: ["RESUBMIT", "CANCEL", "FORWARD", "RETURN"],
+        status: "RETURNED_TO_BRANCH_MAKER",
+      }),
+    });
+    const rejected = getItemRequestListRowActions("rejected", {
+      ...requestForActions({ allowedActions: ["REJECT"] }),
+    });
+    const branchMaker = getItemRequestSidebarQueues({
+      workflowRoles: ["BRANCH_MAKER"],
+      canViewFulfilment: false,
+    }).map((queue) => queue.key);
+    const corporateMaker = getItemRequestSidebarQueues({
+      workflowRoles: ["CORPORATE_MAKER"],
+      canViewFulfilment: false,
+    }).map((queue) => queue.key);
+
+    assert.deepEqual(returned.workflowActions, [
+      "FORWARD",
+      "RETURN",
+      "RESUBMIT",
+      "CANCEL",
+    ]);
+    assert.deepEqual(rejected.workflowActions, []);
+    assert.ok(branchMaker.includes("returned"));
+    assert.ok(branchMaker.includes("rejected"));
+    assert.ok(corporateMaker.includes("returned"));
+    assert.ok(corporateMaker.includes("rejected"));
+    assert.ok(corporateMaker.includes("review"));
+    assert.equal(corporateMaker.includes("recommended"), false);
   });
 
   it("does not duplicate All Requests and Pending My Review for a maker who is also a checker", () => {

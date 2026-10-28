@@ -2,15 +2,16 @@ import {
   itemRequestWorkflowCanCreate,
   itemRequestWorkflowIsCorporateMaker,
   userHasRole,
+  userIsOrganizationHead,
   type AuthenticatedUser,
   type ItemRequestQueue,
   type ItemRequestWorkflowRole,
 } from "@printing-stationery/shared";
 
 /**
- * Admins and branch makers can open the create form. Corporate Maker reviews
- * branch requests and must not create them. Backend `canCreate` remains the
- * authorization source for whether a request can actually be saved.
+ * Branch makers and the Corporate Checker can open the create form. Corporate
+ * Maker reviews branch requests and must not create them. Backend `canCreate`
+ * remains the authorization source for whether a request can actually be saved.
  */
 export function canCreateItemRequests(
   user: AuthenticatedUser | null | undefined,
@@ -25,15 +26,13 @@ export function canCreateItemRequests(
   if (itemRequestWorkflowCanCreate(workflowRoles)) {
     return true;
   }
-  return (
-    userHasRole(user.roles, "ADMIN") || userHasRole(user.roles, "MAKER")
-  );
+  return userIsOrganizationHead(user) || userHasRole(user.roles, "MAKER");
 }
 
 export function canSelectRequestedByEmployee(
   user: AuthenticatedUser | null | undefined,
 ): boolean {
-  return Boolean(user && userHasRole(user.roles, "ADMIN"));
+  return userIsOrganizationHead(user);
 }
 
 export function defaultRequestedByEmployeeId(params: {
@@ -59,7 +58,7 @@ export function shouldShowItemRequestCreateAction(params: {
 export function shouldShowItemRequestCreateAssignmentWarning(params: {
   queueShowsCreate: boolean;
   canCreate: boolean;
-  isAdmin: boolean;
+  isOrganizationHead: boolean;
   user: AuthenticatedUser | null | undefined;
   workflowRoles?: readonly ItemRequestWorkflowRole[];
 }): boolean {
@@ -70,7 +69,7 @@ export function shouldShowItemRequestCreateAssignmentWarning(params: {
   return (
     params.queueShowsCreate &&
     !params.canCreate &&
-    !params.isAdmin &&
+    !params.isOrganizationHead &&
     canCreateItemRequests(params.user, workflowRoles)
   );
 }

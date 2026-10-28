@@ -57,7 +57,7 @@ export const ITEM_ISSUE_ROLE_QUEUES = {
   BRANCH_MAKER: ["posted"],
   BRANCH_CHECKER: ["posted"],
   CORPORATE_MAKER: ["returned", "posted"],
-  CORPORATE_CHECKER: ["pending-verification", "posted"],
+  CORPORATE_CHECKER: ["pending-verification", "returned", "posted"],
 } as const satisfies Record<ItemRequestWorkflowRole, readonly ItemIssueQueue[]>;
 
 export const ITEM_ISSUE_OPEN_RECEIPT_STATUSES = [
@@ -103,6 +103,7 @@ export const ITEM_ISSUE_INCOMING_ROLES = [
   "ADMIN",
   "BRANCH_MAKER",
   "BRANCH_CHECKER",
+  "CORPORATE_CHECKER",
 ] as const satisfies readonly ItemRequestWorkflowRole[];
 
 export const ITEM_ISSUE_DEPARTMENT_CONSUMPTION_ROLES = [

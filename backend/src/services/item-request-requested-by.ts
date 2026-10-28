@@ -1,4 +1,7 @@
-import { userHasRole, type AuthenticatedUser } from "@printing-stationery/shared";
+import {
+  userIsOrganizationHead,
+  type AuthenticatedUser,
+} from "@printing-stationery/shared";
 
 export const UNLINKED_EMPLOYEE_MESSAGE =
   "Your account is not linked to an employee record.";
@@ -34,18 +37,18 @@ export type RequestedByEmployeeSummary = {
 };
 
 export function canSelectRequestedByEmployee(
-  actor: Pick<AuthenticatedUser, "roles">,
+  actor: Pick<AuthenticatedUser, "roles" | "isCorporateChecker">,
 ): boolean {
-  return userHasRole(actor.roles, "ADMIN");
+  return userIsOrganizationHead(actor);
 }
 
 /**
  * Resolves which employee ID may be stored as Requested By.
- * Admin may choose any employee id. Other users must use their linked
- * employee and cannot override it from the request body.
+ * The Corporate Checker may choose any employee id. Other users must use
+ * their linked employee and cannot override it from the request body.
  */
 export function resolveRequestedByEmployeeId(params: {
-  actor: Pick<AuthenticatedUser, "roles" | "employee">;
+  actor: Pick<AuthenticatedUser, "roles" | "employee" | "isCorporateChecker">;
   requestedByEmployeeId: string | undefined;
 }):
   | { ok: true; employeeId: string }

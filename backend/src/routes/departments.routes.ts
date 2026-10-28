@@ -6,12 +6,16 @@ import {
   updateDepartmentHandler,
   updateDepartmentStatusHandler,
 } from "../controllers/departments.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireOrganizationHead,
+  requireRole,
+} from "../middleware/auth.js";
 
 export const departmentsRouter = Router();
 
 const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 departmentsRouter.get("/", requireAuth, readRoles, listDepartmentsHandler);
 departmentsRouter.get("/:id", requireAuth, readRoles, getDepartmentHandler);

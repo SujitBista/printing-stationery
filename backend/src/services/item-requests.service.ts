@@ -56,6 +56,7 @@ import {
   preferCorporateControlStore,
   remainingRequestedQuantity,
   userHasRole,
+  userIsOrganizationHead,
 } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
 import {
@@ -270,7 +271,12 @@ function escapeIlikePattern(value: string): string {
 }
 
 function isAdminUser(actor: AuthenticatedUser): boolean {
-  return userHasRole(actor.roles, "ADMIN");
+  return userHasRole(actor.roles, "ADMIN") && actor.isCorporateChecker !== true;
+}
+
+/** Corporate Checker is the head and has the access the system admin used to have. */
+function hasHeadAccess(actor: AuthenticatedUser): boolean {
+  return userIsOrganizationHead(actor);
 }
 
 function assignmentHasChecker(
@@ -405,6 +411,9 @@ function actorWorkflowRoleForTransition(
 ): ItemRequestWorkflowRole {
   if (isAdminUser(actor)) {
     return "ADMIN";
+  }
+  if (actor.isCorporateChecker === true && kind === "BRANCH_MAKER") {
+    return "CORPORATE_CHECKER";
   }
   return kind;
 }
@@ -681,7 +690,7 @@ async function resolveItemRequestWorkflowRoles(
 }
 
 async function actorCanViewFulfilment(actor: AuthenticatedUser): Promise<boolean> {
-  if (isAdminUser(actor)) {
+  if (hasHeadAccess(actor)) {
     return true;
   }
 
@@ -828,7 +837,7 @@ async function resolveCreateStorePair(
   actor: AuthenticatedUser,
   input: { sourceStoreId: string; destinationStoreId: string },
 ): Promise<{ sourceStoreId: string; destinationStoreId: string }> {
-  if (isAdminUser(actor)) {
+  if (hasHeadAccess(actor)) {
     await assertStorePairForRequest(input);
     return input;
   }
@@ -1116,7 +1125,7 @@ function buildVisibilityCondition(
   supervisedStoreIds: string[],
   makerStoreIds: string[] = [],
 ): SQL | undefined {
-  if (isAdminUser(actor)) {
+  if (hasHeadAccess(actor)) {
     return undefined;
   }
 
@@ -1141,7 +1150,7 @@ function buildQueueActorCondition(
   queue: ItemRequestQueue,
   actor: AuthenticatedUser,
 ): SQL | undefined {
-  if (isAdminUser(actor)) {
+  if (hasHeadAccess(actor)) {
     if (queue === "approve") {
       return isNotNull(itemRequests.forwardedAt);
     }
@@ -1255,11 +1264,11 @@ function buildListFilters(
     conditions.push(eq(itemRequests.status, query.status));
   }
 
-  if (isAdminUser(actor) && query.requestingStoreId) {
+  if (hasHeadAccess(actor) && query.requestingStoreId) {
     conditions.push(eq(itemRequests.requestingStoreId, query.requestingStoreId));
   }
 
-  if (isAdminUser(actor) && query.branchId) {
+  if (hasHeadAccess(actor) && query.branchId) {
     conditions.push(eq(requestingStores.branchId, query.branchId));
   }
 
@@ -1364,6 +1373,14 @@ const headerSelect = {
     order by open_issues.updated_at desc, open_issues.created_at desc, open_issues.id desc
     limit 1
   )`,
+  recommendationRemarks: sql<string | null>`(
+    select ${itemRequestActions.remarks}
+    from ${itemRequestActions}
+    where ${itemRequestActions.itemRequestId} = ${itemRequests.id}
+      and ${itemRequestActions.action} = 'RECOMMEND'
+    order by ${itemRequestActions.createdAt} desc, ${itemRequestActions.id} desc
+    limit 1
+  )`,
 };
 
 function itemRequestHeaderJoins() {
@@ -1455,6 +1472,7 @@ type HeaderJoinedRow = {
     issueNumber: string;
     status: ItemIssueStatus;
   } | null;
+  recommendationRemarks: string | null;
 };
 
 async function attachAvailableStockToListItems(
@@ -1566,6 +1584,14 @@ function parseActiveIssue(
   };
 }
 
+function recommendationRemarksFromRow(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
 function toListItem(
   row: HeaderJoinedRow,
   actor: AuthenticatedUser,
@@ -1659,8 +1685,11 @@ function toListItem(
       corporateMaker,
       corporateChecker,
     }),
+    recommendedAt: row.request.recommendedAt?.toISOString() ?? null,
+    recommendedBy: row.request.recommendedAt ? branchChecker : null,
+    recommendationRemarks: recommendationRemarksFromRow(row.recommendationRemarks),
     canEdit: canEditRequest(row.request, actor),
-    canDelete: isAdminUser(actor),
+    canDelete: hasHeadAccess(actor),
     canCreateIssue,
     activeIssue,
     allowedActions: computeAllowedActions(row.request, actor),
@@ -1711,7 +1740,7 @@ async function insertLines(
 export async function getItemRequestContext(
   actor: AuthenticatedUser,
 ): Promise<ItemRequestContext> {
-  const assignment = isAdminUser(actor)
+  const assignment = hasHeadAccess(actor)
     ? undefined
     : await getActiveMakerAssignment(actor.id);
   const requestFromStore = assignment
@@ -1723,10 +1752,10 @@ export async function getItemRequestContext(
       ? toStoreSummary(corporateResolved.store, corporateResolved.branch)
       : null;
   const [requestFromStores, supplyingStores] = await Promise.all([
-    isAdminUser(actor)
+    hasHeadAccess(actor)
       ? listActiveStoreSummaries()
       : Promise.resolve(requestFromStore ? [requestFromStore] : []),
-    isAdminUser(actor)
+    hasHeadAccess(actor)
       ? listActiveStoreSummaries({ supplyingOnly: true })
       : Promise.resolve(requestToStore ? [requestToStore] : []),
   ]);
@@ -1767,9 +1796,9 @@ export async function getItemRequestContext(
     readyToIssueCount: readyToIssue,
     pendingIssueVerificationCount: pendingIssues,
     returnedIssueCount: returnedIssues,
-    canSelectRequestFromStore: isAdminUser(actor),
-    canSelectRequestToStore: isAdminUser(actor),
-    canSelectDestinationStore: isAdminUser(actor),
+    canSelectRequestFromStore: hasHeadAccess(actor),
+    canSelectRequestToStore: hasHeadAccess(actor),
+    canSelectDestinationStore: hasHeadAccess(actor),
     canSelectRequestedByEmployee: canSelectRequestedByEmployee(actor),
     requestedByEmployee:
       requestedByEmployee?.isActive === true ? requestedByEmployee : null,
@@ -1885,7 +1914,7 @@ export async function listEligibleItemRequestItems(
       throw new AppError(INELIGIBLE_DESTINATION_MESSAGE, 400);
     }
     if (
-      !isAdminUser(actor) &&
+      !hasHeadAccess(actor) &&
       context.requestToStore &&
       query.destinationStoreId !== context.requestToStore.id
     ) {
@@ -2254,7 +2283,7 @@ export async function createItemRequest(
     requestingStoreId: storePair.sourceStoreId,
   });
 
-  if (!isAdminUser(actor)) {
+  if (!hasHeadAccess(actor)) {
     await assertActiveParticipant(actor.id, "Maker");
   }
   await assertRequestLinesEligible(input.lines);
@@ -2317,13 +2346,13 @@ export async function updateItemRequest(
     throw new AppError("This request cannot be edited.", 403);
   }
 
-  if (!isAdminUser(actor)) {
+  if (!hasHeadAccess(actor)) {
     await assertActiveParticipant(actor.id, "Maker");
   }
 
   const nextSourceStoreId =
     input.sourceStoreId ?? existing.request.requestingStoreId;
-  const nextDestinationStoreId = isAdminUser(actor)
+  const nextDestinationStoreId = hasHeadAccess(actor)
     ? (input.destinationStoreId ?? existing.request.corporateStoreId)
     : existing.request.corporateStoreId;
 
@@ -2335,7 +2364,7 @@ export async function updateItemRequest(
   }
 
   if (
-    !isAdminUser(actor) &&
+    !hasHeadAccess(actor) &&
     input.sourceStoreId &&
     input.sourceStoreId !== existing.request.requestingStoreId
   ) {
@@ -2347,7 +2376,7 @@ export async function updateItemRequest(
     destinationStoreId: nextDestinationStoreId,
   });
 
-  const nextRequestedByEmployeeId = isAdminUser(actor)
+  const nextRequestedByEmployeeId = hasHeadAccess(actor)
     ? input.requestedByEmployeeId !== undefined
       ? await resolveRequestedByForSave(actor, input.requestedByEmployeeId)
       : existing.request.requestedByEmployeeId
@@ -2463,7 +2492,7 @@ export async function performItemRequestAction(
         throw new AppError("This request is not pending with you.", 403);
       }
 
-      if (!isAdminUser(actor)) {
+      if (!hasHeadAccess(actor)) {
         await assertActiveParticipant(
           actor.id,
           match.actor === "BRANCH_MAKER" || match.actor === "CORPORATE_MAKER"
@@ -2482,7 +2511,7 @@ export async function performItemRequestAction(
       };
 
       if (input.action === "SUBMIT" || input.action === "RESUBMIT") {
-        if (!isAdminUser(actor)) {
+        if (!hasHeadAccess(actor)) {
           const makerAssignment = await getActiveMakerAssignment(actor.id);
           if (
             !makerAssignment ||
@@ -2633,7 +2662,7 @@ export async function deleteItemRequest(
   actor: AuthenticatedUser,
   expectedVersion: number,
 ): Promise<void> {
-  if (!isAdminUser(actor)) {
+  if (!hasHeadAccess(actor)) {
     throw new AppError("You cannot delete an item request", 403);
   }
 

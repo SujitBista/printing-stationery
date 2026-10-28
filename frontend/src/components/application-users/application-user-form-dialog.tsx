@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  APP_ROLES,
+  ASSIGNABLE_APP_ROLES,
   createApplicationUserInputSchema,
   isStoreManagingRole,
   NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE,
@@ -502,7 +502,7 @@ export function ApplicationUserFormDialog({
               aria-invalid={Boolean(fieldErrors.role)}
             >
               <option value="">Select a role</option>
-              {APP_ROLES.map((role) => (
+              {ASSIGNABLE_APP_ROLES.map((role) => (
                 <option key={role} value={role}>
                   {role}
                 </option>

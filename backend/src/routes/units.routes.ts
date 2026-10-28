@@ -11,12 +11,16 @@ import {
   previewUnitImportHandler,
   unitImportUpload,
 } from "../controllers/units-import.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireOrganizationHead,
+  requireRole,
+} from "../middleware/auth.js";
 
 export const unitsRouter = Router();
 
 const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 unitsRouter.get("/", requireAuth, readRoles, listUnitsHandler);
 unitsRouter.post(

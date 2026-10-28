@@ -20,6 +20,7 @@ import type {
   PostOpeningStockInput,
   StockBalanceSummary,
 } from "@printing-stationery/shared";
+import { userIsOrganizationHead } from "@printing-stationery/shared";
 import { getDb } from "../db/client.js";
 import {
   applicationUsers,
@@ -94,12 +95,8 @@ type MappingContext = {
   };
 };
 
-function isAdmin(user: AuthenticatedUser): boolean {
-  return user.roles.includes("ADMIN");
-}
-
 function requireOpeningStockAdmin(actor: AuthenticatedUser): void {
-  if (!isAdmin(actor)) {
+  if (!userIsOrganizationHead(actor)) {
     throw new AppError("Forbidden", 403);
   }
 }

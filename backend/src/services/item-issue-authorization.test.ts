@@ -173,6 +173,19 @@ describe("item issue authorization", () => {
     );
   });
 
+  it("lets the corporate checker verify an issue while also holding admin", () => {
+    assert.equal(
+      actorMayVerifyItemIssue({
+        actor: { roles: ["ADMIN", "CHECKER"], isCorporateChecker: true },
+        supplyingStoreId: CORPORATE_STORE_ID,
+        supervisedStoreIds: [CORPORATE_STORE_ID],
+        createdByApplicationUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        actorUserId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      }),
+      true,
+    );
+  });
+
   it("allows a checker assigned to the supplying store to verify another user's issue", () => {
     assert.equal(
       actorMayVerifyItemIssue({

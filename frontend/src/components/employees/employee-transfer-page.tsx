@@ -89,7 +89,7 @@ function Field({
 
 export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) {
   const router = useRouter();
-  const { isAdmin } = useAuth();
+  const { isOrganizationHead } = useAuth();
   const detailsHref = `/organization/employees/${employeeId}`;
 
   const [context, setContext] = useState<EmployeeTransferContext | null>(null);
@@ -117,7 +117,7 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isOrganizationHead) {
       return;
     }
 
@@ -161,7 +161,7 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
     return () => {
       cancelled = true;
     };
-  }, [employeeId, isAdmin]);
+  }, [employeeId, isOrganizationHead]);
 
   useEffect(() => {
     if (!toBranchId) {
@@ -221,7 +221,6 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
   const canAssignStore = Boolean(
     context?.applicationUser &&
       context.applicationUser.roles.some((role) => isStoreManagingRole(role)) &&
-      !context.applicationUser.roles.includes("ADMIN") &&
       !context.applicationUser.roles.includes("HR"),
   );
 
@@ -318,12 +317,12 @@ export function EmployeeTransferPage({ employeeId }: EmployeeTransferPageProps) 
     router.push(detailsHref);
   }
 
-  if (!isAdmin) {
+  if (!isOrganizationHead) {
     return (
       <section className="w-full max-w-3xl">
         <PageHeader title="Transfer Employee" />
         <p className="mt-4 text-sm text-ink-muted">
-          Only an administrator can transfer an employee.
+          Only the Corporate Checker can transfer an employee.
         </p>
         <Link
           href={detailsHref}

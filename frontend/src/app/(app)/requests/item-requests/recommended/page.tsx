@@ -1,5 +1,6 @@
-import { ItemRequestListPage } from "@/components/item-requests/item-request-list-page";
+import { redirect } from "next/navigation";
+import { ITEM_REQUEST_RECOMMENDED_HREF } from "@/lib/item-requests/queues";
 
 export default function ItemRequestRecommendedPage() {
-  return <ItemRequestListPage queue="recommended" />;
+  redirect(ITEM_REQUEST_RECOMMENDED_HREF);
 }

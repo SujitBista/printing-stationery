@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useState, useTransition } from "react
 import {
   ITEM_REQUEST_CORPORATE_MAKER_CREATE_MESSAGE,
   ITEM_REQUEST_MISSING_MAKER_OR_CHECKER_MESSAGE,
+  itemRequestListFilterIsRecommended,
   itemRequestListFilterIsSubmitted,
   resolveItemRequestListStatusFilter,
   type Branch,
@@ -34,6 +35,11 @@ import {
   getItemRequestQueue,
 } from "@/lib/item-requests/queues";
 import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
+import {
+  issueWorkflowHref,
+  requestDetailHref,
+  requestNavItemForRequestQueue,
+} from "@/lib/navigation/request-nav";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ItemRequestActionDialog } from "./item-request-action-dialog";
 import { ItemRequestQueueTabs } from "./item-request-queue-tabs";
@@ -43,7 +49,7 @@ import {
   formatStoreTransferDirection,
   getItemRequestActionLabel,
   ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS,
-  ITEM_REQUEST_STATUS_LABELS,
+  itemRequestPendingWithLabel,
   itemRequestStatusTone,
   itemRequestTrackingStatusLabel,
   personDisplayName,
@@ -51,6 +57,16 @@ import {
 } from "./item-request-labels";
 
 const PAGE_SIZE = 20;
+
+function requestListStatusSelectValue(rawStatus: string | null): string {
+  if (itemRequestListFilterIsSubmitted(rawStatus)) {
+    return "SUBMITTED";
+  }
+  if (itemRequestListFilterIsRecommended(rawStatus)) {
+    return "RECOMMENDED";
+  }
+  return resolveItemRequestListStatusFilter(rawStatus);
+}
 
 type ItemRequestListPageProps = {
   queue?: ItemRequestQueue;
@@ -72,9 +88,7 @@ function ItemRequestListPageContent({
   const searchParams = useSearchParams();
   const rawStatusParam =
     queue === "request-list" ? searchParams.get("status") : null;
-  const statusSelectValue = itemRequestListFilterIsSubmitted(rawStatusParam)
-    ? "SUBMITTED"
-    : resolveItemRequestListStatusFilter(rawStatusParam);
+  const statusSelectValue = requestListStatusSelectValue(rawStatusParam);
   const apiStatus =
     queue === "request-list"
       ? resolveItemRequestListStatusFilter(statusSelectValue)
@@ -88,7 +102,7 @@ function ItemRequestListPageContent({
     setReadyToIssueCount,
   } = useItemRequestNavContext();
   const queueMeta = getItemRequestQueue(queue, workflowRoles);
-  const { canAccessItemRequests, isAdmin, user } = useAuth();
+  const { canAccessItemRequests, isOrganizationHead, user } = useAuth();
 
   useEffect(() => {
     document.title = `${queueMeta.title} · Printing Stationery`;
@@ -133,8 +147,8 @@ function ItemRequestListPageContent({
   useEffect(() => {
     async function loadFilters() {
       const [storesResult, branchesResult] = await Promise.all([
-        isAdmin ? loadAllPaginatedOptions(fetchStores, "ALL") : Promise.resolve(null),
-        isAdmin
+        isOrganizationHead ? loadAllPaginatedOptions(fetchStores, "ALL") : Promise.resolve(null),
+        isOrganizationHead
           ? loadAllPaginatedOptions(fetchBranches, "ALL")
           : Promise.resolve(null),
       ]);
@@ -160,10 +174,10 @@ function ItemRequestListPageContent({
       }
     }
 
-    if (canAccessItemRequests && isAdmin) {
+    if (canAccessItemRequests && isOrganizationHead) {
       void loadFilters();
     }
-  }, [canAccessItemRequests, isAdmin]);
+  }, [canAccessItemRequests, isOrganizationHead]);
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -176,8 +190,8 @@ function ItemRequestListPageContent({
       search: search || undefined,
       queue,
       status: apiStatus,
-      requestingStoreId: isAdmin ? requestingStoreId || undefined : undefined,
-      branchId: isAdmin ? branchId || undefined : undefined,
+      requestingStoreId: isOrganizationHead ? requestingStoreId || undefined : undefined,
+      branchId: isOrganizationHead ? branchId || undefined : undefined,
     });
 
     if (!result.ok) {
@@ -209,7 +223,7 @@ function ItemRequestListPageContent({
     apiStatus,
     requestingStoreId,
     branchId,
-    isAdmin,
+    isOrganizationHead,
     setReadyToIssueCount,
   ]);
 
@@ -312,7 +326,7 @@ function ItemRequestListPageContent({
     shouldShowItemRequestCreateAssignmentWarning({
       queueShowsCreate: Boolean(queueMeta.showCreate),
       canCreate,
-      isAdmin,
+      isOrganizationHead,
       user,
       workflowRoles,
     });
@@ -405,6 +419,7 @@ function ItemRequestListPageContent({
             <select
               value={statusSelectValue}
               onChange={(event) => setStatusFilter(event.target.value)}
+              aria-label="Status"
               className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
             >
               {ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS.map((option) => (
@@ -425,7 +440,7 @@ function ItemRequestListPageContent({
             className="rounded-lg border border-border bg-paper-elevated px-3 py-2 outline-none transition focus:border-accent-mid focus:ring-2 focus:ring-accent/20"
           />
         </label>
-        {isAdmin ? (
+        {isOrganizationHead ? (
           <>
             <label className="flex w-full flex-col gap-1 text-sm">
               <span className="font-medium text-ink">Request From Store</span>
@@ -575,27 +590,48 @@ function ItemRequestListPageContent({
                             </div>
                           ) : null}
                         </td>
-                        <td className="min-w-[10rem] px-3 py-3">
+                        <td className="min-w-[12rem] px-3 py-3">
                           <Badge variant={itemRequestStatusTone(request.status)}>
-                            {queue === "request-list"
-                              ? itemRequestTrackingStatusLabel(request.status)
-                              : ITEM_REQUEST_STATUS_LABELS[request.status]}
+                            {itemRequestTrackingStatusLabel(request.status)}
                           </Badge>
+                          {request.recommendedAt ? (
+                            <div className="mt-1 text-xs text-ink-muted">
+                              <div>
+                                Recommended by{" "}
+                                {personDisplayName(request.recommendedBy)}
+                              </div>
+                              <div>{formatDateTime(request.recommendedAt)}</div>
+                              {request.recommendationRemarks ? (
+                                <div>
+                                  Remarks: {request.recommendationRemarks}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="min-w-[10rem] px-3 py-3">
-                          {personDisplayName(request.pendingWith)}
+                          {itemRequestPendingWithLabel(
+                            request.status,
+                            request.pendingWith,
+                          )}
                         </td>
                         <td className="px-3 py-3">
                           <div className="flex min-w-[16rem] flex-wrap gap-2">
                             <Link
-                              href={`/requests/item-requests/${request.id}`}
+                              href={requestDetailHref(
+                                request.id,
+                                requestNavItemForRequestQueue(queue),
+                              )}
                               className="font-medium text-accent hover:text-accent-dark hover:underline"
                             >
                               View
                             </Link>
                             {rowActions.issueAction && rowActions.issueHref ? (
                               <Link
-                                href={rowActions.issueHref}
+                                href={issueWorkflowHref(
+                                  rowActions.issueHref,
+                                  request.activeIssue,
+                                )}
                                 className="font-medium text-accent hover:text-accent-dark hover:underline"
                               >
                                 {rowActions.issueActionLabel}

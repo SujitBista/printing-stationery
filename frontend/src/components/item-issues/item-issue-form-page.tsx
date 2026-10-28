@@ -20,6 +20,14 @@ import {
 } from "@/lib/api/item-issues";
 import { useAuth } from "@/lib/auth/auth-context";
 import { isItemIssueAccessDenied } from "@/lib/item-issues/permissions";
+import { useRegisterRequestNavItem } from "@/lib/navigation/request-nav-context";
+import {
+  issueDetailHref,
+  requestDetailHref,
+  requestNavHref,
+  requestNavItemForIssueDetail,
+  REQUEST_NAV_ITEM,
+} from "@/lib/navigation/request-nav";
 import { requestedByDisplayName } from "@/components/item-requests/item-request-labels";
 import {
   formatAvailableStockQuantity,
@@ -122,6 +130,15 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
   >(null);
   const [checkerRemarks, setCheckerRemarks] = useState("");
 
+  useRegisterRequestNavItem(
+    props.mode === "detail" && issue
+      ? requestNavItemForIssueDetail({
+          status: issue.status,
+          destinationType: issue.destinationType,
+        })
+      : undefined,
+  );
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -140,7 +157,13 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
         const existingIssueId =
           result.data.activeIssue?.id ?? result.data.draftIssueId;
         if (existingIssueId) {
-          router.replace(`/requests/item-issues/${existingIssueId}`);
+          const existingNav = result.data.activeIssue
+            ? requestNavItemForIssueDetail({
+                status: result.data.activeIssue.status,
+                destinationType: "BRANCH_STORE",
+              })
+            : REQUEST_NAV_ITEM.READY_TO_ISSUE;
+          router.replace(issueDetailHref(existingIssueId, existingNav));
           return;
         }
 
@@ -217,12 +240,20 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               ? result.details.issueId
               : null;
           if (existingIssueId) {
-            router.replace(`/requests/item-issues/${existingIssueId}`);
+            router.replace(
+              issueDetailHref(existingIssueId, REQUEST_NAV_ITEM.READY_TO_ISSUE),
+            );
             return;
           }
           throw new Error(result.error);
         }
-        router.push(`/requests/item-issues/${result.data.id}`);
+        router.push(
+          issueDetailHref(
+            result.data.id,
+            requestNavItemForIssueDetail(result.data) ??
+              REQUEST_NAV_ITEM.READY_TO_ISSUE,
+          ),
+        );
       } else if (issue) {
         const result = await updateItemIssue(issue.id, {
           ...payload,
@@ -370,18 +401,34 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
   const checkerLabel = itemIssueCheckerActionLabel({
     destinationType: issue?.destinationType,
   });
+  const detailNavItem =
+    props.mode === "create"
+      ? REQUEST_NAV_ITEM.READY_TO_ISSUE
+      : issue
+        ? requestNavItemForIssueDetail(issue)
+        : null;
+  const sourceRequestId =
+    request?.id ?? (props.mode === "create" ? props.requestId : null);
+  const sourceRequestHref = sourceRequestId
+    ? requestDetailHref(
+        sourceRequestId,
+        detailNavItem ?? REQUEST_NAV_ITEM.ALL_REQUESTS,
+      )
+    : detailNavItem
+      ? requestNavHref(detailNavItem)
+      : "/requests/item-requests";
+  const backLabel =
+    detailNavItem === REQUEST_NAV_ITEM.READY_TO_ISSUE
+      ? "Back to Ready to Issue Request"
+      : "Back to Request";
 
   return (
     <section className="w-full max-w-6xl">
       <Link
-        href={
-          request
-            ? `/requests/item-requests/${request.id}`
-            : "/requests/item-requests"
-        }
+        href={sourceRequestHref}
         className="text-sm font-medium text-accent hover:text-accent-dark hover:underline"
       >
-        Back to Request
+        {backLabel}
       </Link>
 
       {loading ? (
@@ -699,7 +746,7 @@ export function ItemIssueFormPage(props: ItemIssueFormPageProps) {
               </>
             ) : null}
             <Link
-              href={`/requests/item-requests/${request.id}`}
+              href={sourceRequestHref}
               className="rounded-lg border border-accent-tint bg-paper-elevated px-4 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
             >
               View Source Request

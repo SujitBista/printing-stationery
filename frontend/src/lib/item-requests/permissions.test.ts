@@ -47,7 +47,7 @@ describe("item request create role visibility", () => {
       shouldShowItemRequestCreateAssignmentWarning({
         queueShowsCreate: true,
         canCreate: false,
-        isAdmin: false,
+        isOrganizationHead: false,
         user: maker,
       }),
       true,
@@ -78,7 +78,7 @@ describe("item request create role visibility", () => {
       shouldShowItemRequestCreateAssignmentWarning({
         queueShowsCreate: true,
         canCreate: false,
-        isAdmin: false,
+        isOrganizationHead: false,
         user: checker,
       }),
       false,
@@ -93,7 +93,7 @@ describe("item request create role visibility", () => {
       shouldShowItemRequestCreateAssignmentWarning({
         queueShowsCreate: true,
         canCreate: false,
-        isAdmin: true,
+        isOrganizationHead: true,
         user: admin,
       }),
       false,
@@ -124,7 +124,7 @@ describe("item request create role visibility", () => {
       shouldShowItemRequestCreateAssignmentWarning({
         queueShowsCreate: true,
         canCreate: false,
-        isAdmin: false,
+        isOrganizationHead: false,
         user: makerAndChecker,
       }),
       true,
@@ -146,7 +146,7 @@ describe("item request create role visibility", () => {
       shouldShowItemRequestCreateAssignmentWarning({
         queueShowsCreate: false,
         canCreate: false,
-        isAdmin: false,
+        isOrganizationHead: false,
         user: maker,
       }),
       false,
@@ -179,7 +179,7 @@ describe("item request create role visibility", () => {
       shouldShowItemRequestCreateAssignmentWarning({
         queueShowsCreate: true,
         canCreate: false,
-        isAdmin: false,
+        isOrganizationHead: false,
         user: maker,
         workflowRoles: ["CORPORATE_MAKER"],
       }),

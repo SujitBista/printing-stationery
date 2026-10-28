@@ -7,12 +7,16 @@ import {
   updatePartyHandler,
   updatePartyStatusHandler,
 } from "../controllers/parties.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireOrganizationHead,
+  requireRole,
+} from "../middleware/auth.js";
 
 export const partiesRouter = Router();
 
 const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 partiesRouter.get("/", requireAuth, readRoles, listPartiesHandler);
 partiesRouter.get("/:id", requireAuth, readRoles, getPartyHandler);

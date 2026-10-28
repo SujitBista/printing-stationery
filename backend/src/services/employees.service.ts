@@ -639,9 +639,9 @@ async function assertDestinationSupervisor(params: {
     .from(userRoles)
     .where(eq(userRoles.userId, params.supervisorApplicationUserId));
   const roles = roleRows.map((item) => item.role);
-  if (roles.includes("ADMIN") || roles.includes("HR")) {
+  if (roles.includes("HR")) {
     throw new AppError(
-      "ADMIN and HR accounts cannot be assigned as a store supervisor.",
+      "HR accounts cannot be assigned as a store supervisor.",
       400,
     );
   }
@@ -704,7 +704,6 @@ export async function transferEmployee(
   const canManageStores = Boolean(
     context.applicationUser &&
       managingRole &&
-      !context.applicationUser.roles.includes("ADMIN") &&
       !context.applicationUser.roles.includes("HR"),
   );
 

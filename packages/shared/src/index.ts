@@ -280,6 +280,7 @@ export type {
 export {
   appRoleSchema,
   APP_ROLES,
+  ASSIGNABLE_APP_ROLES,
   usernameSchema,
   passwordSchema,
   loginInputSchema,
@@ -290,6 +291,7 @@ export {
   authResponseSchema,
   userHasRole,
   userHasAnyRole,
+  userIsOrganizationHead,
 } from "./schemas/auth.js";
 export type {
   AppRole,
@@ -397,9 +399,11 @@ export {
   itemRequestActionTypeSchema,
   itemRequestWorkflowRoleSchema,
   ITEM_REQUEST_SUBMITTED_LIST_FILTER,
+  ITEM_REQUEST_RECOMMENDED_LIST_FILTER,
   itemRequestStatusFilterSchema,
   resolveItemRequestListStatusFilter,
   itemRequestListFilterIsSubmitted,
+  itemRequestListFilterIsRecommended,
   itemRequestQueueSchema,
   requestedQuantitySchema,
   itemRequestLineInputSchema,

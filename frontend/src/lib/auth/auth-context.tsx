@@ -22,6 +22,7 @@ import {
   canMutatePurchases,
   canReadMasterData,
   isAdmin,
+  isOrganizationHead,
 } from "@/lib/auth/permissions";
 
 type AuthContextValue = {
@@ -29,6 +30,7 @@ type AuthContextValue = {
   refresh: () => Promise<AuthenticatedUser | null>;
   logout: () => Promise<void>;
   isAdmin: boolean;
+  isOrganizationHead: boolean;
   canMutateMasterData: boolean;
   canReadMasterData: boolean;
   canAccessOrganizationSetup: boolean;
@@ -70,6 +72,7 @@ export function AuthProvider({ initialUser, children }: AuthProviderProps) {
       refresh,
       logout,
       isAdmin: isAdmin(user),
+      isOrganizationHead: isOrganizationHead(user),
       canMutateMasterData: canMutateMasterData(user),
       canReadMasterData: canReadMasterData(user),
       canAccessOrganizationSetup: canAccessOrganizationSetup(user),

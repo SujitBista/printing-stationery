@@ -18,7 +18,7 @@ describe("incoming receipt confirmation labels", () => {
     assert.equal(actorCanAccessIncomingItems(["BRANCH_MAKER"]), true);
     assert.equal(actorCanAccessIncomingItems(["BRANCH_CHECKER"]), true);
     assert.equal(actorCanAccessIncomingItems(["CORPORATE_MAKER"]), false);
-    assert.equal(actorCanAccessIncomingItems(["CORPORATE_CHECKER"]), false);
+    assert.equal(actorCanAccessIncomingItems(["CORPORATE_CHECKER"]), true);
   });
 
   it("maps old receipt verification statuses to pending confirmation", () => {

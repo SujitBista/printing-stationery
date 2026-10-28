@@ -464,7 +464,7 @@ export function StoreUserFormPage({
           Add StoreUser
         </h1>
         <p className="mt-4 border-l-2 border-danger pl-3 text-sm text-danger">
-          Only an Admin can manage store user assignments.
+          Only the Corporate Checker can manage store user assignments.
         </p>
       </section>
     );

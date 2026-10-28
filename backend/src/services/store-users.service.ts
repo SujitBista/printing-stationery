@@ -255,14 +255,23 @@ function storeUserJoins(db: DbExecutor, where?: SQL) {
     .innerJoin(stores, eq(storeUsers.storeId, stores.id))
     .innerJoin(branches, eq(stores.branchId, branches.id))
     .leftJoin(makerUsers, eq(storeUsers.makerApplicationUserId, makerUsers.id))
-    .leftJoin(makerRoles, eq(makerRoles.userId, makerUsers.id))
+    .leftJoin(
+      makerRoles,
+      and(eq(makerRoles.userId, makerUsers.id), eq(makerRoles.role, "MAKER")),
+    )
     .leftJoin(makerEmployees, eq(makerUsers.employeeId, makerEmployees.id))
     .leftJoin(makerBranches, eq(makerEmployees.branchId, makerBranches.id))
     .leftJoin(
       supervisorUsers,
       eq(storeUsers.supervisorApplicationUserId, supervisorUsers.id),
     )
-    .leftJoin(supervisorRoles, eq(supervisorRoles.userId, supervisorUsers.id))
+    .leftJoin(
+      supervisorRoles,
+      and(
+        eq(supervisorRoles.userId, supervisorUsers.id),
+        eq(supervisorRoles.role, "CHECKER"),
+      ),
+    )
     .leftJoin(
       supervisorEmployees,
       eq(supervisorUsers.employeeId, supervisorEmployees.id),
@@ -417,9 +426,13 @@ export async function assertAssignablePerson(params: {
     );
   }
 
-  if (context.roles.some((role) => FORBIDDEN_STORE_USER_ROLES.includes(role))) {
+  const blockedRoles: AppRole[] =
+    params.requiredRole === "CHECKER" ? ["HR"] : [...FORBIDDEN_STORE_USER_ROLES];
+  if (context.roles.some((role) => blockedRoles.includes(role))) {
     throw new AppError(
-      "ADMIN and HR accounts cannot be assigned as a store maker or supervisor.",
+      params.requiredRole === "CHECKER"
+        ? "HR accounts cannot be assigned as a store supervisor."
+        : "ADMIN and HR accounts cannot be assigned as a store maker or supervisor.",
       400,
     );
   }
@@ -542,14 +555,23 @@ export async function listStoreUsers(
       .innerJoin(stores, eq(storeUsers.storeId, stores.id))
       .innerJoin(branches, eq(stores.branchId, branches.id))
       .leftJoin(makerUsers, eq(storeUsers.makerApplicationUserId, makerUsers.id))
-      .leftJoin(makerRoles, eq(makerRoles.userId, makerUsers.id))
+      .leftJoin(
+        makerRoles,
+        and(eq(makerRoles.userId, makerUsers.id), eq(makerRoles.role, "MAKER")),
+      )
       .leftJoin(makerEmployees, eq(makerUsers.employeeId, makerEmployees.id))
       .leftJoin(makerBranches, eq(makerEmployees.branchId, makerBranches.id))
       .leftJoin(
         supervisorUsers,
         eq(storeUsers.supervisorApplicationUserId, supervisorUsers.id),
       )
-      .leftJoin(supervisorRoles, eq(supervisorRoles.userId, supervisorUsers.id))
+      .leftJoin(
+        supervisorRoles,
+        and(
+          eq(supervisorRoles.userId, supervisorUsers.id),
+          eq(supervisorRoles.role, "CHECKER"),
+        ),
+      )
       .leftJoin(
         supervisorEmployees,
         eq(supervisorUsers.employeeId, supervisorEmployees.id),
@@ -711,6 +733,8 @@ export async function listEligibleStoreApplicationUsers(
   }
 
   const where = and(...conditions);
+  const blockedRoles: AppRole[] =
+    query.role === "CHECKER" ? ["HR"] : [...FORBIDDEN_STORE_USER_ROLES];
   const makerAssignmentJoin = query.excludeAssignmentId
     ? and(
         eq(activeMakerAssignments.makerApplicationUserId, applicationUsers.id),
@@ -733,7 +757,7 @@ export async function listEligibleStoreApplicationUsers(
         forbiddenRoles,
         and(
           eq(forbiddenRoles.userId, applicationUsers.id),
-          inArray(forbiddenRoles.role, FORBIDDEN_STORE_USER_ROLES),
+          inArray(forbiddenRoles.role, blockedRoles),
         ),
       )
       .leftJoin(activeMakerAssignments, makerAssignmentJoin);
@@ -754,7 +778,7 @@ export async function listEligibleStoreApplicationUsers(
         forbiddenRoles,
         and(
           eq(forbiddenRoles.userId, applicationUsers.id),
-          inArray(forbiddenRoles.role, FORBIDDEN_STORE_USER_ROLES),
+          inArray(forbiddenRoles.role, blockedRoles),
         ),
       )
       .leftJoin(activeMakerAssignments, makerAssignmentJoin)

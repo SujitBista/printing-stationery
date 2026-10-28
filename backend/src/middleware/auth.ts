@@ -1,5 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
-import type { AppRole } from "@printing-stationery/shared";
+import {
+  userIsOrganizationHead,
+  type AppRole,
+} from "@printing-stationery/shared";
 import type { Env } from "../config/env.js";
 import {
   resolveSession,
@@ -72,4 +75,25 @@ export function requireRole(...allowedRoles: AppRole[]) {
       next(error);
     }
   };
+}
+
+/** Corporate Checker, or an existing ADMIN role, may administer organization data. */
+export function requireOrganizationHead(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  try {
+    if (!req.auth) {
+      throw new AppError("Unauthorized", 401);
+    }
+
+    if (!userIsOrganizationHead(req.auth.user)) {
+      throw new AppError("Forbidden", 403);
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
 }

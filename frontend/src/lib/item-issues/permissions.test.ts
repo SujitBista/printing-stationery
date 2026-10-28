@@ -121,8 +121,15 @@ describe("item issue frontend visibility", () => {
     );
   });
 
-  it("limits opening stock access to admins", () => {
+  it("limits opening stock access to the corporate checker and admin role", () => {
     assert.equal(canAccessOpeningStock({ roles: ["ADMIN"] } as never), true);
+    assert.equal(
+      canAccessOpeningStock({
+        roles: ["CHECKER"],
+        isCorporateChecker: true,
+      } as never),
+      true,
+    );
     assert.equal(canAccessOpeningStock({ roles: ["CHECKER"] } as never), false);
     assert.equal(canAccessOpeningStock(null), false);
   });

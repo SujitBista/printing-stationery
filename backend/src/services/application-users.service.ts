@@ -104,8 +104,24 @@ function escapeIlikePattern(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+/** Setup shows the operational role when the Corporate Checker also holds ADMIN. */
+function displayedApplicationRoleCondition(): SQL {
+  return sql`(
+    ${userRoles.role} <> 'ADMIN'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM "user_roles" AS "other_role"
+      WHERE "other_role"."user_id" = ${applicationUsers.id}
+        AND "other_role"."role" <> 'ADMIN'
+    )
+  )`;
+}
+
 function buildListFilters(query: ApplicationUserListQuery): SQL | undefined {
-  const conditions: SQL[] = [isNotNull(applicationUsers.employeeId)];
+  const conditions: SQL[] = [
+    isNotNull(applicationUsers.employeeId),
+    displayedApplicationRoleCondition(),
+  ];
 
   if (query.status === "ACTIVE") {
     conditions.push(eq(applicationUsers.isActive, true));
@@ -192,7 +208,11 @@ async function getJoinedApplicationUserById(
     .innerJoin(employees, eq(applicationUsers.employeeId, employees.id))
     .innerJoin(branches, eq(employees.branchId, branches.id))
     .where(
-      and(eq(applicationUsers.id, id), isNotNull(applicationUsers.employeeId)),
+      and(
+        eq(applicationUsers.id, id),
+        isNotNull(applicationUsers.employeeId),
+        displayedApplicationRoleCondition(),
+      ),
     )
     .limit(1);
 
@@ -456,6 +476,14 @@ export async function updateApplicationUser(
 
   try {
     await getDb().transaction(async (tx) => {
+      const existingRoles = await tx
+        .select({ role: userRoles.role })
+        .from(userRoles)
+        .where(eq(userRoles.userId, id));
+      const keepAdmin =
+        input.role === "CHECKER" &&
+        existingRoles.some((row) => row.role === "ADMIN");
+
       const updated = await tx
         .update(applicationUsers)
         .set({
@@ -479,6 +507,12 @@ export async function updateApplicationUser(
         userId: id,
         role: input.role,
       });
+      if (keepAdmin) {
+        await tx.insert(userRoles).values({
+          userId: id,
+          role: "ADMIN",
+        });
+      }
 
       await syncApplicationUserStoreAssignment({
         applicationUserId: id,

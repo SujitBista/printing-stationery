@@ -1,9 +1,10 @@
-import type {
-  ItemRequestActionType,
-  ItemRequestPersonSummary,
-  ItemRequestQueue,
-  ItemRequestStatus,
-  ItemRequestWorkflowRole,
+import {
+  itemRequestPendingAssignee,
+  type ItemRequestActionType,
+  type ItemRequestPersonSummary,
+  type ItemRequestQueue,
+  type ItemRequestStatus,
+  type ItemRequestWorkflowRole,
 } from "@printing-stationery/shared";
 
 /** Status choices on All Requests. Submitted is the tracking name. */
@@ -13,7 +14,7 @@ export const ITEM_REQUEST_LIST_STATUS_FILTER_OPTIONS = [
   { value: "SUBMITTED", label: "Submitted" },
   { value: "RETURNED_TO_BRANCH_MAKER", label: "Returned" },
   { value: "REJECTED", label: "Rejected" },
-  { value: "PENDING_CORPORATE_MAKER", label: "Recommended" },
+  { value: "RECOMMENDED", label: "Recommended" },
   { value: "PENDING_CORPORATE_CHECKER", label: "Pending Corporate Checker" },
   { value: "RETURNED_TO_CORPORATE_MAKER", label: "Returned to Corporate Maker" },
   { value: "APPROVED", label: "Approved" },
@@ -134,6 +135,25 @@ export function itemRequestStatusTone(
     default:
       return "info";
   }
+}
+
+const PENDING_WITH_ROLE_LABELS = {
+  createdBy: "Branch Maker",
+  branchChecker: "Branch Checker",
+  corporateMaker: "Corporate Maker",
+  corporateChecker: "Corporate Checker",
+} as const;
+
+export function itemRequestPendingWithLabel(
+  status: ItemRequestStatus,
+  pendingWith: ItemRequestPersonSummary | null | undefined,
+): string {
+  const name = personDisplayName(pendingWith);
+  const assignee = itemRequestPendingAssignee(status);
+  if (!pendingWith || !assignee) {
+    return name;
+  }
+  return `${name} (${PENDING_WITH_ROLE_LABELS[assignee]})`;
 }
 
 export function personDisplayName(

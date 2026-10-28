@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
   getItemRequestSidebarQueues,
@@ -10,6 +10,14 @@ import {
 } from "@/lib/item-requests/queues";
 import { getItemIssueSidebarQueues } from "@/lib/item-issues/queues";
 import { useItemRequestNavContext } from "@/lib/item-requests/use-item-request-nav-context";
+import { useRegisteredRequestNavItem } from "@/lib/navigation/request-nav-context";
+import {
+  isRequestsSectionPath,
+  requestNavItemForIssueQueue,
+  requestNavItemForRequestQueue,
+  resolveRequestNavItem,
+  type RequestNavItemId,
+} from "@/lib/navigation/request-nav";
 import {
   actorCanAccessDepartmentConsumption,
   actorCanAccessIncomingItems,
@@ -18,8 +26,9 @@ import {
 type NavItem = {
   label: string;
   href: string;
+  navItemId?: RequestNavItemId;
   soon?: boolean;
-  /** When true, only users who can mutate master data (ADMIN) see this link. */
+  /** When true, only the organization head sees this link. */
   adminSetup?: boolean;
   children?: NavItem[];
   group?: "workflow" | "fulfilment";
@@ -30,28 +39,6 @@ type NavSection = {
   title: string;
   items: NavItem[];
 };
-
-const ALL_ITEM_REQUEST_QUEUE_HREFS: readonly string[] = [
-  "/requests/item-requests",
-  "/requests/item-requests/drafts",
-  "/requests/item-requests/submitted",
-  "/requests/item-requests/recommend",
-  "/requests/item-requests/recommended",
-  "/requests/item-requests/review",
-  "/requests/item-requests/forwarded",
-  "/requests/item-requests/approve",
-  "/requests/item-requests/approved",
-  "/requests/item-requests/returned",
-  "/requests/item-requests/rejected",
-  "/requests/item-requests/issued",
-  "/requests/item-requests/partial-pending",
-  "/requests/item-requests/ready-to-issue",
-  "/requests/item-issues/pending",
-  "/requests/item-issues/returned",
-  "/requests/item-issues/posted",
-  "/requests/incoming-items",
-  "/requests/department-consumption",
-];
 
 const NAV_SECTIONS: NavSection[] = [
   {
@@ -110,51 +97,20 @@ function isPathActive(pathname: string, href: string): boolean {
   if (href === "/") {
     return pathname === "/";
   }
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-const REQUEST_QUEUE_HREFS = new Set(
-  ALL_ITEM_REQUEST_QUEUE_HREFS.filter((href) => href !== "/requests/item-requests"),
-);
-
-function isUnderRequests(pathname: string): boolean {
-  return (
-    pathname === "/requests/item-requests" ||
-    pathname.startsWith("/requests/item-requests/") ||
-    pathname.startsWith("/requests/item-issues/") ||
-    [...REQUEST_QUEUE_HREFS].some(
-      (href) => pathname === href || pathname.startsWith(`${href}/`),
-    )
-  );
-}
-
-function isRequestQueueActive(pathname: string, href: string): boolean {
-  if (href === "/requests/item-requests") {
-    if (pathname === "/requests/item-requests") {
-      return true;
-    }
-    if (
-      REQUEST_QUEUE_HREFS.has(pathname) ||
-      [...REQUEST_QUEUE_HREFS].some((queueHref) =>
-        pathname.startsWith(`${queueHref}/`),
-      )
-    ) {
-      return false;
-    }
-    return pathname.startsWith("/requests/item-requests/");
-  }
-
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const path = href.split("?")[0] ?? href;
+  return pathname === path || pathname.startsWith(`${path}/`);
 }
 
 function NavLink({
   item,
   pathname,
+  activeNavItemId,
   onClose,
   nested = false,
 }: {
   item: NavItem;
   pathname: string;
+  activeNavItemId: RequestNavItemId | null;
   onClose: () => void;
   nested?: boolean;
 }) {
@@ -170,7 +126,7 @@ function NavLink({
   }
 
   const isActive = nested
-    ? isRequestQueueActive(pathname, item.href)
+    ? item.navItemId != null && item.navItemId === activeNavItemId
     : isPathActive(pathname, item.href);
 
   return (
@@ -198,14 +154,16 @@ function NavLink({
 function CollapsibleNavGroup({
   item,
   pathname,
+  activeNavItemId,
   onClose,
 }: {
   item: NavItem;
   pathname: string;
+  activeNavItemId: RequestNavItemId | null;
   onClose: () => void;
 }) {
   const children = item.children ?? [];
-  const sectionActive = isUnderRequests(pathname);
+  const sectionActive = isRequestsSectionPath(pathname);
   const [expanded, setExpanded] = useState(sectionActive);
 
   useEffect(() => {
@@ -256,7 +214,7 @@ function CollapsibleNavGroup({
           const showFulfilmentHeading =
             child.group === "fulfilment" && previous?.group !== "fulfilment";
           return (
-            <div key={child.href}>
+            <div key={child.navItemId ?? child.href}>
               {showFulfilmentHeading ? (
                 <p className="mt-2 px-3 pt-2 text-[0.65rem] font-semibold uppercase tracking-wider text-ink-subtle">
                   Fulfilment / Issue Tracking
@@ -265,6 +223,7 @@ function CollapsibleNavGroup({
               <NavLink
                 item={child}
                 pathname={pathname}
+                activeNavItemId={activeNavItemId}
                 onClose={onClose}
                 nested
               />
@@ -277,10 +236,43 @@ function CollapsibleNavGroup({
 }
 
 export function Sidebar({ open, onClose }: SidebarProps) {
+  return (
+    <Suspense
+      fallback={
+        <SidebarFrame open={open} onClose={onClose} activeNavItemParam={null} />
+      }
+    >
+      <SidebarWithSearch open={open} onClose={onClose} />
+    </Suspense>
+  );
+}
+
+function SidebarWithSearch({ open, onClose }: SidebarProps) {
+  const searchParams = useSearchParams();
+  return (
+    <SidebarFrame
+      open={open}
+      onClose={onClose}
+      activeNavItemParam={searchParams.get("activeNavItem")}
+    />
+  );
+}
+
+function SidebarFrame({
+  open,
+  onClose,
+  activeNavItemParam,
+}: SidebarProps & { activeNavItemParam: string | null }) {
   const pathname = usePathname();
+  const registeredNavItem = useRegisteredRequestNavItem();
+  const activeNavItemId = resolveRequestNavItem({
+    pathname,
+    activeNavItem: activeNavItemParam,
+    registeredNavItem,
+  });
   const {
     canAccessOrganizationSetup,
-    isAdmin,
+    isOrganizationHead,
     canAccessItemRequests,
     canAccessOpeningStock,
     canAccessPurchases,
@@ -300,12 +292,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     }).map((queue) => ({
       label: queue.sidebarLabel,
       href: queue.href,
+      navItemId: requestNavItemForRequestQueue(queue.key),
       group: queue.navGroup,
       badge: queue.key === "ready-to-issue" ? readyToIssueCount : undefined,
     })),
     ...getItemIssueSidebarQueues(workflowRoles).map((queue) => ({
       label: queue.sidebarLabel,
       href: queue.href,
+      navItemId: requestNavItemForIssueQueue(queue.key),
       group: queue.navGroup as "fulfilment",
       badge:
         queue.key === "pending-verification"
@@ -319,6 +313,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           {
             label: "Incoming Items",
             href: "/requests/incoming-items",
+            navItemId: "INCOMING_ITEMS" as const,
             group: "fulfilment" as const,
           },
         ]
@@ -328,6 +323,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           {
             label: "Department Consumption",
             href: "/requests/department-consumption",
+            navItemId: "DEPARTMENT_CONSUMPTION" as const,
             group: "fulfilment" as const,
           },
         ]
@@ -356,7 +352,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 ? []
                 : section.items
             )
-              .filter((item) => !item.adminSetup || isAdmin)
+              .filter((item) => !item.adminSetup || isOrganizationHead)
               .filter(
                 (item) =>
                   item.href !== "/requests/item-requests" ||
@@ -397,6 +393,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                           key={navItem.label}
                           item={navItem}
                           pathname={pathname}
+                          activeNavItemId={activeNavItemId}
                           onClose={onClose}
                         />
                       );
@@ -407,6 +404,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                         key={item.label}
                         item={item}
                         pathname={pathname}
+                        activeNavItemId={activeNavItemId}
                         onClose={onClose}
                       />
                     );

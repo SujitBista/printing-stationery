@@ -10,7 +10,7 @@ import {
   NO_ACTIVE_STORE_FOR_EMPLOYEE_BRANCH_MESSAGE,
   resolveStoreAssignment,
   STORE_MANAGING_ROLES,
-  userHasRole,
+  userIsOrganizationHead,
 } from "@printing-stationery/shared";
 import { getDb, type DbExecutor } from "../db/client.js";
 import { applicationUsers, userRoles } from "../db/schema/auth.js";
@@ -618,7 +618,7 @@ export async function listVisibleInventoryStores(
   db?: DbExecutor,
 ): Promise<InventoryStoreAccess> {
   const executor = useDb(db);
-  if (userHasRole(actor.roles, "ADMIN")) {
+  if (userIsOrganizationHead(actor)) {
     const rows = await executor
       .select({
         store: stores,

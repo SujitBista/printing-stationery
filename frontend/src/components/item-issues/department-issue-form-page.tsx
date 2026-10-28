@@ -23,6 +23,10 @@ import { fetchItems } from "@/lib/api/items";
 import { fetchStores } from "@/lib/api/stores";
 import { useAuth } from "@/lib/auth/auth-context";
 import { isItemIssueAccessDenied } from "@/lib/item-issues/permissions";
+import {
+  issueDetailHref,
+  REQUEST_NAV_ITEM,
+} from "@/lib/navigation/request-nav";
 import { loadAllPaginatedOptions } from "@/lib/api/load-paginated-options";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -186,7 +190,9 @@ export function DepartmentIssueFormPage(props: DepartmentIssueFormPageProps) {
         if (!result.ok) {
           throw new Error(result.error);
         }
-        router.push(`/requests/item-issues/${result.data.id}`);
+        router.push(
+          issueDetailHref(result.data.id, REQUEST_NAV_ITEM.DEPARTMENT_CONSUMPTION),
+        );
         return;
       }
       if (!issue) {

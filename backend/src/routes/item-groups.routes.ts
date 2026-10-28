@@ -6,12 +6,16 @@ import {
   updateItemGroupHandler,
   updateItemGroupStatusHandler,
 } from "../controllers/item-groups.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireOrganizationHead,
+  requireRole,
+} from "../middleware/auth.js";
 
 export const itemGroupsRouter = Router();
 
 const readRoles = requireRole("ADMIN", "MAKER", "CHECKER");
-const adminOnly = requireRole("ADMIN");
+const adminOnly = requireOrganizationHead;
 
 itemGroupsRouter.get("/", requireAuth, readRoles, listItemGroupsHandler);
 itemGroupsRouter.get("/:id", requireAuth, readRoles, getItemGroupHandler);

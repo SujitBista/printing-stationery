@@ -4,6 +4,9 @@ export const appRoleSchema = z.enum(["ADMIN", "HR", "MAKER", "CHECKER"]);
 
 export const APP_ROLES = appRoleSchema.options;
 
+/** Roles that can be assigned in Application User Setup. The Corporate Checker administers the system. */
+export const ASSIGNABLE_APP_ROLES = ["HR", "MAKER", "CHECKER"] as const;
+
 export const usernameSchema = z
   .string()
   .trim()
@@ -136,6 +139,11 @@ export const authenticatedUserSchema = z.object({
   roles: z.array(appRoleSchema),
   /** Null for the independently bootstrapped system Admin; required for ordinary users. */
   employee: authenticatedEmployeeSchema.nullable(),
+  /**
+   * True when this user is the active supervisor of the Corporate Store.
+   * That checker is the head and administers organization data.
+   */
+  isCorporateChecker: z.boolean().optional(),
 });
 
 export const authResponseSchema = z.object({
@@ -155,4 +163,24 @@ export function userHasAnyRole(
   required: ReadonlyArray<z.infer<typeof appRoleSchema>>,
 ): boolean {
   return required.some((role) => roles.includes(role));
+}
+
+/**
+ * Organization setup, opening stock, and user administration.
+ * The Corporate Checker is the head and may also hold ADMIN.
+ * A standalone ADMIN account cannot sign in.
+ */
+export function userIsOrganizationHead(
+  user:
+    | {
+        roles: ReadonlyArray<z.infer<typeof appRoleSchema>>;
+        isCorporateChecker?: boolean;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!user) {
+    return false;
+  }
+  return user.isCorporateChecker === true || user.roles.includes("ADMIN");
 }
